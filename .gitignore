@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+h3easy/prompt_optimizer.json
+web/*.log
+*.bak
+*.bak-*
+.venv/
+venv/
+.idea/
+.vscode/
+*.orig
+*.rej

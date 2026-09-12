@@ -1,0 +1,18 @@
+[project]
+name = "aicg3d-h3-suite"
+description = "把 MiniMax H3 Easy 与 Goohai-MiniMax-H3_Integration 合并成一个 ComfyUI 插件，并补上统一的素材、技能与加载器界面。"
+version = "1.0.0"
+license = {text = "GPL-3.0-or-later"}
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/JGRFW/comfyui-AICG3D"
+Documentation = "https://github.com/JGRFW/comfyui-AICG3D#readme"
+
+[tool.comfy]
+PublisherId = "aicg3d"
+DisplayName = "AICG3D H3 Suite"
+Icon = ""
+
+[project.license-files]
+include = ["LICENSE", "THIRD_PARTY_NOTICES.md", "third_party/*.txt"]

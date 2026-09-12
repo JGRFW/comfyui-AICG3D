@@ -1,0 +1,15 @@
+# 开发用文件，不进入 ComfyUI Registry 的发布包（语法同 .gitignore）。
+# 注意：LICENSE / THIRD_PARTY_NOTICES.md / third_party/ 必须随包分发，切勿加入本文件。
+
+__pycache__/
+*.pyc
+*.pyo
+*.bak
+*.bak-*
+.github/
+tools/
+tests/
+.venv/
+venv/
+.idea/
+.vscode/

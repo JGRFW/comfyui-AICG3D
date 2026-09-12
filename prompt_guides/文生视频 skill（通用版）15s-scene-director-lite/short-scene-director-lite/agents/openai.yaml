@@ -1,0 +1,4 @@
+interface:
+  display_name: "15秒剧情镜头导演·基础版"
+  short_description: "将简单剧情整理成最长15秒的基础文生视频镜头提示词"
+  default_prompt: "使用 $short-scene-director-lite 将我的简单剧情整理成最长15秒、动作连续的中文视频提示词。"

@@ -1,0 +1,2 @@
+# AICG3D 只依赖 ComfyUI 本体与各节点自身的可选依赖（torch / torchaudio / psutil / requests / llama-cpp-python）。
+

@@ -1,0 +1,998 @@
+{
+  "id": "f85c8784-876d-4487-a217-0a6fe2ac7f4e",
+  "revision": 0,
+  "last_node_id": 902,
+  "last_link_id": 6,
+  "nodes": [
+    {
+      "id": 900,
+      "type": "Note",
+      "title": "AICG3D 测试样板 · 看这里",
+      "pos": [
+        40,
+        -430
+      ],
+      "size": [
+        1000,
+        420
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": "AICG3D 测试样板 v1\n\n① 模型加载器：选 H3 模型 / 文本编码器 / VAE；LoRA 默认 1 个，点 ＋ / － 增减\n② AICG3D资源库：点素材缩略图 → 自动 @ 引用到主节点（已预置 01/02/03.png）\n③ 提示词模板：点「浏览提示词模板」→ 选模板 + 写任务 → 输出整条提示词，接主节点 prompt\n④ MiniMax H3 Aicg：模式「参考生视频」；提示词优化默认关闭，跑通后再开（齿轮里配 API 或本地模型）\n⑤ AICG3D 渲染器（高级）：采样 + 解码一条龙 → SaveVideo 出片\n\n技能加载器（右下）是可选分支：想用 Skill 驱动提示词，把它的「提示词」接到主节点 prompt 即可。"
+      },
+      "widgets_values": [
+        "AICG3D 测试样板 v1\n\n① 模型加载器：选 H3 模型 / 文本编码器 / VAE；LoRA 默认 1 个，点 ＋ / － 增减\n② AICG3D资源库：点素材缩略图 → 自动 @ 引用到主节点（已预置 01/02/03.png）\n③ 提示词模板：点「浏览提示词模板」→ 选模板 + 写任务 → 输出整条提示词，接主节点 prompt\n④ MiniMax H3 Aicg：模式「参考生视频」；提示词优化默认关闭，跑通后再开（齿轮里配 API 或本地模型）\n⑤ AICG3D 渲染器（高级）：采样 + 解码一条龙 → SaveVideo 出片\n\n技能加载器（右下）是可选分支：想用 Skill 驱动提示词，把它的「提示词」接到主节点 prompt 即可。"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 901,
+      "type": "Note",
+      "title": "提示词模板用法",
+      "pos": [
+        40,
+        1090
+      ],
+      "size": [
+        620,
+        120
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": "提示词模板：未选模板时直接输出「任务描述」；选中后输出 = 模板正文 + 任务。\n上游接「任务覆盖」可覆盖任务描述（可用另一个文本/Skill 节点驱动）。"
+      },
+      "widgets_values": [
+        "提示词模板：未选模板时直接输出「任务描述」；选中后输出 = 模板正文 + 任务。\n上游接「任务覆盖」可覆盖任务描述（可用另一个文本/Skill 节点驱动）。"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 902,
+      "type": "Note",
+      "title": "技能分支（可选）",
+      "pos": [
+        680,
+        1250
+      ],
+      "size": [
+        900,
+        90
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": "技能加载器（可选）：选 Skill 输出规范正文，可接主节点 prompt，也可接 ShowText 查看。"
+      },
+      "widgets_values": [
+        "技能加载器（可选）：选 Skill 输出规范正文，可接主节点 prompt，也可接 ShowText 查看。"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 1,
+      "type": "MiniMaxH3EasyLoader",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        470,
+        427
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "FL2VA 模型",
+          "localized_name": "FL2VA 模型",
+          "name": "fl2va_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "fl2va_model"
+          },
+          "link": null
+        },
+        {
+          "label": "REF2VA 模型",
+          "localized_name": "REF2VA 模型",
+          "name": "ref2va_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "ref2va_model"
+          },
+          "link": null
+        },
+        {
+          "label": "文本编码器",
+          "localized_name": "文本编码器",
+          "name": "text_encoder",
+          "type": "COMBO",
+          "widget": {
+            "name": "text_encoder"
+          },
+          "link": null
+        },
+        {
+          "label": "视频 VAE",
+          "localized_name": "视频 VAE",
+          "name": "video_vae",
+          "type": "COMBO",
+          "widget": {
+            "name": "video_vae"
+          },
+          "link": null
+        },
+        {
+          "label": "音频 VAE",
+          "localized_name": "音频 VAE",
+          "name": "audio_vae",
+          "type": "COMBO",
+          "widget": {
+            "name": "audio_vae"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_1",
+          "name": "lora_1",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_1"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_1_strength",
+          "name": "lora_1_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_1_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_2",
+          "name": "lora_2",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_2"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_2_strength",
+          "name": "lora_2_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_2_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_3",
+          "name": "lora_3",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_3"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_3_strength",
+          "name": "lora_3_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_3_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_4",
+          "name": "lora_4",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_4"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_4_strength",
+          "name": "lora_4_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_4_strength"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "h3_bundle",
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3EasyLoader",
+        "cnr_id": "comfyui-AICG3D",
+        "ver": "1658798be6a8ac004aa3a3973b29a41d3e036abc",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "fl2va_model": true,
+            "ref2va_model": true,
+            "text_encoder": true,
+            "video_vae": true,
+            "audio_vae": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "MiniMax/minimax_h3_hybrid_fl2va_ref2va-int8.safetensors",
+        "无",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "minimax\\minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors",
+        1,
+        "minimax\\风格lora\\h3-realism-people-t2v-i2v-r2v照片级真实人物，触发r34l1sm.safetensors",
+        0.5,
+        "none",
+        1,
+        "none",
+        1
+      ],
+      "widgets_values_named": {
+        "fl2va_model": "MiniMax/minimax_h3_hybrid_fl2va_ref2va-int8.safetensors",
+        "ref2va_model": "无",
+        "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+        "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
+        "lora_1": "minimax\\minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors",
+        "lora_1_strength": 1,
+        "lora_2": "minimax\\风格lora\\h3-realism-people-t2v-i2v-r2v照片级真实人物，触发r34l1sm.safetensors",
+        "lora_2_strength": 0.5,
+        "lora_3": "none",
+        "lora_3_strength": 1,
+        "lora_4": "none",
+        "lora_4_strength": 1
+      }
+    },
+    {
+      "id": 2,
+      "type": "MiniMaxH3Easy",
+      "pos": [
+        680,
+        60
+      ],
+      "size": [
+        420,
+        830
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "H3 模型组合",
+          "localized_name": "H3 模型组合",
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "link": 1
+        },
+        {
+          "label": "AICG3D",
+          "localized_name": "AICG3D",
+          "name": "media",
+          "shape": 7,
+          "type": "*",
+          "link": 2
+        },
+        {
+          "localized_name": "mode",
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 3
+        },
+        {
+          "localized_name": "resolution",
+          "name": "resolution",
+          "type": "COMBO",
+          "widget": {
+            "name": "resolution"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "aspect_ratio",
+          "name": "aspect_ratio",
+          "type": "COMBO",
+          "widget": {
+            "name": "aspect_ratio"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seconds",
+          "name": "seconds",
+          "type": "FLOAT",
+          "widget": {
+            "name": "seconds"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "advanced",
+          "name": "advanced",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "advanced"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "fps",
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "keyframe_role",
+          "name": "keyframe_role",
+          "type": "COMBO",
+          "widget": {
+            "name": "keyframe_role"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "ref_image_size",
+          "name": "ref_image_size",
+          "type": "COMBO",
+          "widget": {
+            "name": "ref_image_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "reference_mention_mode",
+          "name": "reference_mention_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "reference_mention_mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "prompt_optimizer_settings",
+          "name": "prompt_optimizer_settings",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "prompt_optimizer_settings"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "prompt_optimizer_scene_guide",
+          "name": "prompt_optimizer_scene_guide",
+          "type": "COMBO",
+          "widget": {
+            "name": "prompt_optimizer_scene_guide"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "H3 Context",
+          "localized_name": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3Easy",
+        "minimax_h3_virtual_media_links": [],
+        "cnr_id": "comfyui-AICG3D",
+        "ver": "1658798be6a8ac004aa3a3973b29a41d3e036abc",
+        "minimax_h3_prompt_reference_doc": {
+          "version": 1,
+          "text": "<Picture 1> 是角色定妆参考，<Picture 3> 是场景与色调参考。生成一段 3 秒、24fps 的 3D 动画短片：镜头从低角度缓慢推近，角色站在雨后赛博朋克街道中央，霓虹灯牌在积水里被拉成长条倒影；角色轻轻转头看向镜头，衣料与发丝带轻微滞后摆动；中段一次快速横摇带出后方悬浮车流与招牌，随后镜头回位。整体保持立体卡通渲染质感，轮廓边缘光清晰，色彩以青蓝与品红撞色为主，画面干净，不出现任何文字。",
+          "parts": [
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "01.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": 1,
+              "sourceId": 193,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=01.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 是角色定妆参考，"
+            },
+            {
+              "type": "mention",
+              "token": "@图片3",
+              "tag": "<Picture 3>",
+              "label": "图片3",
+              "fullLabel": "03.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 3,
+              "mediaIndex": 3,
+              "sourceId": 193,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=03.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 是场景与色调参考。生成一段 3 秒、24fps 的 3D 动画短片：镜头从低角度缓慢推近，角色站在雨后赛博朋克街道中央，霓虹灯牌在积水里被拉成长条倒影；角色轻轻转头看向镜头，衣料与发丝带轻微滞后摆动；中段一次快速横摇带出后方悬浮车流与招牌，随后镜头回位。整体保持立体卡通渲染质感，轮廓边缘光清晰，色彩以青蓝与品红撞色为主，画面干净，不出现任何文字。"
+            }
+          ]
+        },
+        "minimax_h3_prompt_view_mode": "structured",
+        "minimax_h3_prompt_optimizer": {
+          "enabled": true,
+          "api_format": "openai",
+          "api_url": "https://zz.211b.site",
+          "model": "gpt-5.6-terra",
+          "scene_guide": "none",
+          "read_media": true
+        },
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "reference",
+        "<Picture 1> 是角色定妆参考，<Picture 2> 是场景参考，<Picture 3> 是色调参考。生成一段 3 秒、24fps 的 3D 动画短片：镜头从低角度缓慢推近，角色站在雨后赛博朋克街道中央，霓虹灯牌在积水里被拉成长条倒影；角色轻轻转头看向镜头；中段一次快速横摇带出后方悬浮车流与招牌，随后镜头回位。整体保持立体卡通渲染质感，轮廓边缘光清晰，青蓝与品红撞色为主，不出现任何文字。",
+        null,
+        "480P",
+        "16:9",
+        1344,
+        768,
+        3,
+        false,
+        24,
+        "first",
+        "1k",
+        "index",
+        false,
+        "none"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "SaveVideo",
+      "pos": [
+        1460,
+        60
+      ],
+      "size": [
+        420,
+        700
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "SaveVideo"
+      },
+      "widgets_values": [
+        "video/AICG3D_TestSample",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 193,
+      "type": "MiniMaxH3EasyMediaLoader",
+      "pos": [
+        40,
+        540
+      ],
+      "size": [
+        600,
+        540
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "media_state",
+          "name": "media_state",
+          "type": "STRING",
+          "widget": {
+            "name": "media_state"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "AICG3D",
+          "localized_name": "AICG3D",
+          "name": "media_bundle",
+          "type": "MINIMAX_H3_MEDIA_BUNDLE",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3EasyMediaLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        },
+        "cnr_id": "comfyui-AICG3D"
+      },
+      "widgets_values": [
+        "{\"images\":[{\"filename\":\"01.png\"},{\"filename\":\"02.png\"},{\"filename\":\"03.png\"}],\"audios\":[],\"videos\":[]}"
+      ],
+      "widgets_values_named": {
+        "media_state": "{\"images\":[{\"filename\":\"01.png\"},{\"filename\":\"02.png\"},{\"filename\":\"03.png\"}],\"audios\":[],\"videos\":[]}"
+      }
+    },
+    {
+      "id": 300,
+      "type": "AICG3D_SkillLoader",
+      "pos": [
+        680,
+        960
+      ],
+      "size": [
+        420,
+        270
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "task_override",
+          "name": "task_override",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "localized_name": "skill",
+          "name": "skill",
+          "type": "COMBO",
+          "widget": {
+            "name": "skill"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "task",
+          "name": "task",
+          "type": "STRING",
+          "widget": {
+            "name": "task"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "提示词",
+          "name": "提示词",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            6
+          ]
+        },
+        {
+          "localized_name": "技能ID",
+          "name": "技能ID",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        },
+        {
+          "localized_name": "技能正文",
+          "name": "技能正文",
+          "type": "STRING",
+          "slot_index": 2,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_SkillLoader",
+        "cnr_id": "comfyui-AICG3D",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "3D动画短片生成器 [3d-animation-short-generator]",
+        "把三段参考素材做成 3 秒 3D 动画短片：低角度推近 + 中段横摇，皮克斯式卡通渲染，青蓝与品红撞色，无文字。"
+      ],
+      "widgets_values_named": {
+        "skill": "3D动画短片生成器 [3d-animation-short-generator]",
+        "task": "把三段参考素材做成 3 秒 3D 动画短片：低角度推近 + 中段横摇，皮克斯式卡通渲染，青蓝与品红撞色，无文字。"
+      },
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 301,
+      "type": "ShowText|pysssss",
+      "pos": [
+        1160,
+        960
+      ],
+      "size": [
+        460,
+        320
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "文本",
+          "name": "text",
+          "type": "STRING",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "字符串",
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING",
+          "slot_index": 0,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ShowText|pysssss",
+        "cnr_id": "comfyui-custom-scripts",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 302,
+      "type": "AICG3D_PromptPreset",
+      "pos": [
+        40,
+        1230
+      ],
+      "size": [
+        470,
+        560
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "task_override",
+          "name": "task_override",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "localized_name": "preset",
+          "name": "preset",
+          "type": "COMBO",
+          "widget": {
+            "name": "preset"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "task",
+          "name": "task",
+          "type": "STRING",
+          "widget": {
+            "name": "task"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "提示词",
+          "name": "提示词",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            3
+          ]
+        },
+        {
+          "localized_name": "模板ID",
+          "name": "模板ID",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        },
+        {
+          "localized_name": "模板正文",
+          "name": "模板正文",
+          "type": "STRING",
+          "slot_index": 2,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_PromptPreset",
+        "cnr_id": "comfyui-AICG3D",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "H3 专题｜前置词｜3D动画短片制作助手",
+        "用 <Picture 1> 的角色、<Picture 2> 的场景、<Picture 3> 的色调参考，做一条 3 秒 3D 动画短片：低角度缓慢推近，角色回头看向镜头，中段快速横摇带出街景光带，皮克斯式立体卡通渲染，青蓝与品红撞色，画面干净，不出现任何文字。"
+      ],
+      "widgets_values_named": {
+        "preset": "H3 专题｜前置词｜3D动画短片制作助手",
+        "task": "用 <Picture 1> 的角色、<Picture 2> 的场景、<Picture 3> 的色调参考，做一条 3 秒 3D 动画短片：低角度缓慢推近，角色回头看向镜头，中段快速横摇带出街景光带，皮克斯式立体卡通渲染，青蓝与品红撞色，画面干净，不出现任何文字。"
+      },
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 303,
+      "type": "MiniMaxH3EasyRenderAdvanced",
+      "pos": [
+        1160,
+        60
+      ],
+      "size": [
+        260,
+        230
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "H3 Context",
+          "localized_name": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "link": 4
+        },
+        {
+          "localized_name": "noise_seed",
+          "name": "noise_seed",
+          "type": "INT",
+          "widget": {
+            "name": "noise_seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "scheduler",
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "steps",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "denoise",
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "成片视频",
+          "localized_name": "成片视频",
+          "name": "video",
+          "type": "VIDEO",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3EasyRenderAdvanced",
+        "cnr_id": "comfyui-AICG3D"
+      },
+      "widgets_values": [
+        0,
+        "randomize",
+        "euler",
+        "simple",
+        20,
+        1
+      ],
+      "widgets_values_named": {
+        "noise_seed": 0,
+        "control_after_generate": "randomize",
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "steps": 20,
+        "denoise": 1
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "MINIMAX_H3_BUNDLE"
+    ],
+    [
+      2,
+      193,
+      0,
+      2,
+      1,
+      "MINIMAX_H3_MEDIA_BUNDLE"
+    ],
+    [
+      3,
+      302,
+      0,
+      2,
+      3,
+      "STRING"
+    ],
+    [
+      4,
+      2,
+      0,
+      303,
+      0,
+      "MINIMAX_H3_CONTEXT"
+    ],
+    [
+      5,
+      303,
+      0,
+      12,
+      0,
+      "VIDEO"
+    ],
+    [
+      6,
+      300,
+      0,
+      301,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "version": 0.4,
+  "extra": {
+    "ds": {
+      "scale": 0.62,
+      "offset": [
+        80,
+        460
+      ]
+    },
+    "frontendVersion": "1.24.0"
+  }
+}

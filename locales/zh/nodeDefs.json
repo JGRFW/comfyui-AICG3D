@@ -1,0 +1,205 @@
+{
+  "MiniMaxH3IntegrationGH": {
+    "display_name": "MiniMax-H3 智能一体化(GH)",
+    "inputs": {
+      "clip_name": {
+        "name": "CLIP模型"
+      },
+      "video_vae_name": {
+        "name": "视频 VAE"
+      },
+      "audio_vae_name": {
+        "name": "音频 VAE"
+      },
+      "aspect": {
+        "name": "宽高比例",
+        "options": {
+          "adaptive": "自适应",
+          "16:9": "16:9",
+          "9:16": "9:16",
+          "3:2": "3:2",
+          "2:3": "2:3",
+          "4:3": "4:3",
+          "3:4": "3:4",
+          "1:1": "1:1",
+          "21:9": "21:9"
+        }
+      },
+      "megapixels": {
+        "name": "百万像素"
+      },
+      "prompt_override": {
+        "name": "提示词"
+      },
+      "duration_seconds": {
+        "name": "时长（秒）"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": ">"
+      }
+    }
+  },
+  "MiniMaxH3IntegrationAdapterGH": {
+    "display_name": "MiniMax-H3 适配器(GH)",
+    "inputs": {
+      "integration": {
+        "name": "<"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "正面条件"
+      },
+      "1": {
+        "name": "音视频潜空间"
+      },
+      "2": {
+        "name": "视频 VAE"
+      },
+      "3": {
+        "name": "音频 VAE"
+      },
+      "4": {
+        "name": "模型序号"
+      },
+      "5": {
+        "name": "原始音频"
+      },
+      "6": {
+        "name": "是否原声"
+      },
+      "7": {
+        "name": "条件提示词"
+      },
+      "8": {
+        "name": "媒体映射 JSON"
+      },
+      "9": {
+        "name": "报告"
+      }
+    }
+  },
+  "MiniMaxH3DualClockT8GH": {
+    "display_name": "MiniMax-H3 双时钟-T8(GH)",
+    "inputs": {
+      "model": {
+        "name": "模型"
+      },
+      "av_latent": {
+        "name": "音视频潜空间"
+      },
+      "steps": {
+        "name": "步数"
+      },
+      "shift_video": {
+        "name": "视频偏移"
+      },
+      "shift_audio": {
+        "name": "音频偏移"
+      },
+      "sampler_name": {
+        "name": "采样器"
+      },
+      "scheduler": {
+        "name": "调度器"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型"
+      },
+      "1": {
+        "name": "采样器"
+      },
+      "2": {
+        "name": "Sigmas"
+      }
+    }
+  },
+  "MiniMaxH3AVDecodeT8GH": {
+    "display_name": "MiniMax-H3解码-T8(GH)",
+    "inputs": {
+      "av_latent": {
+        "name": "音视频潜空间"
+      },
+      "video_vae": {
+        "name": "视频 VAE"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像"
+      },
+      "1": {
+        "name": "生成音频"
+      },
+      "2": {
+        "name": "视频潜空间"
+      },
+      "3": {
+        "name": "音频潜空间"
+      }
+    }
+  },
+  "AICG3D_SkillLoader": {
+    "display_name": "AICG3D 技能加载器",
+    "inputs": {
+      "skill": {
+        "name": "技能",
+        "tooltip": "自动选择：不下发技能正文，由下游大模型自行挑选。"
+      },
+      "task": {
+        "name": "任务描述",
+        "tooltip": "你的创作需求，会拼在技能正文后面一起输出。"
+      },
+      "task_override": {
+        "name": "任务覆盖",
+        "tooltip": "从上游节点覆盖任务描述。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "提示词"
+      },
+      "1": {
+        "name": "技能ID"
+      },
+      "2": {
+        "name": "技能正文"
+      }
+    }
+  },
+  "AICG3D_PromptPreset": {
+    "display_name": "AICG3D 提示词模板",
+    "inputs": {
+      "preset": {
+        "name": "提示词模板",
+        "tooltip": "“分类｜名称”格式，输入关键字可快速过滤。"
+      },
+      "task": {
+        "name": "任务描述",
+        "tooltip": "你的创作需求。留空时只输出模板正文。"
+      },
+      "task_override": {
+        "name": "任务覆盖",
+        "tooltip": "从上游节点覆盖任务描述。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "提示词"
+      },
+      "1": {
+        "name": "模板ID"
+      },
+      "2": {
+        "name": "模板正文"
+      }
+    }
+  }
+}

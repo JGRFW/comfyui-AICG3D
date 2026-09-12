@@ -1,0 +1,205 @@
+{
+  "MiniMaxH3IntegrationGH": {
+    "display_name": "MiniMax-H3 Integration (GH)",
+    "inputs": {
+      "clip_name": {
+        "name": "CLIP model"
+      },
+      "video_vae_name": {
+        "name": "video VAE"
+      },
+      "audio_vae_name": {
+        "name": "audio VAE"
+      },
+      "aspect": {
+        "name": "aspect ratio",
+        "options": {
+          "adaptive": "adaptive",
+          "16:9": "16:9",
+          "9:16": "9:16",
+          "3:2": "3:2",
+          "2:3": "2:3",
+          "4:3": "4:3",
+          "3:4": "3:4",
+          "1:1": "1:1",
+          "21:9": "21:9"
+        }
+      },
+      "megapixels": {
+        "name": "megapixels"
+      },
+      "prompt_override": {
+        "name": "prompt"
+      },
+      "duration_seconds": {
+        "name": "duration (seconds)"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": ">"
+      }
+    }
+  },
+  "MiniMaxH3IntegrationAdapterGH": {
+    "display_name": "MiniMax-H3 Adapter (GH)",
+    "inputs": {
+      "integration": {
+        "name": "<"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "positive"
+      },
+      "1": {
+        "name": "AV latent"
+      },
+      "2": {
+        "name": "video VAE"
+      },
+      "3": {
+        "name": "audio VAE"
+      },
+      "4": {
+        "name": "model number"
+      },
+      "5": {
+        "name": "mux audio"
+      },
+      "6": {
+        "name": "is original audio"
+      },
+      "7": {
+        "name": "conditioned prompt"
+      },
+      "8": {
+        "name": "media map JSON"
+      },
+      "9": {
+        "name": "report"
+      }
+    }
+  },
+  "MiniMaxH3DualClockT8GH": {
+    "display_name": "MiniMax H3 Dual Clock - T8 (GH)",
+    "inputs": {
+      "model": {
+        "name": "model"
+      },
+      "av_latent": {
+        "name": "AV latent"
+      },
+      "steps": {
+        "name": "steps"
+      },
+      "shift_video": {
+        "name": "video shift"
+      },
+      "shift_audio": {
+        "name": "audio shift"
+      },
+      "sampler_name": {
+        "name": "sampler"
+      },
+      "scheduler": {
+        "name": "scheduler"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model"
+      },
+      "1": {
+        "name": "sampler"
+      },
+      "2": {
+        "name": "sigmas"
+      }
+    }
+  },
+  "MiniMaxH3AVDecodeT8GH": {
+    "display_name": "MiniMax H3 AV Decode - T8 (GH)",
+    "inputs": {
+      "av_latent": {
+        "name": "AV latent"
+      },
+      "video_vae": {
+        "name": "video VAE"
+      },
+      "audio_vae": {
+        "name": "audio VAE"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "frames"
+      },
+      "1": {
+        "name": "generated audio"
+      },
+      "2": {
+        "name": "video latent"
+      },
+      "3": {
+        "name": "audio latent"
+      }
+    }
+  },
+  "AICG3D_SkillLoader": {
+    "display_name": "AICG3D Skill Loader",
+    "inputs": {
+      "skill": {
+        "name": "skill",
+        "tooltip": "Auto: pass the task through and let the downstream model pick a skill."
+      },
+      "task": {
+        "name": "task",
+        "tooltip": "Your request, appended after the skill body."
+      },
+      "task_override": {
+        "name": "task override",
+        "tooltip": "Override the task text from an upstream node."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "prompt"
+      },
+      "1": {
+        "name": "skill ID"
+      },
+      "2": {
+        "name": "skill body"
+      }
+    }
+  },
+  "AICG3D_PromptPreset": {
+    "display_name": "AICG3D Prompt Preset",
+    "inputs": {
+      "preset": {
+        "name": "prompt preset",
+        "tooltip": "\"Category | Name\" format; type to filter quickly."
+      },
+      "task": {
+        "name": "task",
+        "tooltip": "Your request. Leave empty to output the preset body only."
+      },
+      "task_override": {
+        "name": "task override",
+        "tooltip": "Override the task text from an upstream node."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "prompt"
+      },
+      "1": {
+        "name": "preset ID"
+      },
+      "2": {
+        "name": "preset body"
+      }
+    }
+  }
+}

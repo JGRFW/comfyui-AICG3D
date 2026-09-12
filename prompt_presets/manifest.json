@@ -1,0 +1,1056 @@
+{
+ "version": 1,
+ "categories": [
+  {
+   "id": "h3",
+   "name": "H3 专题",
+   "summary": "MiniMax H3 官方范例、导演台与专用提示词系统"
+  },
+  {
+   "id": "video",
+   "name": "视频生成与运镜",
+   "summary": "镜头语言、运镜技巧与视频提示词助手"
+  },
+  {
+   "id": "storyboard",
+   "name": "分镜与剧本",
+   "summary": "分镜系统、漫剧宫格、小说与剧本模板"
+  },
+  {
+   "id": "portrait",
+   "name": "人像写真",
+   "summary": "人像美学、穿搭拆解与写真模板"
+  },
+  {
+   "id": "eastern",
+   "name": "古风仙侠东方",
+   "summary": "古风、仙侠、天宫与东方幻想场景"
+  },
+  {
+   "id": "artstyle",
+   "name": "画风与插画",
+   "summary": "特定画风、插画师风格与画面美术"
+  },
+  {
+   "id": "image",
+   "name": "生图模板与反推",
+   "summary": "生图模板、商品摄影与图片反推"
+  },
+  {
+   "id": "meta",
+   "name": "提示词工程",
+   "summary": "元提示词、方法论与提示词工具"
+  }
+ ],
+ "count": 144,
+ "items": [
+  {
+   "id": "h3-h3-pv",
+   "category": "h3",
+   "name": "H3 单图角色 PV 提示词模板（盲盒万能版）",
+   "chars": 27290,
+   "source": "超然打斗\\提示词模板\\H3单图角色PV提示词模板（盲盒万能版）.md"
+  },
+  {
+   "id": "h3-h3-pv-2",
+   "category": "h3",
+   "name": "H3 单图角色 PV 提示词模板（稳定武动版）",
+   "chars": 9926,
+   "source": "超然打斗\\提示词模板\\H3单图角色PV提示词模板（稳定武动版）.md"
+  },
+  {
+   "id": "h3-h3-skill",
+   "category": "h3",
+   "name": "H3 打斗 Skill 提示词（完整版）",
+   "chars": 15988,
+   "source": "超然打斗\\H3打斗skill.txt"
+  },
+  {
+   "id": "h3-minimax",
+   "category": "h3",
+   "name": "H3 图生视频自动提示词·多分镜连贯系统",
+   "chars": 2718,
+   "source": "MiniMax H3 导演台能做长视频短剧相关提示词\\MiniMax -图生视频专用-自动提示词-多分镜连贯系统.txt"
+  },
+  {
+   "id": "h3-p47b7af",
+   "category": "h3",
+   "name": "超然打斗·精简提示词",
+   "chars": 1534,
+   "source": "超然打斗\\提示词.txt"
+  },
+  {
+   "id": "h3-p4fe14a",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_049｜魔术师服装互换",
+   "chars": 484,
+   "source": "70-优秀提示词案例和官方提示词模板\\01-主案例-魔术师服装互换-mmh3_049\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-p4fe14a-2",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_001｜望远镜时尚广告",
+   "chars": 2175,
+   "source": "70-优秀提示词案例和官方提示词模板\\03-主案例-望远镜时尚广告-mmh3_001\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-p4fe14a-3",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_038｜咖啡无缝变沙漠",
+   "chars": 1909,
+   "source": "70-优秀提示词案例和官方提示词模板\\04-主案例-咖啡无缝变沙漠-mmh3_038\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-p4fe14a-4",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_023｜赛博朋克角色装备界面",
+   "chars": 3232,
+   "source": "70-优秀提示词案例和官方提示词模板\\05-主案例-赛博朋克角色装备界面-mmh3_023\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-p4fe14a-5",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_006｜复古日漫犯罪片头",
+   "chars": 4038,
+   "source": "70-优秀提示词案例和官方提示词模板\\06-主案例-复古日漫犯罪片头-mmh3_006\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-p4fe14a-6",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_016｜中文动态字体",
+   "chars": 1508,
+   "source": "70-优秀提示词案例和官方提示词模板\\07-快速案例-中文动态字体-mmh3_016\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-p4fe14a-7",
+   "category": "h3",
+   "name": "H3 官方案例 mmh3_052｜黄昏电车手绘光线",
+   "chars": 7578,
+   "source": "70-优秀提示词案例和官方提示词模板\\08-快速案例-黄昏电车手绘光线-mmh3_052\\提示词与案例信息.txt"
+  },
+  {
+   "id": "h3-preword-01",
+   "category": "h3",
+   "name": "前置词｜H3视频提示词编写助手",
+   "chars": 1543,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-02",
+   "category": "h3",
+   "name": "前置词｜极简产品广告视频助手",
+   "chars": 1890,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-03",
+   "category": "h3",
+   "name": "前置词｜3D动画短片制作助手",
+   "chars": 1804,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-04",
+   "category": "h3",
+   "name": "前置词｜纸艺定格科普视频助手",
+   "chars": 1315,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-05",
+   "category": "h3",
+   "name": "前置词｜品牌宣传视频制作助手",
+   "chars": 1627,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-06",
+   "category": "h3",
+   "name": "前置词｜音乐视频与动态字幕助手",
+   "chars": 1451,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-07",
+   "category": "h3",
+   "name": "前置词｜双人合作游戏片头助手",
+   "chars": 1608,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-08",
+   "category": "h3",
+   "name": "前置词｜纸张拼贴讲解视频助手",
+   "chars": 1329,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "h3-preword-09",
+   "category": "h3",
+   "name": "前置词｜手绘动画实拍融合助手",
+   "chars": 1355,
+   "source": "前置词-复制即用.zip"
+  },
+  {
+   "id": "video-38-ai",
+   "category": "video",
+   "name": "38 种运镜技巧中英对照",
+   "chars": 1385,
+   "source": "提示词及模板\\1-3-3掌握38种引爆流量的AI视频镜头运镜技巧.txt"
+  },
+  {
+   "id": "video-ltxv",
+   "category": "video",
+   "name": "LTXV 视频提示词制作",
+   "chars": 1946,
+   "source": "LTXV的视频提示词制作.md"
+  },
+  {
+   "id": "video-p3197b7",
+   "category": "video",
+   "name": "42 种具体运镜提示词",
+   "chars": 1219,
+   "source": "提示词及模板\\1-3-42种具体运镜提示词.txt"
+  },
+  {
+   "id": "video-pbe9491",
+   "category": "video",
+   "name": "图生视频三态专家系统",
+   "chars": 1447,
+   "source": "提示词及模板\\提示词\\你是一位图生视频三态专家系统，需同时激活【电影叙事导演】【视觉风格大师.txt"
+  },
+  {
+   "id": "video-pd17012",
+   "category": "video",
+   "name": "镜头提示词（景别大全）",
+   "chars": 6520,
+   "source": "提示词及模板\\1-3-2镜头提示词.txt"
+  },
+  {
+   "id": "video-wan",
+   "category": "video",
+   "name": "Wan 题词生成器",
+   "chars": 885,
+   "source": "提示词及模板\\提示词\\Wan题词生成器.txt"
+  },
+  {
+   "id": "video-wanflf",
+   "category": "video",
+   "name": "WanFLF 提示词助手",
+   "chars": 1347,
+   "source": "提示词及模板\\提示词\\WanFLF提示词助手.txt"
+  },
+  {
+   "id": "storyboard-ai-v1-0",
+   "category": "storyboard",
+   "name": "现代爱情故事 AI 短视频提示词模板 v1.0",
+   "chars": 9056,
+   "source": "现代爱情故事 AI 短视频提示词模板 v1.0.md"
+  },
+  {
+   "id": "storyboard-gem",
+   "category": "storyboard",
+   "name": "25 宫格漫剧分镜 Gem",
+   "chars": 4405,
+   "source": "提示词及模板\\25宫格漫剧分镜gem\\25宫格分镜Gem.txt"
+  },
+  {
+   "id": "storyboard-gpt2-0",
+   "category": "storyboard",
+   "name": "GPT2.0 一键生成影视分镜与关键帧（多图版）",
+   "chars": 7000,
+   "source": "MiniMax H3 导演台能做长视频短剧相关提示词\\GPT2.0一键生成专业影视分镜与关键帧全流程提示词-多图版.txt"
+  },
+  {
+   "id": "storyboard-p382335",
+   "category": "storyboard",
+   "name": "小说·爆款网文标题模板",
+   "chars": 191,
+   "source": "小说模板\\生成爆款网文标题专用模板.txt"
+  },
+  {
+   "id": "storyboard-p5e69b0",
+   "category": "storyboard",
+   "name": "提示词宝典·分镜",
+   "chars": 506,
+   "source": "提示词及模板\\提示词\\提示词宝典分镜.docx"
+  },
+  {
+   "id": "storyboard-p6f7320",
+   "category": "storyboard",
+   "name": "15 秒末世赛博融合短片分镜脚本",
+   "chars": 1135,
+   "source": "提示词人物风格\\内容叙事风格 + 画面美术风格\\15 秒末世赛博融合短片分镜脚本.pdf"
+  },
+  {
+   "id": "storyboard-p7cb7fa",
+   "category": "storyboard",
+   "name": "小说·长篇玄幻爽文大纲",
+   "chars": 369,
+   "source": "小说模板\\长篇玄幻爽文完整大纲.txt"
+  },
+  {
+   "id": "storyboard-p93f888",
+   "category": "storyboard",
+   "name": "分镜提示词命令",
+   "chars": 1540,
+   "source": "提示词及模板\\提示词\\分镜提示词命令：.txt"
+  },
+  {
+   "id": "storyboard-pa5a36f",
+   "category": "storyboard",
+   "name": "小说·完整定制小说提示词",
+   "chars": 577,
+   "source": "小说模板\\完整定制小说提示词（适合直接生成整本设定 + 开篇）.MD"
+  },
+  {
+   "id": "storyboard-pa7aee0",
+   "category": "storyboard",
+   "name": "小说·开篇正文生成模板",
+   "chars": 250,
+   "source": "小说模板\\小说开篇正文生成模板（代入标题直接写第一章）.txt"
+  },
+  {
+   "id": "storyboard-pd830d5",
+   "category": "storyboard",
+   "name": "全自动小说转剧本 + 分镜 + 视频",
+   "chars": 2485,
+   "source": "提示词及模板\\提示词\\全自动小说转剧本+角色场景设定+分镜图+视频(1).txt"
+  },
+  {
+   "id": "storyboard-pe3d2f2",
+   "category": "storyboard",
+   "name": "漫剧九宫格分镜（豆包）",
+   "chars": 3650,
+   "source": "提示词及模板\\9宫格AI漫剧Gem\\漫剧九宫格分镜（豆包）.txt"
+  },
+  {
+   "id": "storyboard-pf7df11",
+   "category": "storyboard",
+   "name": "25 宫格使用教程",
+   "chars": 468,
+   "source": "提示词及模板\\25宫格漫剧分镜gem\\25宫格使用教程.pdf"
+  },
+  {
+   "id": "storyboard-pro",
+   "category": "storyboard",
+   "name": "漫剧九宫格分镜（大香蕉 pro）",
+   "chars": 3706,
+   "source": "提示词及模板\\9宫格AI漫剧Gem\\漫剧九宫格分镜（大香蕉pro）.txt"
+  },
+  {
+   "id": "storyboard-role-cinematic-st",
+   "category": "storyboard",
+   "name": "电影级分镜叙事工程师",
+   "chars": 1971,
+   "source": "提示词及模板\\提示词\\# Role你是一位 电影级分镜叙事工程师 (Cinematic St.txt"
+  },
+  {
+   "id": "storyboard-v1-0",
+   "category": "storyboard",
+   "name": "短剧分镜序列审核系统 提示词 V1.0",
+   "chars": 3544,
+   "source": "3.短剧分镜序列审核系统提示词（V1.0）.MD"
+  },
+  {
+   "id": "kook_portrait_1",
+   "category": "portrait",
+   "name": "KOOK 人像美学图集·第一期",
+   "chars": 4828,
+   "source": "KOOK"
+  },
+  {
+   "id": "kook_portrait_2",
+   "category": "portrait",
+   "name": "KOOK 人像美学图集·第二期",
+   "chars": 5714,
+   "source": "KOOK"
+  },
+  {
+   "id": "portrait-coser",
+   "category": "portrait",
+   "name": "二次元 coser 提示词模板",
+   "chars": 5248,
+   "source": "提示词及模板\\1-10二次元coser提示词模板.txt"
+  },
+  {
+   "id": "portrait-ootd",
+   "category": "portrait",
+   "name": "香奢美女穿搭拆解 OOTD（香蕉版）",
+   "chars": 1176,
+   "source": "提示词及模板\\1-21-2香奢美女穿搭拆解OOTD提示词模板(香蕉版).docx"
+  },
+  {
+   "id": "portrait-ootd-2",
+   "category": "portrait",
+   "name": "香奢风日常穿搭拆解 OOTD",
+   "chars": 826,
+   "source": "提示词及模板\\1-21香奢风日常穿搭拆解OOTD提示词模板.docx"
+  },
+  {
+   "id": "portrait-p3c39d0",
+   "category": "portrait",
+   "name": "自由姿势提示词模板",
+   "chars": 4704,
+   "source": "提示词及模板\\1-34自由姿势提示词模板.docx"
+  },
+  {
+   "id": "portrait-p469d7a",
+   "category": "portrait",
+   "name": "时尚艺术写真高级拍摄指南",
+   "chars": 2697,
+   "source": "提示词及模板\\1-2时尚艺术写真提示词.txt"
+  },
+  {
+   "id": "portrait-p54dc8b",
+   "category": "portrait",
+   "name": "少女日常·极致张力版",
+   "chars": 4137,
+   "source": "提示词及模板\\1-11-3少女日常·极致X张力版.txt"
+  },
+  {
+   "id": "portrait-p5f818a",
+   "category": "portrait",
+   "name": "AI 表情卡提示词大全（古风少女）",
+   "chars": 3633,
+   "source": "image-1786190832\\新建 文本文档.txt"
+  },
+  {
+   "id": "portrait-p901291",
+   "category": "portrait",
+   "name": "甜美穿搭·大胆开放姿态版",
+   "chars": 3204,
+   "source": "提示词及模板\\1-11-1甜美穿搭·欲拒还迎·大胆开放姿态版.txt"
+  },
+  {
+   "id": "portrait-pb27e56",
+   "category": "portrait",
+   "name": "糖水片风格美女提示词",
+   "chars": 1665,
+   "source": "提示词及模板\\1-4糖水片风格美女提示词.txt"
+  },
+  {
+   "id": "portrait-pce21a5",
+   "category": "portrait",
+   "name": "少女裙装·常规拍摄版",
+   "chars": 3886,
+   "source": "提示词及模板\\1-11-2少女裙装·迎合姿态·常规拍摄版.txt"
+  },
+  {
+   "id": "portrait-pe913fe",
+   "category": "portrait",
+   "name": "女性之美摄影提示词模板",
+   "chars": 4702,
+   "source": "提示词及模板\\1-34女性之美摄影提示词模板.docx"
+  },
+  {
+   "id": "portrait-pf4951a",
+   "category": "portrait",
+   "name": "三视图必须是同一人物",
+   "chars": 1024,
+   "source": "三视图必须是同一人物.txt"
+  },
+  {
+   "id": "portrait-shishang-yishu-xiezhen-v1",
+   "category": "portrait",
+   "name": "时尚艺术写真高级拍摄指南 v1.0 轻度版",
+   "chars": 15892,
+   "source": "2.txt"
+  },
+  {
+   "id": "eastern-1-0",
+   "category": "eastern",
+   "name": "古装玄幻人物写真模板 1.0",
+   "chars": 1686,
+   "source": "提示词及模板\\1-6-1古装玄幻人物写真模板1.0.txt"
+  },
+  {
+   "id": "eastern-2-0",
+   "category": "eastern",
+   "name": "天宫 2.0 提示词（中文）",
+   "chars": 2516,
+   "source": "中式天宫仙境图片\\天宫2.0提示词 - 中文.docx"
+  },
+  {
+   "id": "eastern-2-0-2",
+   "category": "eastern",
+   "name": "古风玄幻半身写真模板 2.0",
+   "chars": 15148,
+   "source": "提示词及模板\\1-6-2古风玄幻半身写真模板2.0.txt"
+  },
+  {
+   "id": "eastern-p091f7b",
+   "category": "eastern",
+   "name": "云上仙宫·文生图提示词",
+   "chars": 2605,
+   "source": "云上仙宫\\“云上仙宫”文生图提示词.txt"
+  },
+  {
+   "id": "eastern-p2789c8",
+   "category": "eastern",
+   "name": "CG 动漫人物唯美古风场景",
+   "chars": 652,
+   "source": "提示词人物风格\\CG动漫人物唯美古风人物场景.txt"
+  },
+  {
+   "id": "eastern-p2c3881",
+   "category": "eastern",
+   "name": "云上仙宫·视频提示词",
+   "chars": 3847,
+   "source": "云上仙宫\\“云上仙宫”视频提示词.txt"
+  },
+  {
+   "id": "eastern-p3b8d38",
+   "category": "eastern",
+   "name": "三星堆·古蜀文明视觉提示词",
+   "chars": 7540,
+   "source": "三星堆.md"
+  },
+  {
+   "id": "eastern-p42b21f",
+   "category": "eastern",
+   "name": "烟雨江南图（附提示词）",
+   "chars": 808,
+   "source": "提示词人物风格\\烟雨江南图（附提示词）.txt"
+  },
+  {
+   "id": "eastern-p445d8b",
+   "category": "eastern",
+   "name": "中式 AI 仙境提示词",
+   "chars": 3657,
+   "source": "中式天宫仙境图片\\中式AI仙境提示词.docx"
+  },
+  {
+   "id": "eastern-p5d52e4",
+   "category": "eastern",
+   "name": "东方庭院提示词教程",
+   "chars": 1159,
+   "source": "提示词人物风格\\东方庭院提示词）\\东方庭院提示词教程（附提示词）.txt"
+  },
+  {
+   "id": "eastern-p8b87c3",
+   "category": "eastern",
+   "name": "绝美古风女子提示词（二）",
+   "chars": 7066,
+   "source": "提示词及模板\\1-6-4附：绝美古风女子提示词2.txt"
+  },
+  {
+   "id": "eastern-p936e8d",
+   "category": "eastern",
+   "name": "新古装美女提示词",
+   "chars": 2399,
+   "source": "提示词及模板\\1-1新古装美女提示词.txt"
+  },
+  {
+   "id": "eastern-pab74f9",
+   "category": "eastern",
+   "name": "绝美古风美女提示词（一）",
+   "chars": 51193,
+   "source": "提示词及模板\\1-6-3附：绝美古风美女提示词1.txt"
+  },
+  {
+   "id": "eastern-pb26ce8",
+   "category": "eastern",
+   "name": "金陵十二钗人物提示词",
+   "chars": 1740,
+   "source": "提示词及模板\\1-1-2金陵十二钗人物提示词.txt"
+  },
+  {
+   "id": "eastern-pcf5524",
+   "category": "eastern",
+   "name": "汽水变装转场提示词",
+   "chars": 2103,
+   "source": "中式天宫仙境图片\\汽水变装转场提示词.docx"
+  },
+  {
+   "id": "eastern-pda0759",
+   "category": "eastern",
+   "name": "中式赛博异兽场景公式",
+   "chars": 1002,
+   "source": "提示词人物风格\\生成中式赛博异兽场景，公式教程.txt"
+  },
+  {
+   "id": "eastern-pf9cbcb",
+   "category": "eastern",
+   "name": "气势磅礴的东方修仙大场景",
+   "chars": 2201,
+   "source": "提示词人物风格\\气势磅礴、仙气飘飘的极具视觉冲击力的东方修仙大场景.txt"
+  },
+  {
+   "id": "eastern-pfdbccf",
+   "category": "eastern",
+   "name": "仙侠场景提示词",
+   "chars": 1381,
+   "source": "仙侠场景提示词.MD"
+  },
+  {
+   "id": "artstyle-80-90-ova",
+   "category": "artstyle",
+   "name": "80-90 年代 OVA 画风提示词",
+   "chars": 12462,
+   "source": "提示词及模板\\1-13-2-附：80-90年代OVA画风提示词.txt"
+  },
+  {
+   "id": "artstyle-moebius",
+   "category": "artstyle",
+   "name": "Moebius 风格清新治愈系插画模板",
+   "chars": 6314,
+   "source": "提示词及模板\\1-7-2Moebius 风格清新治愈系插画提示词：共同点 + 可变点 + 通用模板.txt"
+  },
+  {
+   "id": "artstyle-moebius-jean-giraud",
+   "category": "artstyle",
+   "name": "Moebius 风格清新治愈系插画",
+   "chars": 2949,
+   "source": "提示词及模板\\1-7Moebius (Jean Giraud) 风格清新治愈系插画.txt"
+  },
+  {
+   "id": "artstyle-ova",
+   "category": "artstyle",
+   "name": "80-90 年代复古 OVA 画风角色写真模板",
+   "chars": 1443,
+   "source": "提示词及模板\\1-13-1-80-90年代复古怀旧OVA画风动画角色写真模板.txt"
+  },
+  {
+   "id": "artstyle-p02ddaa",
+   "category": "artstyle",
+   "name": "吉卜力 Q 萌可爱萌宠",
+   "chars": 5134,
+   "source": "提示词及模板\\1-8-2吉卜力Q萌可爱萌宠.txt"
+  },
+  {
+   "id": "artstyle-p096062",
+   "category": "artstyle",
+   "name": "金政基插画提示词",
+   "chars": 5021,
+   "source": "提示词及模板\\1-9-2金政基插画提示词.txt"
+  },
+  {
+   "id": "artstyle-p25629f",
+   "category": "artstyle",
+   "name": "吉卜力工作室风格提示词模板",
+   "chars": 3987,
+   "source": "提示词及模板\\1-8-1吉卜力工作室风格提示词模板.txt"
+  },
+  {
+   "id": "artstyle-p4932f6",
+   "category": "artstyle",
+   "name": "风格增强提示词（60 组）",
+   "chars": 1780,
+   "source": "提示词及模板\\1-5风格增强提示词(if).xlsx"
+  },
+  {
+   "id": "artstyle-p5bc482",
+   "category": "artstyle",
+   "name": "吉卜力固定画风提示词前缀",
+   "chars": 477,
+   "source": "提示词及模板\\1-8-3Q吉卜力固定画风提示词前缀.txt"
+  },
+  {
+   "id": "artstyle-p646b65",
+   "category": "artstyle",
+   "name": "3D 动漫风格按视觉美学分类",
+   "chars": 1249,
+   "source": "提示词人物风格\\3D动漫风格按视觉美学-分类\\3D 动漫风格按视觉美学-分类.txt"
+  },
+  {
+   "id": "artstyle-p6ecd8e",
+   "category": "artstyle",
+   "name": "风格提示词速查",
+   "chars": 454,
+   "source": "提示词人物风格\\风格，提示词.txt"
+  },
+  {
+   "id": "artstyle-p9dc29f",
+   "category": "artstyle",
+   "name": "短视频风格细分总表",
+   "chars": 2620,
+   "source": "提示词人物风格\\内容叙事风格 + 画面美术风格\\短视频风格细分总表.pdf"
+  },
+  {
+   "id": "artstyle-pbb841e",
+   "category": "artstyle",
+   "name": "巨物科幻",
+   "chars": 6494,
+   "source": "巨物科幻.md"
+  },
+  {
+   "id": "artstyle-pec6d84",
+   "category": "artstyle",
+   "name": "赛博朋克 + 末日废土提示词",
+   "chars": 734,
+   "source": "提示词人物风格\\内容叙事风格 + 画面美术风格\\赛博朋克+末日废土.pdf"
+  },
+  {
+   "id": "artstyle-pfd7ce4",
+   "category": "artstyle",
+   "name": "金政基插画提示词生成模板",
+   "chars": 2473,
+   "source": "提示词及模板\\1-9-1金政基插画提示词生成模板.txt"
+  },
+  {
+   "id": "image-ins",
+   "category": "image",
+   "name": "ins 氛围感社交轻奢四宫格拼图",
+   "chars": 4871,
+   "source": "提示词及模板\\1-23ins氛围感社交轻奢四宫格拼图提示词模板（含预览图）.docx"
+  },
+  {
+   "id": "image-ins-2",
+   "category": "image",
+   "name": "ins 风极简生活四宫格拼图",
+   "chars": 616,
+   "source": "提示词及模板\\1-27ins风极简生活四宫格拼图提示词模板（带预览图）.docx"
+  },
+  {
+   "id": "image-json",
+   "category": "image",
+   "name": "图片信息提取转 JSON 元指令版",
+   "chars": 10069,
+   "source": "提示词及模板\\1-25-4图片信息提取转 JSON 元指令版.docx"
+  },
+  {
+   "id": "image-krea-2-aaa-cg",
+   "category": "image",
+   "name": "Krea 2 东方玄幻 AAA CG 通用母模板",
+   "chars": 2775,
+   "source": "Krea2文生图提示词\\Krea 2「东方玄幻 AAA CG」通用母模板.MD"
+  },
+  {
+   "id": "image-krea2",
+   "category": "image",
+   "name": "Krea 2 万物精准复刻",
+   "chars": 6388,
+   "source": "Krea 2图片100%反推\\Krea2_万物精准复刻.txt"
+  },
+  {
+   "id": "image-krea2-2",
+   "category": "image",
+   "name": "Krea 2 万能生图",
+   "chars": 4892,
+   "source": "Krea 2图片100%反推\\Krea2_万能生图.md"
+  },
+  {
+   "id": "image-p0d2c25",
+   "category": "image",
+   "name": "Krea 2 然像高级游戏 CG",
+   "chars": 3216,
+   "source": "Krea2文生图提示词\\然像高级游戏 CG.MD"
+  },
+  {
+   "id": "image-p2438b9",
+   "category": "image",
+   "name": "手绘风格教学食谱信息图",
+   "chars": 766,
+   "source": "提示词及模板\\1-25手绘风格教学食谱信息图提示词模板（含预览图）.docx"
+  },
+  {
+   "id": "image-p2bdcd8",
+   "category": "image",
+   "name": "156 组提示词整理版",
+   "chars": 130735,
+   "source": "提示词及模板\\1-12-156组提示词_整理版.txt"
+  },
+  {
+   "id": "image-p2febdc",
+   "category": "image",
+   "name": "城市 3D 精致微缩冰箱贴",
+   "chars": 1167,
+   "source": "提示词及模板\\1-24城市 3D 精致微缩冰箱贴（两组提示词模板，分开用）.docx"
+  },
+  {
+   "id": "image-p31865b",
+   "category": "image",
+   "name": "指定角色概念分解图提示词",
+   "chars": 1637,
+   "source": "提示词及模板\\1-20指定角色概念分解图提示词模板（含预览图）.docx"
+  },
+  {
+   "id": "image-p3dd1cf",
+   "category": "image",
+   "name": "通用高端产品爆炸视图",
+   "chars": 989,
+   "source": "提示词及模板\\1-31通用高端产品爆炸视图可视化图提示词模板.docx"
+  },
+  {
+   "id": "image-p47b7af",
+   "category": "image",
+   "name": "生成图片提示词合集",
+   "chars": 3934,
+   "source": "提示词人物风格\\生成图片\\提示词.txt"
+  },
+  {
+   "id": "image-p4c8276",
+   "category": "image",
+   "name": "反推提示词（人像）",
+   "chars": 3594,
+   "source": "提示词人物风格\\反推提示词.txt"
+  },
+  {
+   "id": "image-p58d0d8",
+   "category": "image",
+   "name": "超高清美食高级摄影",
+   "chars": 423,
+   "source": "提示词及模板\\1-32超高清美食高级摄影提示词模板（带预览图）.docx"
+  },
+  {
+   "id": "image-p5b7623",
+   "category": "image",
+   "name": "立体书漫画风手办玩具摄影",
+   "chars": 330,
+   "source": "提示词及模板\\1-35立体书漫画风手办玩具摄影提示词模板（带预览图）.docx"
+  },
+  {
+   "id": "image-p61a3ec",
+   "category": "image",
+   "name": "Krea 2 东方玄幻视觉体系拆解",
+   "chars": 17781,
+   "source": "Krea2文生图提示词\\介绍.txt"
+  },
+  {
+   "id": "image-p8aaf95",
+   "category": "image",
+   "name": "高端商品九宫格营销概念设计",
+   "chars": 961,
+   "source": "提示词及模板\\1-22高端商品九宫格营销概念设计专业 AI 提示词模板（奢品广告质感）.docx"
+  },
+  {
+   "id": "image-p95032e",
+   "category": "image",
+   "name": "传世乐器的史诗级解构图鉴",
+   "chars": 290,
+   "source": "提示词及模板\\1-29传世乐器的史诗级解构图鉴提示词模板（含预览图）.docx"
+  },
+  {
+   "id": "image-p9c39d9",
+   "category": "image",
+   "name": "刺绣风专辑封面",
+   "chars": 727,
+   "source": "提示词及模板\\1-36刺绣风专辑封面提示词模板（仅需替输入歌曲名带预览图）.docx"
+  },
+  {
+   "id": "image-p9d64c0",
+   "category": "image",
+   "name": "高端概念艺术杂志编辑级产品摄影",
+   "chars": 649,
+   "source": "提示词及模板\\1-28高端概念艺术杂志编辑级产品摄影提示词模板（含预览图）.docx"
+  },
+  {
+   "id": "image-pa39711",
+   "category": "image",
+   "name": "高端科技产品摄影",
+   "chars": 319,
+   "source": "提示词及模板\\1-33高端科技产品摄影通用提示词模板（带预览图）.docx"
+  },
+  {
+   "id": "image-pa49897",
+   "category": "image",
+   "name": "反推提示词模版",
+   "chars": 3454,
+   "source": "反推.MD"
+  },
+  {
+   "id": "image-pb23238",
+   "category": "image",
+   "name": "图片精细反推（喵呜大人）",
+   "chars": 2579,
+   "source": "提示词及模板\\1-25-1喵呜大人图片精细反推.docx"
+  },
+  {
+   "id": "image-pbf9d32",
+   "category": "image",
+   "name": "城市动态天气卡片",
+   "chars": 322,
+   "source": "提示词及模板\\1-26城市动态天气卡片提示词模板（含预览图）.docx"
+  },
+  {
+   "id": "image-pc0aadd",
+   "category": "image",
+   "name": "超逼真 3D 等距视图",
+   "chars": 508,
+   "source": "提示词及模板\\1-30超逼真3D等距视图提示词模板.docx"
+  },
+  {
+   "id": "image-pe31067",
+   "category": "image",
+   "name": "城市高端剪纸艺术",
+   "chars": 3905,
+   "source": "提示词及模板\\1-37城市高端剪纸艺术提示词模板（带预览图）.docx"
+  },
+  {
+   "id": "image-pf1b7af",
+   "category": "image",
+   "name": "左右分屏构图提示词模板",
+   "chars": 2093,
+   "source": "提示词及模板\\1-19左右分屏构图提示词模板，输入超级英雄名称即可（含预览图）.docx"
+  },
+  {
+   "id": "image-z-image",
+   "category": "image",
+   "name": "43 组 Z-image 艺术提示词",
+   "chars": 60772,
+   "source": "提示词及模板\\zimage提示词\\43组Z-image艺术提示词.txt"
+  },
+  {
+   "id": "image-z-image-1",
+   "category": "image",
+   "name": "Z-image 构图第 1 组",
+   "chars": 5062,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第1组.txt"
+  },
+  {
+   "id": "image-z-image-2",
+   "category": "image",
+   "name": "Z-image 构图第 2 组",
+   "chars": 5361,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第2组.txt"
+  },
+  {
+   "id": "image-z-image-3",
+   "category": "image",
+   "name": "Z-image 构图第 3 组",
+   "chars": 8303,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第3组.txt"
+  },
+  {
+   "id": "image-z-image-4",
+   "category": "image",
+   "name": "Z-image 构图第 4 组",
+   "chars": 5631,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第4组.txt"
+  },
+  {
+   "id": "image-z-image-5",
+   "category": "image",
+   "name": "Z-image 构图第 5 组",
+   "chars": 4729,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第5组.txt"
+  },
+  {
+   "id": "image-z-image-6",
+   "category": "image",
+   "name": "Z-image 构图第 6 组",
+   "chars": 5110,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第6组.txt"
+  },
+  {
+   "id": "image-z-image-7",
+   "category": "image",
+   "name": "Z-image 构图第 7 组",
+   "chars": 6791,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第7组.txt"
+  },
+  {
+   "id": "image-z-image-8",
+   "category": "image",
+   "name": "Z-image 构图第 8 组",
+   "chars": 5976,
+   "source": "提示词及模板\\zimage提示词\\Z-image提示词构图第8组.txt"
+  },
+  {
+   "id": "meta-ai-1",
+   "category": "meta",
+   "name": "豆包专用 AI 生图工作流",
+   "chars": 5104,
+   "source": "提示词及模板\\提示词\\豆包专用AI生图工作流(1).pdf"
+  },
+  {
+   "id": "meta-api-1",
+   "category": "meta",
+   "name": "API 获取地址",
+   "chars": 233,
+   "source": "提示词及模板\\提示词\\API获取地址(1).txt"
+  },
+  {
+   "id": "meta-lib",
+   "category": "meta",
+   "name": "Lib 绘画提示词大师",
+   "chars": 2073,
+   "source": "提示词及模板\\提示词\\Lib 绘画提示词大师.txt"
+  },
+  {
+   "id": "meta-ltx-2-3-lora",
+   "category": "meta",
+   "name": "LTX-2.3 视频生成模型 LoRA 适配器",
+   "chars": 5112,
+   "source": "提示词人物风格\\LTX-2.3 视频生成模型的 LoRA 适配器.docx"
+  },
+  {
+   "id": "meta-p1c96c1",
+   "category": "meta",
+   "name": "反推命令提示",
+   "chars": 2052,
+   "source": "提示词及模板\\提示词\\反推命令提示.txt"
+  },
+  {
+   "id": "meta-p348529",
+   "category": "meta",
+   "name": "通义万相 AI 生视频使用指南",
+   "chars": 21728,
+   "source": "提示词及模板\\提示词\\通义万相AI生视频—使用指南.pdf"
+  },
+  {
+   "id": "meta-p379504",
+   "category": "meta",
+   "name": "图片生成强化提示词",
+   "chars": 323,
+   "source": "提示词人物风格\\图片生成强化提示词.txt"
+  },
+  {
+   "id": "meta-p47b7af",
+   "category": "meta",
+   "name": "提示词（大合集）",
+   "chars": 27840,
+   "source": "提示词及模板\\提示词.docx"
+  },
+  {
+   "id": "meta-p9ed34e",
+   "category": "meta",
+   "name": "五十套提示词技巧模板",
+   "chars": 24799,
+   "source": "提示词及模板\\1-14五十套提示词技巧模板.docx"
+  },
+  {
+   "id": "meta-pa0b6f0",
+   "category": "meta",
+   "name": "(提示词整合) 表格视图",
+   "chars": 56088,
+   "source": "提示词及模板\\(提示词整合)表格视图.xlsx"
+  },
+  {
+   "id": "meta-pafaa4d",
+   "category": "meta",
+   "name": "H3 极速工作流·安装说明",
+   "chars": 851,
+   "source": "MiniMaxH3_提示词Skill_极速工作流\\安装说明.md"
+  },
+  {
+   "id": "meta-pce813e",
+   "category": "meta",
+   "name": "提示词标签速查",
+   "chars": 991,
+   "source": "提示词及模板\\提示词标签.txt"
+  },
+  {
+   "id": "meta-pdf5179",
+   "category": "meta",
+   "name": "提示词方法论 1",
+   "chars": 21412,
+   "source": "70-优秀提示词案例和官方提示词模板\\提示词方法论1.html"
+  },
+  {
+   "id": "meta-prompt",
+   "category": "meta",
+   "name": "三步傻瓜式 Prompt 生成",
+   "chars": 1050,
+   "source": "提示词及模板\\提示词\\三步傻瓜式Prompt生成.txt"
+  },
+  {
+   "id": "meta-wan-2-2-prompt-guide",
+   "category": "meta",
+   "name": "Wan 2.2 提示词指南",
+   "chars": 40719,
+   "source": "提示词及模板\\提示词\\Wan 2.2  prompt guide.txt"
+  }
+ ]
+}

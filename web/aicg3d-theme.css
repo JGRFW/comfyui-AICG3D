@@ -1,0 +1,766 @@
+/* ==========================================================================
+    Copyright (C) 2026 AICG3D
+    SPDX-License-Identifier: GPL-3.0-or-later
+    本模块为新增代码（整合三个来源插件）
+    ========================================================================== */
+
+/* ==========================================================================
+    AICG3D 统一界面主题
+   合并插件后所有自定义面板共用这一套设计语言：
+   深色玻璃面板 + 蓝紫渐变强调色 + 紧凑信息密度。
+   ========================================================================== */
+
+:root {
+    --a3-accent: #6b9bff;
+    --a3-accent-2: #a473ff;
+    --a3-accent-soft: rgba(107, 155, 255, .16);
+    --a3-ok: #35cdb9;
+    --a3-warn: #e2b04a;
+    --a3-danger: #e06c75;
+    --a3-bg: #14161a;
+    --a3-bg-2: #1b1e24;
+    --a3-bg-3: #23272f;
+    --a3-line: #333842;
+    --a3-line-soft: #2a2e36;
+    --a3-text: #e7e9ee;
+    --a3-text-dim: #9aa3b0;
+    --a3-text-faint: #6d7784;
+    --a3-radius: 9px;
+    --a3-radius-sm: 6px;
+    --a3-shadow: 0 12px 34px rgba(0, 0, 0, .48);
+}
+
+/* ---------- 面板骨架 ---------- */
+.a3-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 0;
+    padding: 10px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius);
+    background: linear-gradient(180deg, var(--a3-bg-2), var(--a3-bg));
+    color: var(--a3-text);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.a3-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 22px;
+}
+
+.a3-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, var(--a3-accent), var(--a3-accent-2));
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: -.4px;
+}
+
+.a3-title {
+    flex: 0 1 auto;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    color: var(--a3-text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.a3-sub {
+    overflow: hidden;
+    color: var(--a3-text-faint);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.a3-spacer { flex: 1 1 auto; }
+
+.a3-badge {
+    padding: 1px 6px;
+    border: 1px solid rgba(107, 155, 255, .35);
+    border-radius: 999px;
+    background: var(--a3-accent-soft);
+    color: #bcd0ff;
+    font-size: 9.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ---------- 分组 ---------- */
+.a3-section {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding-top: 8px;
+    border-top: 1px solid var(--a3-line-soft);
+}
+
+.a3-section:first-of-type { border-top: 0; padding-top: 0; }
+
+.a3-section-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.a3-section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--a3-text-dim);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+}
+
+.a3-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--a3-accent), var(--a3-accent-2));
+}
+
+.a3-hint {
+    color: var(--a3-text-faint);
+    font-size: 10px;
+}
+
+/* ---------- 行 ---------- */
+.a3-row {
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.a3-row--wide { grid-template-columns: 78px minmax(0, 1fr); }
+
+.a3-row > .a3-label {
+    overflow: hidden;
+    color: var(--a3-text-dim);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.a3-row > .a3-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* ---------- 按钮 ---------- */
+.a3-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 24px;
+    padding: 3px 9px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg-3);
+    color: var(--a3-text);
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background .14s ease, border-color .14s ease, color .14s ease, transform .1s ease;
+}
+
+.a3-btn:hover { border-color: #4d607d; background: #2b3038; }
+.a3-btn:active { transform: translateY(1px); }
+.a3-btn:disabled { opacity: .45; cursor: not-allowed; }
+.a3-btn--ghost { border-color: transparent; background: transparent; color: var(--a3-text-dim); }
+.a3-btn--ghost:hover { border-color: var(--a3-line); background: var(--a3-bg-3); color: var(--a3-text); }
+.a3-btn--accent {
+    border-color: transparent;
+    background: linear-gradient(135deg, var(--a3-accent), var(--a3-accent-2));
+    color: #fff;
+    font-weight: 600;
+}
+.a3-btn--accent:hover { filter: brightness(1.08); }
+.a3-btn--icon { width: 24px; padding: 0; }
+
+/* ---------- 开关 ---------- */
+.a3-switch {
+    position: relative;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 16px;
+    border: 1px solid var(--a3-line);
+    border-radius: 999px;
+    background: var(--a3-bg);
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease;
+}
+
+.a3-switch::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--a3-text-faint);
+    transition: transform .16s ease, background .16s ease;
+}
+
+.a3-switch.is-on { border-color: transparent; background: linear-gradient(135deg, var(--a3-accent), var(--a3-accent-2)); }
+.a3-switch.is-on::after { transform: translateX(12px); background: #fff; }
+
+/* ---------- 下拉选择 ---------- */
+.a3-select {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    min-height: 24px;
+    padding: 3px 7px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg);
+    color: var(--a3-text);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .14s ease, background .14s ease;
+}
+
+.a3-select:hover { border-color: #4d607d; }
+.a3-select.is-open { border-color: var(--a3-accent); background: #191d24; }
+.a3-select.is-empty { color: var(--a3-text-faint); font-style: italic; }
+.a3-select > .a3-select-text {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.a3-select > .a3-caret { flex: 0 0 auto; color: var(--a3-text-faint); font-size: 9px; }
+
+/* ---------- 滑块 ---------- */
+.a3-slider {
+    flex: 1 1 auto;
+    min-width: 40px;
+    height: 16px;
+    accent-color: var(--a3-accent);
+    cursor: pointer;
+}
+
+.a3-number {
+    flex: 0 0 auto;
+    width: 42px;
+    min-height: 22px;
+    padding: 2px 4px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg);
+    color: var(--a3-text);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 悬浮面板（素材库 / 技能库） ---------- */
+.a3-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 12000;
+    background: rgba(6, 8, 12, .45);
+    backdrop-filter: blur(2px);
+}
+
+.a3-scrim--soft {
+    background: transparent;
+    backdrop-filter: none;
+}
+
+.a3-palette {
+    position: fixed;
+    z-index: 12001;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(600px, calc(100vh - 60px));
+    overflow: hidden;
+    border: 1px solid var(--a3-line);
+    border-radius: 12px;
+    background: linear-gradient(180deg, #1d2129, #15181d);
+    box-shadow: var(--a3-shadow);
+    color: var(--a3-text);
+    font-size: 12px;
+}
+
+.a3-palette-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 12px 9px;
+    border-bottom: 1px solid var(--a3-line-soft);
+}
+
+.a3-palette-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.a3-palette-side {
+    display: flex;
+    flex: 0 0 132px;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px;
+    overflow-y: auto;
+    border-right: 1px solid var(--a3-line-soft);
+}
+
+.a3-tab {
+    padding: 5px 8px;
+    border: 0;
+    border-radius: var(--a3-radius-sm);
+    background: transparent;
+    color: var(--a3-text-dim);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.a3-tab:hover { background: var(--a3-bg-3); color: var(--a3-text); }
+.a3-tab.is-active { background: var(--a3-accent-soft); color: #cfdcff; font-weight: 600; }
+
+.a3-palette-main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.a3-search-wrap { padding: 9px 10px 6px; }
+
+.a3-search {
+    width: 100%;
+    min-height: 28px;
+    padding: 4px 9px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg);
+    color: var(--a3-text);
+    font-size: 12px;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.a3-search:focus { outline: none; border-color: var(--a3-accent); }
+
+.a3-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 8px;
+    padding: 4px 10px 12px;
+    overflow-y: auto;
+    align-content: start;
+}
+
+.a3-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg-2);
+    color: var(--a3-text);
+    font-size: 10px;
+    text-align: left;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color .14s ease, transform .12s ease, background .14s ease;
+}
+
+.a3-card:hover { border-color: var(--a3-accent); background: #1d222b; transform: translateY(-1px); }
+
+.a3-thumb {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: 5px;
+    background: #0e1013;
+}
+
+.a3-thumb > img,
+.a3-thumb > video { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.a3-thumb-tag {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(8, 10, 14, .74);
+    color: #dfe6f2;
+    font-size: 8.5px;
+    font-weight: 600;
+}
+
+.a3-card-name {
+    overflow: hidden;
+    color: var(--a3-text-dim);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.a3-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 4px 10px 12px;
+    overflow-y: auto;
+}
+
+.a3-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid var(--a3-line-soft);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg-2);
+    color: var(--a3-text);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .14s ease, background .14s ease;
+}
+
+.a3-item:hover { border-color: var(--a3-accent); background: #1d222b; }
+.a3-item.is-on { border-color: var(--a3-accent); background: var(--a3-accent-soft); }
+
+.a3-item-main { flex: 1 1 auto; min-width: 0; }
+.a3-item-title { font-size: 12px; font-weight: 600; }
+.a3-item-desc {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--a3-text-faint);
+    font-size: 10.5px;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.a3-empty {
+    padding: 22px 10px;
+    color: var(--a3-text-faint);
+    font-size: 11px;
+    text-align: center;
+}
+
+.a3-palette-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--a3-line-soft);
+    background: rgba(10, 12, 16, .4);
+}
+
+/* ---------- 下拉菜单 ---------- */
+.a3-menu {
+    position: fixed;
+    z-index: 12002;
+    display: flex;
+    flex-direction: column;
+    width: 260px;
+    max-height: 320px;
+    overflow: hidden;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius);
+    background: #1b1f26;
+    box-shadow: var(--a3-shadow);
+    color: var(--a3-text);
+}
+
+.a3-menu-search { margin: 7px; }
+.a3-menu-list { display: flex; flex-direction: column; overflow-y: auto; padding: 0 5px 6px; }
+
+.a3-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 7px;
+    border-radius: 5px;
+    color: var(--a3-text-dim);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.a3-option:hover,
+.a3-option.is-active { background: var(--a3-accent-soft); color: #dbe6ff; }
+.a3-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a3-option-img {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    background: #0e1013;
+    object-fit: contain;
+}
+.a3-option-meta { flex: 0 0 auto; margin-left: auto; color: var(--a3-text-faint); font-size: 9.5px; }
+
+/* ---------- 提示条 ---------- */
+.a3-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 34px;
+    z-index: 12100;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 70vw;
+    padding: 8px 14px;
+    border: 1px solid var(--a3-line);
+    border-radius: 999px;
+    background: rgba(24, 28, 34, .96);
+    box-shadow: var(--a3-shadow);
+    color: var(--a3-text);
+    font-size: 12px;
+    transform: translateX(-50%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+}
+
+.a3-toast.is-on { opacity: 1; transform: translate(-50%, -4px); }
+.a3-toast-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--a3-accent), var(--a3-accent-2));
+}
+.a3-toast.is-ok .a3-toast-dot { background: var(--a3-ok); }
+.a3-toast.is-warn .a3-toast-dot { background: var(--a3-warn); }
+
+/* ---------- 编辑器附加按钮 ---------- */
+.h3-prompt-editor-tools .aicg3d-tool {
+    color: #b9c8e6;
+}
+.h3-prompt-editor-tools .aicg3d-tool:hover {
+    color: #fff;
+    border-color: var(--a3-accent);
+}
+
+/* ---------- 音频波形占位 ---------- */
+.a3-wave {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 48%;
+    height: 42%;
+}
+
+.a3-wave > i {
+    display: block;
+    width: 4px;
+    border-radius: 3px;
+    background: var(--a3-ok);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .08);
+}
+
+.a3-thumb:has(.a3-wave) { background: #10201d; }
+
+/* ---------- 加载器面板 ---------- */
+.a3-lora-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) 54px;
+    align-items: center;
+    gap: 6px;
+}
+
+.a3-lora-index {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    background: var(--a3-bg-3);
+    color: var(--a3-text-faint);
+    font-size: 9.5px;
+    font-weight: 700;
+}
+
+.a3-lora-row.is-on .a3-lora-index {
+    background: linear-gradient(135deg, var(--a3-accent), var(--a3-accent-2));
+    color: #fff;
+}
+
+.a3-lora-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.a3-lora-name {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.a3-lora-name > .a3-select { min-height: 22px; padding: 2px 6px; }
+
+.a3-lora-strength {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.a3-lora-row:not(.is-on) .a3-lora-body { opacity: .45; }
+
+.a3-lora-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.a3-lora-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.a3-lora-count {
+    min-width: 30px;
+    color: var(--a3-text-faint);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.a3-lora-preview {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    object-fit: cover;
+    background: #0e1013;
+}
+
+.a3-meter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--a3-text-faint);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+
+/* ---------- 模板分类胶囊（技能库 · 提示词模板页签） ---------- */
+.a3-toolbar {
+    flex: 0 0 auto;
+    padding: 0 10px 7px;
+}
+
+.a3-toolbar[hidden] { display: none; }
+
+.a3-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 82px;
+    overflow-y: auto;
+}
+
+.a3-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border: 1px solid var(--a3-line);
+    border-radius: 999px;
+    background: var(--a3-bg);
+    color: var(--a3-text-dim);
+    font-size: 10.5px;
+    font-family: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+
+.a3-chip:hover { border-color: var(--a3-accent); color: var(--a3-text); }
+
+.a3-chip.is-active {
+    border-color: var(--a3-accent);
+    background: var(--a3-accent-soft);
+    color: #cfdcff;
+    font-weight: 600;
+}
+
+.a3-chip-count {
+    padding: 0 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .08);
+    color: var(--a3-text-faint);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+}
+
+.a3-chip.is-active .a3-chip-count { color: #bcd0ff; }
+
+/* ---------- 模板卡片信息 ---------- */
+.a3-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+}
+
+.a3-tag {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(47, 143, 127, .18);
+    color: #7fd6c4;
+    font-size: 9.5px;
+}
+
+.a3-dim {
+    color: var(--a3-text-faint);
+    font-size: 9.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.a3-badge--preset {
+    border-color: rgba(47, 143, 127, .45);
+    background: rgba(47, 143, 127, .16);
+    color: #7fd6c4;
+}

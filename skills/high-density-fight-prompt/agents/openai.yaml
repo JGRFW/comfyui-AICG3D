@@ -1,0 +1,7 @@
+interface:
+  display_name: "高密度打斗导演"
+  short_description: "按参考图创作中文母稿和 H3 六段英文打斗提示词"
+  default_prompt: "使用 $high-density-fight-prompt，根据我上传的参考图生成一条 15 秒高密度连续打斗中文母稿，并附同一时间线的 MiniMax H3 Ref2VA 英文六段稿。"
+
+policy:
+  allow_implicit_invocation: true

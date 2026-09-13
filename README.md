@@ -272,6 +272,21 @@ CreateVideo         ->  合成 VIDEO
   「NO-REFERENCE OUTPUT RULE」：不得出现引用标签、`subject_definitions`、`retention_analysis`；
 - 提示词里写了引用（例如只引用 `图1`/`图2`/`图3`）时行为不变：只把被引用的素材送出去。
 
+## 鸣谢
+
+本插件的骨架、提示词引擎与提示词规范都不是我写的，来源说清楚比什么都重要：
+
+| 来源项目 | 作者 | 贡献 |
+|---|---|---|
+| `ComfyUI-MiniMaxH3-Easy`（MIT） | nkxx188 | 整个骨架：H3 主节点、素材加载器、渲染器，以及把几十个节点收敛成一个主节点的设计 |
+| `Goohai-MiniMax-H3_Integration`（GPL-3.0-or-later） | goohai（B站 孤海FOTO） | 提示词优化引擎（云端 API + 本地 GGUF 双引擎）与音视频潜空间解码 |
+| `MiniMax-AI/MiniMax-H3`（MiniMax H3 Community License） | MiniMax | H3 五种生成模式的提示词规范与官方风格技能 |
+| `comfyUI-llama-TE`（上游未附许可证） | tl2012tl | 本地推理与多轮对话的开源工作；**本版未包含其代码**，但开发中参考过它的设计 |
+| 中文 AI 创作社区的提示词合集 | 各原始作者 | `prompt_presets/` 的 144 个模板，整理自社区公开流传的文档合集 |
+
+完整鸣谢见 `ACKNOWLEDGEMENTS.md`，发布版文案见 `RELEASE.md`。
+把别人的代码说成自己的，比用别人的代码严重得多 —— 所以这一段单独写在这里。
+
 ## 开源许可
 
 本插件自有代码按 **GPL-3.0-or-later** 发布（因为合并了 GPL-3.0-or-later 的
@@ -282,6 +297,7 @@ CreateVideo         ->  合成 VIDEO
 | `ComfyUI-MiniMaxH3-Easy` | MIT | nkxx188 | https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy |
 | `Goohai-MiniMax-H3_Integration` | GPL-3.0-or-later | goohai | https://github.com/goohai/Goohai-MiniMax-H3_Integration |
 | MiniMax H3 官方提示词技能与方案 | MiniMax H3 Community License | MiniMax | https://github.com/MiniMax-AI/MiniMax-H3 |
+| `comfyUI-llama-TE`（已移除，未包含其代码） | 上游未附许可证 | tl2012tl | https://github.com/tl2012tl/comfyUI-llama-TE |
 
 - 许可证原文：`third_party/`
 - 逐项声明、修改说明与使用限制：`THIRD_PARTY_NOTICES.md`
@@ -297,7 +313,7 @@ CreateVideo         ->  合成 VIDEO
 提示词优化可以调用第三方 API（OpenAI / Gemini / OpenRouter / DashScope / SiliconFlow /
 RunningHub），需要你自备密钥；启用后提示词与所选附件素材会发送到对应服务。
 不配置密钥、使用本地 GGUF 模式时不会对外发送任何内容。完整列表见
-`THIRD_PARTY_NOTICES.md` 第 6 节。
+`THIRD_PARTY_NOTICES.md` 第 7 节。
 
 ## 安装
 

@@ -43,6 +43,7 @@ comfyui-AICG3D 做的事很简单：**把这三套合并成一套**，统一节�
 | [Goohai-MiniMax-H3_Integration](https://github.com/goohai/Goohai-MiniMax-H3_Integration) | goohai（B站 孤海FOTO） | GPL-3.0-or-later | **提示词优化引擎 + 音视频解码**。基本为原样使用：`h3goohai/` 里 5 个文件一字未改，只有 `prompt_optimizer.py`、`nodes.py` 与前端做了少量适配 |
 | [MiniMax-AI/MiniMax-H3](https://github.com/MiniMax-AI/MiniMax-H3) | MiniMax 官方 | MiniMax H3 Community License | **提示词规范与风格技能**。本插件做的是把 Agent 技能改造成 ComfyUI 节点可直接使用的方案 |
 | 中文 AI 创作社区的提示词合集 | 各原始作者 | 未标注 | `prompt_presets/` 的 144 个模板，整理自社区公开流传的文档合集 |
+| [comfyUI-llama-TE](https://github.com/tl2012tl/comfyUI-llama-TE) | tl2012tl | 上游未附许可证 | **已移除**。早期版本合并过它的本地 LLM 节点，因上游没有任何授权声明，本版把这部分代码整体删除；参考过的设计保留在下面的鸣谢里 |
 
 逐文件的"原样复制 / 已修改"清单见
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#逐文件修改清单)，

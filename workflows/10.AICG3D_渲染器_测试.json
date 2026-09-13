@@ -410,6 +410,13 @@
       ],
       "outputs": [
         {
+          "label": "Model",
+          "localized_name": "Model",
+          "name": "model",
+          "type": "MODEL",
+          "links": null
+        },
+        {
           "label": "H3 Context",
           "localized_name": "H3 Context",
           "name": "h3_context",
@@ -804,7 +811,7 @@
     [
       3,
       2,
-      0,
+      1,
       303,
       0,
       "MINIMAX_H3_CONTEXT"

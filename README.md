@@ -171,14 +171,20 @@ Vue 渲染器（`computeProcessedWidgets()` → `isWidgetVisible()`）只看 `wi
 不再出现 `comfyui-easyuse-contextmenu-model`。旧 Canvas 渲染器回归正常。
 ### 11. 一条龙出片：AICG-渲染器（高级）+ 单条输出线
 
-**主节点收敛成一条线**：`MiniMax H3 Aicg`（以及 `Context Segments` / `Selected Video Context`）
-现在只有一个输出 `h3_context`。采样需要的 `model` 跟着 context 一起走，
-画布上不再需要额外拉一条 `MODEL` 线。
+**主节点输出与上游保持一致**：`MiniMax H3 Aicg`（以及 `Context Segments` /
+`Selected Video Context`）有 **2 个输出点** —— 第 1 个 `model`、第 2 个 `h3_context`，
+和上游 `ComfyUI-MiniMaxH3-Easy` 完全相同。
+
+上游那批二采工作流（`2.`~`7.`）都是从这个 `model` 输出取模型去接
+`ModelAttentionBackend` / `BasicScheduler` / `LoraLoaderModelOnly`。
+早先把这个输出删掉后，老工作流读到的第 1 个输出变成了 `h3_context`，
+校验报 `received_type(MINIMAX_H3_CONTEXT) mismatch input_type(MODEL)` 和
+`tuple index out of range`，整条二采链路直接跑不起来；现已恢复。
 
 - `MiniMaxH3Context` 新增 `model` 字段，三处构造点都会回填。
 - `MiniMax H3 Aicg Output` 末尾新增 `model` 输出：需要走原生链路
-  （BasicGuider / SamplerCustomAdvanced / VAEDecode …）时，从它取 model 即可，
-  原来的 5 个输出位置不变，老工作流不必重连。
+  （BasicGuider / SamplerCustomAdvanced / VAEDecode …）时，从它取 model 也可以，
+  原来的 6 个输出位置不变，老工作流不必重连。
 - `Segment Sample` / `Sample Setup` / `Segment Refine` / `Selected Video Refine`
   的 `model` 输入改成**可选**：接了就优先用它，没接就自动用 `h3_context.model`。
 

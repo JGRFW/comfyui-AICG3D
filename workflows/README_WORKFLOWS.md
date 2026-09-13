@@ -14,6 +14,8 @@
 
 也可以在 ComfyUI Manager 中搜索插件名称安装。安装或更新后请重启 ComfyUI。
 
+`3.MiniMax_H3_Easy_Selected_Video_Refine.json` 里上游自带的 `Fast Groups Bypasser (rgthree)` 分组开关节点已移除：新版 rgthree 不再提供这个节点，留着只会报「缺失节点」；其余连线与参数一律未改，需要分组开关时自己拖一个 `Fast Groups Muter` 之类的节点即可。
+
 ### 模型与资源
 
 工作流需要的插件、模型和相关资源：
@@ -57,13 +59,14 @@
 
 `MiniMax H3 Aicg Loader` → `MiniMax H3 Aicg`（参考生视频）→ **`AICG-渲染器（高级）`** → `SaveVideo`
 
-`MiniMax H3 Aicg` 只有一条 `H3 Context` 输出，直接进渲染器；渲染器内部完成
+`MiniMax H3 Aicg` 的 `H3 Context` 输出直接进渲染器；渲染器内部完成
 采样 + 视频/音频解码 + 合成，只输出一条 `VIDEO`，接原生 `SaveVideo` 即可出片。
+主节点第 1 个输出 `Model` 是给上游老工作流（`2.`~`7.`）用的，这条链路不需要它。
 旁支 `AICG3D 技能加载器` → `ShowText` 用于确认技能库正文。
 
 测试要点：
 
-- 主节点应该只有 **1 个输出点**（`H3 Context`），不再有 `Model` 输出。
+- 主节点有 **2 个输出点**：第 1 个 `Model`、第 2 个 `H3 Context`（与上游 `ComfyUI-MiniMaxH3-Easy` 一致，二采工作流靠它取模型）。本工作流只用 `H3 Context`，`Model` 悬空不影响运行。
 - 媒体包里放了 `01.png`、`02.png`、`03.png` 三张素材，提示词只引用了
   `<Picture 1>` 和 `<Picture 3>`。点一次 `✦` 优化：下发给优化器的素材应该只有 2 张，
   优化结果里不应该出现 `<Picture 2>`。
@@ -112,6 +115,8 @@ Before using any workflow in this folder, install the required custom nodes and 
 
 You can also install them by searching for their names in ComfyUI Manager. Restart ComfyUI after installing or updating custom nodes.
 
+The upstream `Fast Groups Bypasser (rgthree)` group-toggle node has been removed from `3.MiniMax_H3_Easy_Selected_Video_Refine.json`: recent rgthree releases no longer ship that node, so keeping it only produced a "missing node types" warning. Every other link and setting is untouched; add a `Fast Groups Muter`-style node yourself if you want group toggles.
+
 ### Models and assets
 
 The plugins, models, and related assets used by the workflows are available here:
@@ -154,13 +159,13 @@ Verifies the shortest chain built around the single output line and the new rend
 
 `MiniMax H3 Aicg Loader` -> `MiniMax H3 Aicg` (Reference-to-video) -> **`AICG Render (Advanced)`** -> `SaveVideo`
 
-`MiniMax H3 Aicg` exposes only one output (`H3 Context`) which feeds the render node directly;
+`MiniMax H3 Aicg` feeds its `H3 Context` output straight into the render node; the first `Model` output stays for the upstream workflows (`2.`-`7.`) and is not needed here;
 the render node samples, decodes video/audio, and muxes them into a single `VIDEO` output that
 connects to the native `SaveVideo`. A side branch runs `AICG3D Skill Loader` into `ShowText`.
 
 What to check:
 
-- The main node must show exactly one output dot (`H3 Context`) and no `Model` output.
+- The main node shows two output dots: `Model` (1st) and `H3 Context` (2nd), matching upstream `ComfyUI-MiniMaxH3-Easy` (the second-pass workflows take the model from the first one). This workflow only uses `H3 Context`; leaving `Model` unconnected is fine.
 - The Media Loader holds `01.png`, `02.png`, and `03.png`, while the prompt references only
   `<Picture 1>` and `<Picture 3>`. Press `+`/`✦` to optimize: only two assets should be sent and
   `<Picture 2>` must not appear in the optimized prompt.

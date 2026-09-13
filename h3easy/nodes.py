@@ -4372,8 +4372,8 @@ def _validate_context_media_library(items: list[_MediaInput]) -> None:
 class MiniMaxH3Easy:
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "generate"
-    RETURN_TYPES = ("MINIMAX_H3_CONTEXT",)
-    RETURN_NAMES = ("h3_context",)
+    RETURN_TYPES = ("MODEL", "MINIMAX_H3_CONTEXT")
+    RETURN_NAMES = ("model", "h3_context")
     DESCRIPTION = "One MiniMax H3 node for text, image, reference-video, and digital-human workflows."
 
     @classmethod
@@ -4531,7 +4531,7 @@ class MiniMaxH3Easy:
             keyframe_sources=keyframe_sources,
             source_audio=source_audio if mode == MODE_DIGITAL_HUMAN else None,
         )
-        result = (context,)
+        result = (context.model, context)
         if optimization.marker:
             return {
                 "ui": {
@@ -4555,8 +4555,8 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
 
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "generate"
-    RETURN_TYPES = ("MINIMAX_H3_CONTEXT",)
-    RETURN_NAMES = ("h3_context",)
+    RETURN_TYPES = ("MODEL", "MINIMAX_H3_CONTEXT")
+    RETURN_NAMES = ("model", "h3_context")
     DESCRIPTION = (
         "Prepare a custom one- or multi-segment plan from a selected candidate VIDEO. "
         "Connect the H3 Context to Segment Sample, then Segment Refine and Segment Decode."
@@ -4738,7 +4738,7 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
             source_audio=source_audio,
             selected_video=selected_video,
         )
-        result = (context,)
+        result = (context.model, context)
         if optimization.marker:
             return {
                 "ui": {
@@ -4755,8 +4755,8 @@ class MiniMaxH3EasyContextSegments:
 
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "generate"
-    RETURN_TYPES = ("MINIMAX_H3_CONTEXT",)
-    RETURN_NAMES = ("h3_context",)
+    RETURN_TYPES = ("MODEL", "MINIMAX_H3_CONTEXT")
+    RETURN_NAMES = ("model", "h3_context")
     DESCRIPTION = (
         "Prepare a Context Segment plan for MiniMax H3. Select the audio mode; Digital Human "
         "uses one Media audio track as a locked external driver, or falls back to normal "
@@ -4906,7 +4906,7 @@ class MiniMaxH3EasyContextSegments:
             segment_plan=plan,
             source_audio=source_audio,
         )
-        return (context,)
+        return (context.model, context)
 
     @classmethod
     def generate(cls, h3_bundle, mode, audio_mode, prompt, resolution, aspect_ratio, width, height, seconds, segment_seconds, context_length, continuity_mode, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, context_prompt_optimizer_mode, context_prompt_optimizer_concurrency, **kwargs):

@@ -1,3 +1,5 @@
+<img width="1591" height="585" alt="image" src="https://github.com/user-attachments/assets/a0073ab0-ed68-43b6-a866-ce80f8601e16" />
+
 # comfyui-AICG3D
 
 基于 MiniMax H3 Easy 优化合并的 ComfyUI 插件，加入统一的素材、技能与加载器界面。

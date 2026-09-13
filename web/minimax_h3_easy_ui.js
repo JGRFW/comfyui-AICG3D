@@ -167,6 +167,8 @@ const TEXT = {
     localModelEmpty: ZH_BROWSER ? "\u672a\u5728 models/llm \u4e2d\u627e\u5230\u89c6\u89c9\u6a21\u578b" : "No vision model found in models/llm",
     localModelFailed: ZH_BROWSER ? "\u672c\u5730\u6a21\u578b\u5217\u8868\u8bfb\u53d6\u5931\u8d25" : "Unable to read local models",
     localMmproj: ZH_BROWSER ? "\u89c6\u89c9\u6295\u5f71 (mmproj)" : "Vision projector (mmproj)",
+    localMmprojAuto: ZH_BROWSER ? "\u81ea\u52a8\u5339\u914d" : "Auto-detect",
+    localMmprojAutoMissing: ZH_BROWSER ? "\u672a\u81ea\u52a8\u5339\u914d\u5230\uff0c\u8bf7\u5728\u4e0b\u65b9\u624b\u52a8\u9009\u62e9" : "No auto match - pick one manually below",
     localDevice: ZH_BROWSER ? "\u672c\u5730\u8bbe\u5907" : "Local device",
     localDepsMissing: ZH_BROWSER ? "\u7f3a\u5c11\u4f9d\u8d56\uff1a" : "Missing dependencies: ",
     outputLanguage: ZH_BROWSER ? "\u8f93\u51fa\u8bed\u8a00" : "Output language",
@@ -4788,6 +4790,7 @@ async function loadPromptOptimizerLocalModels({ force = false } = {}) {
         if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
         promptOptimizerLocalModelsCache = {
             models: Array.isArray(data.models) ? data.models : [],
+            mmprojFiles: Array.isArray(data.mmproj_files) ? data.mmproj_files : [],
             missingDependencies: Array.isArray(data.missing_dependencies) ? data.missing_dependencies : [],
         };
         return promptOptimizerLocalModelsCache;
@@ -5269,6 +5272,7 @@ function buildPromptOptimizerSettingsDialog(node) {
     localDeps.className = "h3-optimizer-settings-note";
     localDeps.hidden = true;
     let localModels = [];
+    let localMmprojFiles = [];
     const outputLanguage = makePromptOptimizerChoice(
         promptOptimizerSettingsCache.output_language,
         OPTION_DEFS.prompt_optimizer_output_language,
@@ -5279,15 +5283,21 @@ function buildPromptOptimizerSettingsDialog(node) {
     const syncMmprojRow = () => {
         const selected = localModels.find((item) => String(item?.relative_path || "") === localModelSelect.value);
         const candidates = Array.isArray(selected?.mmproj_candidates) ? selected.mmproj_candidates : [];
-        const required = candidates.length > 1 && engineSelect.value === PROMPT_OPTIMIZER_ENGINE_LOCAL;
-        mmprojRow.hidden = !required;
-        if (!required) return;
+        const local = engineSelect.value === PROMPT_OPTIMIZER_ENGINE_LOCAL;
+        mmprojRow.hidden = !local || String(selected?.format || "") !== "gguf";
+        if (mmprojRow.hidden) return;
         const defs = {};
-        for (const candidate of candidates) defs[String(candidate)] = String(candidate);
+        defs[""] = candidates.length ? TEXT.localMmprojAuto : TEXT.localMmprojAutoMissing;
+        for (const candidate of candidates) defs[String(candidate)] = `\u2605 ${String(candidate)}`;
+        for (const file of localMmprojFiles) {
+            const key = String(file || "");
+            if (key && !(key in defs)) defs[key] = key;
+        }
         mmprojSelect.setOptions(defs, promptOptimizerSettingsCache.local_mmproj);
     };
     const applyLocalModels = (payload) => {
         localModels = Array.isArray(payload?.models) ? payload.models : [];
+        localMmprojFiles = Array.isArray(payload?.mmprojFiles) ? payload.mmprojFiles : [];
         const defs = {};
         for (const item of localModels) {
             const value = String(item?.relative_path || item?.name || "");

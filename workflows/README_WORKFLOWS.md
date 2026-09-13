@@ -4,6 +4,33 @@
 
 使用本文件夹中的工作流前，请先安装所需插件，并下载对应模型。
 
+### 工作流总览
+
+| # | 文件 | 干什么用 | 关键链路 | 主要模型 / LoRA | 额外依赖 |
+|---|---|---|---|---|---|
+| 1 | `1.MiniMax_H3_Easy.json` | 基础示例：文生视频 / 图生或首尾帧 / 参考生视频的最短链路 | 加载器 → 主节点 → 输出 → 外挂 LoRA → 原生采样 → 视频/音频解码 → 合成 | FL2VA int8、Qwen3VL 文本编码、video/audio VAE、Turbo 8step LoRA | 无 |
+| 2 | `2.MiniMax_H3_Easy_Pass2.json` | **二采放大（像素级）**：一采出片 → 解码成帧 → 放大 → 重新编码成 latent 再采一遍；节点最多、最吃显存 | 主节点 → 输出 → 分辨率/宽高比 → 图像缩放 → VAE 编码 → 二采条件 → 第二套采样 → 合成 | 一采 FL2VA int8 + 二采 W4A8、taeh3 预览 VAE、Turbo LoRA | KJNodes、Easy-Use、Memory Cleanup |
+| 3 | `3.MiniMax_H3_Easy_Selected_Video_Refine.json` | **已选视频分段二采**：挑一条已经生成好的视频，按时间/帧切开逐段二采 | 已选视频上下文 → 分段采样 → 分段二采 → 分段解码 | Ref2VA pruned int8、Ref2V Turbo 4step LoRA、3D latent 放大器 | 无 |
+| 4 | `4.MiniMax_H3_Easy_Context_Segments.json` | 上下文分段基础版：提示词用单独一行 `---` 切段，一次采样出一段连续长视频 | 素材库 + 上下文分段 → 分段采样 → 分段解码 | FL2VA int8、FL2V Turbo 4step LoRA | 无 |
+| 5 | `5.MiniMax_H3_Easy_Context_Segments_Latent_Refine.json` | 上下文分段 + **latent 二采**：复用一采模型，只多加载 3D latent 放大器，最省显存的二采 | 上下文分段 → 一采分段 → 分段二采（`latent_upscale`）→ 分段解码 | Ref2VA int8、3D latent 放大器、Ref2V Turbo LoRA | 无 |
+| 6 | `6.MiniMax_H3_Easy_Context_Segments_Pixel_Refine.json` | 上下文分段 + **像素二采**：二采可走独立模型和目标分辨率，画质上限最高 | 上下文分段 → 一采分段 → 分段二采（`pixel_resize`）→ 分段解码 | FL2VA pruned int8、Ref2V Turbo LoRA、3D latent 放大器 | 无 |
+| 7 | `7.MiniMax_H3_Easy_Context_Segments_Control.json` | 上下文分段 + **逐段控制**：公共输入只接一次，3 个分段步骤串起来，可只重跑第 N 段 | 上下文分段 → 采样设置 → 分段步骤 ×3 → 分段汇总 → 分段解码 | FL2VA int8、FL2V Turbo 4step LoRA | 无 |
+| 8 | `8.AICG3D_Smoke_Test.json` | 插件自检：验证加载器 4 个 LoRA 槽、主节点、素材库、技能库 | 加载器（4 槽）→ 主节点 → 输出 → 原生采样 → AV Decode T8 → VHS 合成 | 合并版 hybrid int8、Qwen3VL、video/audio VAE、Turbo 4step + 写实 LoRA | VHS、pysssss、T8 解码插件 |
+| 9 | `9.AICG3D_合并采样器_测试.json` | 验证 **AICG-采样器（高级）**：原生五个采样节点合并成一个 | 加载器 → 主节点 → AICG-采样器（高级）→ 解码 → 合成 | 同 8 | VHS、pysssss |
+| 10 | `10.AICG3D_渲染器_测试.json` | 验证 **AICG-渲染器（高级）**：主节点一条线到底直接出片（只有 7 个节点） | 加载器 → 主节点 → 渲染器（内部完成采样+解码+合成）→ 保存视频 | 同 8 | pysssss（ShowText 旁支） |
+| 11 | `11.AICG3D_测试样板.json` | 上手样板：提示词模板 + 技能库 + 渲染器整套串起来 | 提示词模板 → 主节点 → 渲染器 → 保存视频；旁支技能库 | 同 8 | pysssss |
+
+**怎么挑**：
+
+- 先跑通、快点看到画面：`11`（上手样板）→ `10`（一条龙渲染）。
+- 做长视频 / 多镜头连续：`4`（基础分段）→ `7`（要逐段重跑）→ `5`（省显存二采）→ `6`（画质优先二采）。
+- 已经有满意的成片、只想挑几段放大：`3`。
+- 单条短片整体二采放大：`2`。
+- `8` / `9` 是插件自检用的，平时不用跑。
+
+> 二采（`3` / `5` / `6` / `2`）需要额外的二采模型：`latent_upscale` 模式要 3D latent 放大器，
+> `pixel_resize` 模式要第二套 H3 模型或目标分辨率；模型文件按工作流里的加载器选择为准。
+
 ### 可能需要安装的插件
 
 - [ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy)
@@ -104,6 +131,34 @@
 ## English
 
 Before using any workflow in this folder, install the required custom nodes and download the models used by that workflow.
+
+### Workflow overview
+
+| # | File | What it does | Key chain | Main models / LoRAs | Extra nodes |
+|---|---|---|---|---|---|
+| 1 | `1.MiniMax_H3_Easy.json` | Baseline sample: shortest text-to-video / image / reference-to-video chain | Loader -> main node -> Output -> external LoRA -> native sampling -> video/audio decode -> mux | FL2VA int8, Qwen3VL text encoder, video/audio VAE, Turbo 8-step LoRA | none |
+| 2 | `2.MiniMax_H3_Easy_Pass2.json` | **Pixel-level second pass**: first pass -> decode to frames -> resize -> encode back to latent -> second pass; heaviest graph | main node -> Output -> resolution/aspect -> image resize -> VAE encode -> second-pass conditioning -> second sampling -> mux | first-pass FL2VA int8 + second-pass W4A8, taeh3 preview VAE, Turbo LoRA | KJNodes, Easy-Use, Memory Cleanup |
+| 3 | `3.MiniMax_H3_Easy_Selected_Video_Refine.json` | **Refine a selected video**: pick an already rendered clip, cut it into segments and refine segment by segment | selected-video context -> segment render -> segment refine -> segment decode | Ref2VA pruned int8, Ref2V Turbo 4-step LoRA, 3D latent upscaler | none |
+| 4 | `4.MiniMax_H3_Easy_Context_Segments.json` | Context-segment baseline: split the prompt with a standalone `---` line and sample one continuous long clip | media loader + context segments -> segment render -> segment decode | FL2VA int8, FL2V Turbo 4-step LoRA | none |
+| 5 | `5.MiniMax_H3_Easy_Context_Segments_Latent_Refine.json` | Context segments + **latent second pass**: reuse the first-pass model, only add the 3D latent upscaler (lowest VRAM) | context segments -> first pass -> segment refine (`latent_upscale`) -> segment decode | Ref2VA int8, 3D latent upscaler, Ref2V Turbo LoRA | none |
+| 6 | `6.MiniMax_H3_Easy_Context_Segments_Pixel_Refine.json` | Context segments + **pixel second pass**: optional separate model and target resolution, best quality ceiling | context segments -> first pass -> segment refine (`pixel_resize`) -> segment decode | FL2VA pruned int8, Ref2V Turbo LoRA, 3D latent upscaler | none |
+| 7 | `7.MiniMax_H3_Easy_Context_Segments_Control.json` | Context segments + **per-segment control**: shared inputs connected once, three segment steps chained, rerun segment N only | context segments -> sample setup -> segment step x3 -> segment collect -> segment decode | FL2VA int8, FL2V Turbo 4-step LoRA | none |
+| 8 | `8.AICG3D_Smoke_Test.json` | Plugin self-test: 4 LoRA slots, main node, media library, skill library | loader (4 slots) -> main node -> Output -> native sampling -> AV Decode T8 -> VHS combine | merged hybrid int8, Qwen3VL, video/audio VAE, Turbo 4-step + realism LoRA | VHS, pysssss, T8 decode plugin |
+| 9 | `9.AICG3D_合并采样器_测试.json` | Verifies **AICG Sampler (Advanced)**: five native sampling nodes collapsed into one | loader -> main node -> AICG sampler -> decode -> mux | same as 8 | VHS, pysssss |
+| 10 | `10.AICG3D_渲染器_测试.json` | Verifies **AICG Render (Advanced)**: one wire from the main node to the file (7 nodes) | loader -> main node -> render node (sampling + decode + mux inside) -> SaveVideo | same as 8 | pysssss (ShowText side branch) |
+| 11 | `11.AICG3D_测试样板.json` | Starter sample: prompt preset + skill library + render node together | prompt preset -> main node -> render node -> SaveVideo; skill side branch | same as 8 | pysssss |
+
+**Which one to pick**
+
+- Get something on screen fast: `11` (starter) then `10` (one-wire render).
+- Long, multi-shot continuous video: `4` first, then `7` for per-segment reruns, `5` for a low-VRAM second pass, `6` when quality matters most.
+- You already have a clip you like and only want to upscale parts of it: `3`.
+- Whole-clip second pass for a short video: `2`.
+- `8` / `9` are plugin self-tests; you normally do not run them.
+
+> The second-pass workflows (`2` / `3` / `5` / `6`) need extra models: `latent_upscale` mode
+> requires a 3D latent upscaler, `pixel_resize` mode uses a second H3 model or a target
+> resolution. Select the files matching the loaders inside each workflow.
 
 ### Required custom nodes
 

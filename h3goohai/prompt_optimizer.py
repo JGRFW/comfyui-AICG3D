@@ -177,9 +177,25 @@ def _matching_mmproj(model_path: Path) -> list[Path]:
     # First keep only the same model/version/size, then choose the closest name.
     signature = _gguf_model_signature(model_path.name)
     compatible = [path for path in projectors if signature and _gguf_model_signature(path.name) == signature]
-    pool = compatible or projectors
+    if compatible:
+        return sorted(compatible, key=lambda path: path.name.lower())
+    # Publisher bundles rename projectors by hand ("Qwe3.8-mmproj-BF16.gguf" for
+    # "Qwen3.8-27B-UD-IQ4_XS.gguf"), which no name heuristic can match. A
+    # projector stored next to the model is still the best guess, and the
+    # settings dialog lets the user override the choice.
+    sibling = [path for path in projectors if path.parent == model_path.parent]
+    if sibling:
+        ratios = {
+            path: SequenceMatcher(None, identity, _gguf_identity(path.name, projector=True)).ratio()
+            for path in sibling
+        }
+        best_ratio = max(ratios.values())
+        return sorted(
+            [path for path, ratio in ratios.items() if ratio == best_ratio],
+            key=lambda path: path.name.lower(),
+        )
     scored = []
-    for path in pool:
+    for path in projectors:
         candidate = _gguf_identity(path.name, projector=True)
         containment = 1 if identity in candidate or candidate in identity else 0
         ratio = SequenceMatcher(None, identity, candidate).ratio()
@@ -187,8 +203,8 @@ def _matching_mmproj(model_path: Path) -> list[Path]:
     if not scored:
         return []
     best = max(score for score, _path in scored)
-    # If no family/size match exists, stay conservative and reject weak names.
-    if not compatible and best[0] == 0 and best[1] < 0.72:
+    # Stay conservative and reject weak names when nothing else matched.
+    if best[0] == 0 and best[1] < 0.72:
         return []
     return sorted(
         [path for score, path in scored if score == best],
@@ -203,6 +219,17 @@ def _gguf_handler_name(path: Path) -> str | None:
     if "qwen3-vl" in name or "qwen3vl" in name:
         return "qwen3vl"
     return None
+
+
+def _mmproj_options() -> list[str]:
+    """Every projector file under models/llm, for the manual picker in the settings dialog."""
+    root = _llm_root()
+    if not root.is_dir():
+        return []
+    return sorted(
+        {path.relative_to(root).as_posix() for path in root.rglob("*.gguf") if _is_mmproj(path)},
+        key=lambda item: item.lower(),
+    )
 
 
 def _scan_visual_models() -> list[dict]:
@@ -440,16 +467,19 @@ def _selected_mmproj(config: dict, model: dict) -> Path:
     candidates = list(model.get("mmproj_candidates") or [])
     selected = str(config.get("local_mmproj") or "").strip()
     if selected:
-        if selected not in candidates:
-            raise ValueError("已选择的mmproj与当前GGUF模型不匹配，请重新选择")
-        path = (_llm_root() / selected).resolve()
-        if not path.is_file() or _llm_root().resolve() not in path.parents:
+        # 手动选择优先：文件名匹配（mmproj 自动识别）本来就常常靠不住，
+        # 让用户自己指定的版本直接生效，只校验文件确实存在且是投影模型。
+        root = _llm_root().resolve()
+        path = (root / selected).resolve()
+        if not path.is_file() or (path != root and root not in path.parents):
             raise ValueError("已选择的mmproj文件不存在")
+        if not _is_mmproj(path):
+            raise ValueError("已选择的文件不是mmproj视觉投影模型，请重新选择")
         return path
     if not candidates:
-        raise ValueError("未找到与当前GGUF模型匹配的mmproj视觉模型")
+        raise ValueError("未找到与当前GGUF模型匹配的mmproj视觉模型，请在提示词优化设置里手动选择「视觉投影 (mmproj)」")
     if len(candidates) > 1:
-        raise ValueError("检测到多个匹配的mmproj视觉模型，请在配置页面选择一个版本")
+        raise ValueError("检测到多个匹配的mmproj视觉模型，请在提示词优化设置里选择一个版本")
     return (_llm_root() / candidates[0]).resolve()
 
 
@@ -1549,6 +1579,7 @@ def gguf_dependency_status() -> dict:
 async def get_prompt_optimizer_config(_request):
     config = _public_config(DEFAULT_CONFIG)
     config["models"] = _scan_visual_models()
+    config["mmproj_files"] = _mmproj_options()
     config["missing_dependencies"] = _local_missing_dependencies()
     config["gguf_dependency"] = _gguf_dependency_status()
     return web.json_response(config)
@@ -1563,6 +1594,7 @@ def _local_missing_dependencies() -> list[str]:
 async def list_prompt_optimizer_models(_request):
     return web.json_response({
         "models": _scan_visual_models(),
+        "mmproj_files": _mmproj_options(),
         "missing_dependencies": _local_missing_dependencies(),
         "gguf_dependency": _gguf_dependency_status(),
     })

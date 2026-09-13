@@ -9,8 +9,12 @@
 | `ComfyUI-MiniMaxH3-Easy`（nkxx188） | MIT | H3 主节点、素材加载器、渲染器 |
 | `Goohai-MiniMax-H3_Integration`（goohai） | GPL-3.0-or-later | 提示词优化引擎、AV 潜空间解码 |
 | 本项目新增 | GPL-3.0-or-later | 统一加载器 / 素材库 / 技能库面板、AICG-采样器、提示词模板库 |
+| `comfyUI-llama-TE`（tl2012tl） | 上游**未附许可证** | **未合并**：早期版本曾合并它的本地 LLM 节点，因上游无授权已整体移除，本仓库不含其代码 |
 
 第三方许可证原文在 `third_party/`，逐项声明见 `THIRD_PARTY_NOTICES.md`。
+
+`comfyUI-llama-TE` 已移除的说明见下方「鸣谢」、`ACKNOWLEDGEMENTS.md` 第 3 节与
+`THIRD_PARTY_NOTICES.md` 第 6 节；提示词优化的本地模型能力由插件自带的 GGUF 引擎提供，不受影响。
 
 节点 ID 全部保持原样（显示名里的 `Easy` 换成 `Aicg`），旧工作流导入后不需要重新接线。
 

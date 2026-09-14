@@ -284,6 +284,23 @@ CreateVideo         ->  合成 VIDEO
   「NO-REFERENCE OUTPUT RULE」：不得出现引用标签、`subject_definitions`、`retention_analysis`；
 - 提示词里写了引用（例如只引用 `图1`/`图2`/`图3`）时行为不变：只把被引用的素材送出去。
 
+### 16. 装了 ComfyUI-MiniMaxH3-Easy 之后，加载器节点变成空白
+
+**症状**：`MiniMax H3 Aicg 加载器` 只剩标题和 `h3_bundle` 输出点，模型、编码器、VAE 全都不见了。
+
+**原因**：两个插件的 Python 节点类都叫 `MiniMaxH3EasyLoader`，ComfyUI 只会保留其中一个。
+上游那套只有 5 个控件（没有 LoRA 槽位），而界面脚本已经按本插件的实现把原生控件隐藏了 ——
+"面板建不出来"叠加"原生控件已被隐藏"，结果就是一个空白节点。
+
+**修复**：
+
+- 面板只把 4 个核心控件当硬要求；一旦缺控件就**不再隐藏任何原生控件**，直接退回原生下拉；
+- 面板初始化或挂载失败时，已被隐藏的原生控件会**自动还原**（`markWidgetVisible`）；
+- 面板被其他脚本整表重排 `node.widgets` 摘掉后会自动装回；
+- 启动时扫描 `custom_nodes`，发现同类节点包会在控制台打一段中英文提示。
+
+**建议**：两个插件二选一，把不用的那个目录改名成 `xxx.disabled`，再重启 ComfyUI。
+
 ## 鸣谢
 
 本插件的骨架、提示词引擎与提示词规范都不是我写的，来源说清楚比什么都重要：
@@ -330,6 +347,9 @@ RunningHub），需要你自备密钥；启用后提示词与所选附件素材�
 ## 安装
 
 放到 `ComfyUI/custom_nodes/comfyui-AICG3D`，重启 ComfyUI 即可。
+
+本插件已经内置了上游 `ComfyUI-MiniMaxH3-Easy` 的节点，**不要再装同名插件**：
+两边节点类同名，同时启用会让加载器面板变成空白（见下文第 16 条）。
 
 ## 目录
 

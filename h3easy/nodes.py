@@ -25,6 +25,7 @@ import hashlib
 import base64
 import asyncio
 import json
+import io
 import mimetypes
 import tempfile
 import urllib.parse
@@ -44,6 +45,12 @@ import torchaudio
 import requests
 import psutil
 
+try:
+    from PIL import Image, ImageOps
+except Exception:  # Pillow is optional for the host, but normally bundled with ComfyUI.
+    Image = None
+    ImageOps = None
+
 import comfy.sample
 import comfy.samplers
 import comfy.utils
@@ -60,6 +67,12 @@ try:
 except ImportError:
     MiniMaxH3EasyLatentUpscaler3D = None
     scan_latent_upscaler_models = None
+from .sampling_strategies import (
+    SAMPLING_PLAN_TYPE,
+    SELFLIFT_KIND,
+    MiniMaxH3SamplingPlan,
+    sample_with_plan as sample_with_sampling_plan,
+)
 
 
 MODE_IMAGE = "image"
@@ -150,6 +163,15 @@ MAX_AUDIOS = 3
 MEDIA_SPLITTER_MAX_IMAGES = 27
 MEDIA_SPLITTER_MAX_VIDEOS = 9
 MEDIA_SPLITTER_MAX_AUDIOS = 9
+# How Media Splitter should handle a requested output for which the bundle
+# does not contain a corresponding resource.  The original block behavior is
+# kept as the default for existing workflows; returning None is opt-in.
+MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL = "block_missing"
+MEDIA_SPLITTER_EMPTY_OUTPUT_ALLOW_NONE = "allow_none"
+MEDIA_SPLITTER_EMPTY_OUTPUT_MODES = (
+    MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL,
+    MEDIA_SPLITTER_EMPTY_OUTPUT_ALLOW_NONE,
+)
 MEDIA_BUNDLE_TYPE = "MINIMAX_H3_MEDIA_BUNDLE"
 SEGMENT_RESULT_TYPE = "MINIMAX_H3_SEGMENTS"
 SEGMENT_STEP_TYPE = "MINIMAX_H3_SEGMENT_STEP"
@@ -175,6 +197,12 @@ SEGMENT_CONTEXT_GUIDE_FRAME_GRID = (5, 22, 39, 56, 73)
 SEGMENT_CONTEXT_AV_FRAME_GRID = (39, 90, 141)
 SEGMENT_CONTEXT_FRAME_GRID = SEGMENT_CONTEXT_GUIDE_FRAME_GRID
 SEGMENT_FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
+# The validated H3 Motion Context latent-taper recipe.  These values are
+# intentionally internal: context noise is applied only when a segment has a
+# visual reference, so ordinary text-only continuation remains untouched.
+SEGMENT_CONTEXT_NOISE_ALPHA = 0.45
+SEGMENT_CONTEXT_NOISE_ALPHA_END = 0.10
+SEGMENT_CONTEXT_NOISE_RAMP_STEPS = 2
 # Keep a short, phase-aligned visual handoff at the outgoing edge. One H3
 # temporal token can cover four frames, which is too little for the first
 # generated body token to infer motion reliably from every scene.
@@ -265,12 +293,16 @@ OPTIMIZER_THINK_CLOSE_LINE_PATTERN = re.compile(
 # AICG3D：提示词方案库统一放在插件根目录，三个来源共用同一份。
 PROMPT_GUIDES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompt_guides")
 PROMPT_GUIDE_MANIFEST = os.path.join(PROMPT_GUIDES_DIR, "manifest.json")
-PROMPT_OPTIMIZER_TIMEOUT_SECONDS = 600
-PROMPT_OPTIMIZER_ON_RUN_TIMEOUT_SECONDS = 120
+PROMPT_OPTIMIZER_TIMEOUT_SECONDS = 1200
+PROMPT_OPTIMIZER_ON_RUN_TIMEOUT_SECONDS = 600
 PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS = 50000
 CONTEXT_PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS = 128000
 CONTEXT_PROMPT_OPTIMIZER_MEDIA_MAX_RESOURCES = 10
 CONTEXT_PROMPT_OPTIMIZER_MEDIA_MAX_BYTES = 96 * 1024 * 1024
+PROMPT_OPTIMIZER_IMAGE_MAX_SIDE = 2048
+PROMPT_OPTIMIZER_IMAGE_TARGET_BYTES = 2 * 1024 * 1024
+PROMPT_OPTIMIZER_IMAGE_TOTAL_TARGET_BYTES = 8 * 1024 * 1024
+PROMPT_OPTIMIZER_IMAGE_HARD_BYTES = 32 * 1024 * 1024
 CONTEXT_PROMPT_OPTIMIZER_DEFAULT_CONCURRENCY = 3
 CONTEXT_PROMPT_OPTIMIZER_MAX_CONCURRENCY = 20
 CONTEXT_PROMPT_OPTIMIZER_WHOLE = "whole_sequence"
@@ -281,9 +313,11 @@ CONTEXT_PROMPT_OPTIMIZER_MODES = (
 )
 # Bump whenever the optimizer contract changes so an older auto-optimized
 # result cannot silently bypass the new continuity rules.
-PROMPT_OPTIMIZER_MARKER_VERSION = 6
+PROMPT_OPTIMIZER_MARKER_VERSION = 9
 DEFAULT_PROMPT_OPTIMIZER_LANGUAGE = "中文"
-PROMPT_OPTIMIZER_CONFIG_VERSION = 4
+PROMPT_OPTIMIZER_CONFIG_VERSION = 5
+PROMPT_OPTIMIZER_LANGUAGE_EN = "en"
+PROMPT_OPTIMIZER_LANGUAGE_ZH = "zh"
 PROMPT_OPTIMIZER_CONFIG_DEFAULTS = {
     "version": PROMPT_OPTIMIZER_CONFIG_VERSION,
     "mode": "api",
@@ -291,6 +325,8 @@ PROMPT_OPTIMIZER_CONFIG_DEFAULTS = {
     "api_url": "",
     "api_key": "",
     "model": "",
+    "language": PROMPT_OPTIMIZER_LANGUAGE_EN,
+    "prompt_guide_by_language": {},
     "read_media": False,
     "output_language": DEFAULT_PROMPT_OPTIMIZER_LANGUAGE,
     "local_model": "",
@@ -541,6 +577,46 @@ def _is_none_model(value: Any) -> bool:
     return str(value or "").strip().lower() in NONE_MODEL_ALIASES
 
 
+def _normalize_optimizer_language(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    return PROMPT_OPTIMIZER_LANGUAGE_ZH if raw in {"zh", "zh-cn", "zh-hans", "chinese", "中文"} else PROMPT_OPTIMIZER_LANGUAGE_EN
+
+
+def _normalize_prompt_guide_map(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, str] = {}
+    for language in (PROMPT_OPTIMIZER_LANGUAGE_EN, PROMPT_OPTIMIZER_LANGUAGE_ZH):
+        selected = str(value.get(language) or "").strip()
+        if selected:
+            result[language] = selected
+    return result
+
+
+def _configured_prompt_scene_guide(settings: Mapping[str, Any], fallback: str) -> str:
+    language = _normalize_optimizer_language(settings.get("language"))
+    guide_map = settings.get("prompt_guide_by_language")
+    selected = guide_map.get(language) if isinstance(guide_map, Mapping) else None
+    selected = str(selected or fallback or "none").strip() or "none"
+    return selected if _prompt_scene_guide_allowed(selected, language) else "none"
+
+
+def _prompt_scene_guide_allowed(scene_guide: str, language: str) -> bool:
+    candidate = str(scene_guide or "none").strip() or "none"
+    if candidate == "none":
+        return True
+    normalized_language = _normalize_optimizer_language(language)
+    manifest = _prompt_guide_manifest()
+    for item in manifest.get("scene_guides") or []:
+        if not isinstance(item, Mapping) or str(item.get("id") or "") != candidate:
+            continue
+        languages = item.get("languages")
+        if not isinstance(languages, (list, tuple, set)):
+            return True
+        return normalized_language in {str(value).strip().lower() for value in languages}
+    return False
+
+
 def _read_prompt_guide_text(relative_path: str) -> str:
     path = os.path.realpath(os.path.join(PROMPT_GUIDES_DIR, str(relative_path or "")))
     root = os.path.realpath(PROMPT_GUIDES_DIR)
@@ -566,22 +642,56 @@ def _prompt_guide_bundle(
     seconds: float,
     media_counts: Mapping[str, int],
     reference_mode: bool = True,
+    language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
+    segment_seconds: str = "",
 ) -> str:
     manifest = _prompt_guide_manifest()
     general = manifest.get("general") if isinstance(manifest.get("general"), dict) else {}
+    language = _normalize_optimizer_language(language)
+    if not _prompt_scene_guide_allowed(scene_guide, language):
+        scene_guide = "none"
+    raw_segment_seconds = str(segment_seconds or "").replace("\uff0c", ",")
+    segment_duration_labels = [item.strip() for item in raw_segment_seconds.split(",") if item.strip()]
+    if len(segment_duration_labels) >= 2:
+        try:
+            sequence_total = sum(float(item) for item in segment_duration_labels)
+        except ValueError:
+            sequence_total = float(seconds)
+        duration_context = (
+            f"Node context: mode={mode}; sequence_total_duration_seconds={sequence_total:.2f}; "
+            f"segment_duration_seconds={segment_duration_labels}; media_counts={dict(media_counts)}. "
+            "This is a multi-block sequence: the sequence total is NOT the duration of any individual "
+            "output block. Each output block must use only its corresponding segment duration and its "
+            "own local timeline starting at 0.00 seconds."
+        )
+    else:
+        duration_context = (
+            f"Node context: mode={mode}; duration_seconds={float(seconds):.2f}; "
+            f"media_counts={dict(media_counts)}."
+        )
     blocks = [
         "You are the MiniMax H3 Prompt Optimizer inside a ComfyUI node.",
         "Return only the final prompt text. Do not add explanations, markdown fences, titles, or commentary.",
         "Use the complete prompt guide text below. Preserve all official field names, section order, labels, timing notation, dialogue language, and reference tags.",
-        f"Node context: mode={mode}; duration_seconds={float(seconds):.2f}; media_counts={dict(media_counts)}.",
+        duration_context,
     ]
-    if general.get("path"):
-        blocks.append("=== H3 GENERAL PROMPT GUIDE ===\n" + _read_prompt_guide_text(str(general["path"])))
+    language_paths = general.get("path_by_language") if isinstance(general.get("path_by_language"), dict) else {}
+    general_path = str(language_paths.get(language) or general.get("path") or "").strip()
+    if general_path:
+        title = "H3 GENERAL PROMPT GUIDE" if language == PROMPT_OPTIMIZER_LANGUAGE_EN else "H3 中文通用提示词规则"
+        blocks.append(f"=== {title} ===\n" + _read_prompt_guide_text(general_path))
+    # 提示词没有引用素材时改用基础指南，避免模型把素材包里的东西写成引用。
     reference_selected = mode in (MODE_REFERENCE, MODE_DIGITAL_HUMAN) and reference_mode
-    if general.get("base_reference") and not reference_selected:
-        blocks.append("=== H3 BASE REFERENCE GUIDE ===\n" + _read_prompt_guide_text(str(general["base_reference"])))
-    if general.get("ref_reference") and reference_selected:
-        blocks.append("=== H3 FULL-REFERENCE GUIDE ===\n" + _read_prompt_guide_text(str(general["ref_reference"])))
+    base_paths = general.get("base_reference_by_language") if isinstance(general.get("base_reference_by_language"), dict) else {}
+    ref_paths = general.get("ref_reference_by_language") if isinstance(general.get("ref_reference_by_language"), dict) else {}
+    base_path = str(base_paths.get(language) or general.get("base_reference") or "").strip()
+    ref_path = str(ref_paths.get(language) or general.get("ref_reference") or "").strip()
+    if base_path and not reference_selected:
+        title = "H3 BASE REFERENCE GUIDE" if language == PROMPT_OPTIMIZER_LANGUAGE_EN else "H3 中文基础模式规则"
+        blocks.append(f"=== {title} ===\n" + _read_prompt_guide_text(base_path))
+    if ref_path and reference_selected:
+        title = "H3 FULL-REFERENCE GUIDE" if language == PROMPT_OPTIMIZER_LANGUAGE_EN else "H3 中文完整参考模式规则"
+        blocks.append(f"=== {title} ===\n" + _read_prompt_guide_text(ref_path))
     if scene_guide and scene_guide != "none":
         for item in manifest.get("scene_guides") or []:
             if isinstance(item, dict) and str(item.get("id")) == scene_guide and item.get("path"):
@@ -632,6 +742,8 @@ def _normalize_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[
         "api_url": str(source.get("api_url") or "").strip(),
         "api_key": str(source.get("api_key") or ""),
         "model": str(source.get("model") or "").strip(),
+        "language": _normalize_optimizer_language(source.get("language")),
+        "prompt_guide_by_language": _normalize_prompt_guide_map(source.get("prompt_guide_by_language")),
         "read_media": bool(read_media),
         "output_language": output_language,
         "local_model": str(source.get("local_model") or "").strip(),
@@ -1106,12 +1218,128 @@ def _optimizer_asset_path(asset: Mapping[str, Any]) -> str | None:
     return candidate if os.path.isfile(candidate) else None
 
 
+def _optimizer_image_upload_bytes(
+    path: str,
+    target_bytes: int = PROMPT_OPTIMIZER_IMAGE_TARGET_BYTES,
+) -> tuple[bytes, str]:
+    """Create a bounded, LLM-only image upload without touching the source file.
+
+    Reference images can be much larger than an LLM needs.  Keep the original
+    asset for H3 itself, but resize/re-encode a separate in-memory copy for
+    multimodal prompt optimization.  If Pillow cannot process a readable
+    source, fall back to the original only while it remains within the hard
+    upload limit; never silently discard a referenced image.
+    """
+    with open(path, "rb") as handle:
+        original = handle.read()
+    original_mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+    hard_limit = PROMPT_OPTIMIZER_IMAGE_HARD_BYTES
+    target = max(64 * 1024, int(target_bytes or PROMPT_OPTIMIZER_IMAGE_TARGET_BYTES))
+
+    if Image is None:
+        if len(original) <= hard_limit:
+            return original, original_mime
+        raise ValueError(
+            f"Prompt optimizer image '{os.path.basename(path)}' could not be processed "
+            "because Pillow is unavailable and the original file is too large"
+        )
+
+    try:
+        with Image.open(io.BytesIO(original)) as source:
+            image = ImageOps.exif_transpose(source) if ImageOps is not None else source.copy()
+            image.load()
+            has_alpha = "A" in image.getbands()
+            if has_alpha:
+                alpha = image.getchannel("A")
+                has_alpha = alpha.getextrema()[0] < 255
+                image = image.convert("RGBA")
+            else:
+                image = image.convert("RGB")
+
+            resampling_enum = getattr(Image, "Resampling", None)
+            resampling = getattr(resampling_enum, "LANCZOS", getattr(Image, "LANCZOS", 1))
+            max_side = max(1, int(PROMPT_OPTIMIZER_IMAGE_MAX_SIDE))
+            if max(image.size) > max_side:
+                scale = max_side / float(max(image.size))
+                image = image.resize(
+                    (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+                    resample=resampling,
+                )
+
+            # Preserve a small transparent PNG when possible.  Large alpha
+            # images are flattened only for the LLM upload copy, because JPEG
+            # is substantially more compatible with OpenAI-compatible gateways.
+            if has_alpha:
+                png_buffer = io.BytesIO()
+                image.save(png_buffer, format="PNG", optimize=True)
+                png_data = png_buffer.getvalue()
+                if len(png_data) <= target:
+                    return png_data, "image/png"
+                rgba = image.convert("RGBA")
+                flattened = Image.new("RGB", rgba.size, (255, 255, 255))
+                flattened.paste(rgba, mask=rgba.getchannel("A"))
+                image = flattened
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            # Start with a detail-preserving encode, then reduce quality and
+            # dimensions only when needed to meet the per-image budget.
+            best_data: bytes | None = None
+            best_size = 0
+            quality_steps = (85, 78, 70, 60)
+            side_steps = (max_side, 1792, 1536, 1280, 1024)
+            for side in side_steps:
+                candidate = image
+                if max(candidate.size) > side:
+                    scale = side / float(max(candidate.size))
+                    candidate = candidate.resize(
+                        (max(1, round(candidate.width * scale)), max(1, round(candidate.height * scale))),
+                        resample=resampling,
+                    )
+                for quality in quality_steps:
+                    buffer = io.BytesIO()
+                    candidate.save(
+                        buffer,
+                        format="JPEG",
+                        quality=quality,
+                        optimize=True,
+                        progressive=True,
+                    )
+                    data = buffer.getvalue()
+                    if best_data is None or len(data) < best_size:
+                        best_data, best_size = data, len(data)
+                    if len(data) <= target:
+                        return data, "image/jpeg"
+
+            if best_data is not None and len(best_data) <= hard_limit:
+                return best_data, "image/jpeg"
+            raise ValueError("compressed image remains above the upload limit")
+    except Exception as exc:
+        # A valid but unusual image format should not make optimization fail
+        # merely because the optional re-encode path failed.  Use the source
+        # bytes only when the gateway hard limit still makes that reasonable.
+        if len(original) <= hard_limit:
+            return original, original_mime
+        raise ValueError(
+            f"Prompt optimizer image '{os.path.basename(path)}' could not be safely sent: {exc}"
+        ) from exc
+
+
 def _optimizer_media_parts(
     resources: list[Mapping[str, Any]],
     api_format: str,
     maximum: int = MAX_MEDIA,
 ) -> list[dict[str, Any]]:
     parts: list[dict[str, Any]] = []
+    image_count = sum(
+        1
+        for resource in resources[:max(0, int(maximum))]
+        if str(resource.get("type") or "").lower() == "image"
+    )
+    image_target = min(
+        PROMPT_OPTIMIZER_IMAGE_TARGET_BYTES,
+        max(64 * 1024, PROMPT_OPTIMIZER_IMAGE_TOTAL_TARGET_BYTES // max(1, image_count)),
+    )
     for resource in resources[:max(0, int(maximum))]:
         asset = resource.get("asset") if isinstance(resource.get("asset"), Mapping) else {}
         path = _optimizer_asset_path(asset)
@@ -1119,11 +1347,23 @@ def _optimizer_media_parts(
         if not path or media_type not in {"image", "video", "audio"}:
             continue
         try:
-            if os.path.getsize(path) > 32 * 1024 * 1024:
+            source_size = os.path.getsize(path)
+            # Images get their own adaptive upload path below.  Keep the
+            # historical hard cap for raw audio/video payloads, but do not
+            # silently drop an oversized image before it has a chance to be
+            # resized for the optimizer request.
+            if media_type != "image" and source_size > 32 * 1024 * 1024:
                 continue
-            with open(path, "rb") as handle:
-                encoded = base64.b64encode(handle.read()).decode("ascii")
-            mime = mimetypes.guess_type(path)[0] or {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/wav"}[media_type]
+            if media_type == "image":
+                upload_bytes, mime = _optimizer_image_upload_bytes(path, image_target)
+            else:
+                with open(path, "rb") as handle:
+                    upload_bytes = handle.read()
+                mime = mimetypes.guess_type(path)[0] or {
+                    "video": "video/mp4",
+                    "audio": "audio/wav",
+                }[media_type]
+            encoded = base64.b64encode(upload_bytes).decode("ascii")
             if api_format == "gemini":
                 parts.append({"inlineData": {"mimeType": mime, "data": encoded}})
             elif media_type == "image":
@@ -1326,7 +1566,20 @@ def _optimizer_segment_resources(
     return resolved, list(resources) if _optimizer_media_read_allowed(resources) else []
 
 
-def _optimizer_single_segment_rules(segment_index: int, segment_count: int, seconds: float) -> str:
+def _optimizer_single_segment_rules(
+    segment_index: int,
+    segment_count: int,
+    seconds: float,
+    language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
+) -> str:
+    if _normalize_optimizer_language(language) == PROMPT_OPTIMIZER_LANGUAGE_ZH:
+        return (
+            "\n\n=== 上下文单段优化规则（仅上下文节点） ===\n"
+            "只优化用户消息中当前这一段。前面的原始段落仅用于理解人物、场景、道具和动作连续性，不能重写、总结或输出。"
+            "最终只返回当前段的一条自然、完整、可独立执行的 MiniMax H3 提示词，不要输出编号、标题、解释、Markdown 围栏或分段标签。"
+            "不要提到上一段、下一段、延续、拼接或提示词规划。保留当前段已有的媒体标签；只有当前段确实依赖已连接的媒体时才添加对应标签。\n"
+            f"当前是第 {int(segment_index) + 1} 段，共 {int(segment_count)} 段，时长约 {float(seconds):g} 秒。"
+        )
     return (
         "\n\n=== CONTEXT SINGLE-BLOCK OPTIMIZATION RULES (CONTEXT NODE ONLY) ===\n"
         "Optimize only the current block supplied in the user message. Earlier original blocks are "
@@ -1380,11 +1633,21 @@ def _optimizer_system_prompt(
     seconds: float,
     media_counts: Mapping[str, int],
     attached_media_count: int = 0,
+    language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
+    segment_seconds: str = "",
     output_language: str = "",
     user_prompt: str = "",
 ) -> str:
     has_media_references = _optimizer_prompt_has_references(user_prompt)
-    prompt = _prompt_guide_bundle(scene_guide, mode, seconds, media_counts, has_media_references)
+    prompt = _prompt_guide_bundle(
+        scene_guide,
+        mode,
+        seconds,
+        media_counts,
+        has_media_references,
+        language,
+        segment_seconds=segment_seconds,
+    )
     actual_count = max(0, int(attached_media_count or 0))
     if actual_count:
         prompt += (
@@ -1490,10 +1753,19 @@ def _runtime_optimizer_context_hash(
     counts: Mapping[str, int],
     resources: list[Mapping[str, Any]],
     items: list[_MediaInput],
+    segment_seconds: str = "",
     extra: str = "",
 ) -> str:
     guide_fingerprint = _optimizer_sha256(
-        _optimizer_system_prompt(scene_guide, mode, seconds, counts, 0)
+        _optimizer_system_prompt(
+            scene_guide,
+            mode,
+            seconds,
+            counts,
+            0,
+            language=_normalize_optimizer_language(settings.get("language")),
+            segment_seconds=segment_seconds,
+        )
     )
     payload = {
         "version": PROMPT_OPTIMIZER_MARKER_VERSION,
@@ -1545,11 +1817,71 @@ def _segment_expected_count(seconds_spec: Any) -> int:
     return len([item for item in raw.split(",") if item.strip()])
 
 
-def _optimizer_segment_rules(segment_count: int, seconds_spec: str, source_prompt: str = "") -> str:
+def _optimizer_segment_duration_values(seconds_spec: Any, expected_count: int) -> list[float]:
+    """Parse the duration list used by the optimizer's multi-block contract."""
+    return parse_segment_seconds(seconds_spec, max(2, int(expected_count)))
+
+
+def _optimizer_segment_duration_plan(seconds_spec: Any, expected_count: int, language: str) -> str:
+    try:
+        durations = _optimizer_segment_duration_values(seconds_spec, expected_count)
+    except ValueError:
+        return str(seconds_spec or "").strip()
+    if _normalize_optimizer_language(language) == PROMPT_OPTIMIZER_LANGUAGE_ZH:
+        return "；".join(
+            f"第{index}段：本段局部时间 0.00–{duration:g} 秒"
+            for index, duration in enumerate(durations, start=1)
+        )
+    return "; ".join(
+        f"block {index}: local time 0.00-{duration:g} seconds"
+        for index, duration in enumerate(durations, start=1)
+    )
+
+
+def _optimizer_segment_rules(
+    segment_count: int,
+    seconds_spec: str,
+    source_prompt: str = "",
+    language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
+) -> str:
     """Return adaptive rules for the context-segment optimizer only."""
     source_parts = split_prompt_segments(source_prompt)
     has_storyboard = len(source_parts) >= 2
     requested = max(2, int(segment_count))
+    duration_plan = _optimizer_segment_duration_plan(seconds_spec, requested, language)
+    if _normalize_optimizer_language(language) == PROMPT_OPTIMIZER_LANGUAGE_ZH:
+        if has_storyboard:
+            mode_rules = (
+                "用户已经提供了多段草稿。把每个分隔块视为有意安排的独立片段，保持原有顺序、片段动作、镜头想法、文字和局部声音，并在原位置改进。"
+                "不要把它们压缩成重复的通用模板，也不要为了填满段数凭空添加新的剧情。先在内部整理连续性，再只补充当前片段独立生成所必需的前置状态。"
+            )
+        else:
+            mode_rules = (
+                "用户只提供了一个想法或未分段的提示词。先在内部建立简洁的连续性锚点，再把内容安排成清晰的开始、发展和结束。"
+                "每段都要能单独执行，但不要把无关的固定描述机械重复到每段。动作和状态应该真正推进，而不是重复同一张画面。"
+            )
+        return (
+            "\n\n=== 上下文多段优化规则（仅上下文节点） ===\n"
+            "这些规则只适用于 MiniMax H3 Easy 上下文分段节点，不改变普通单段或普通参考模式的优化协议。\n"
+            "本节关于多段输出和 `---` 分隔的要求，优先于任何通用规则中“返回一个完整提示词”或“单段模式”的表述。\n"
+            "最终输出必须是普通的、可独立执行的单段视频提示词列表。内部可以规划连续故事，但提示词正文不能谈论分段、片段编号、上一段、下一段、拼接或提示词规划。"
+            "不要添加 Shot 1、Segment 2 等编号、标题、解释或 Markdown 围栏。\n"
+            f"{mode_rules}\n"
+            f"严格返回 {requested} 段提示词，只能使用单独一行的三个连字符（---）分隔，不得增加或减少段数。\n"
+            "先在内部把原始想法的事件按先后顺序分配给各段，每个事件只安排一次；人物外观、环境和持续状态可以按需复述，但不能把完整的开始、发展、结尾或完整镜头表复制进每一段。\n"
+            f"严格时长分配：{duration_plan}。每段只描述分配给该段的局部内容，段内时间从 0.00 秒重新开始，任何时间码、动作或声音都不得超过该段自己的结束时间。"
+            "总时长只表示所有段拼接后的长度，绝不能当作每一段的时长。\n"
+            "1. 先确定最少但必要的连续性锚点：人物身份和外观、服装、视觉风格、地点、时间和光线、色彩、持续道具、文字规则、声音基调和情绪方向。"
+            "只有当前段需要识别或理解动作时才重复锚点，避免无意义的整段复制。\n"
+            "2. 每段必须包含足够的画面和声音信息，能够脱离其他段独立生成。重要的道具状态、姿势、表情、文字状态或空间关系必须在当前段直接写出，不能假定模型能读取其他段。\n"
+            "3. 使用自然语言表达连续性。不要只写“和之前一样”“继续上个镜头”或“捕获的物体”；如果某个状态重要，就直接写清楚当前人物、物体和位置。\n"
+            f"4. 每段时长依次为 {str(seconds_spec or '').strip()} 秒，按 24 fps 规划动作密度、镜头速度和声音变化。"
+            "如果使用时间码，每一段都必须从 0.00 秒起算，而不是沿用整条序列的累计时间。\n"
+            "5. 音频连续性要灵活：持续的音乐或环境声可以保持同一身份，但允许根据剧情加入局部声音、停顿、静音或变化，不要机械重复没有新增信息的完整声音段落。\n"
+            "6. 媒体引用由用户原始提示词和实际连接的媒体决定。保留显式的 @ 引用以及 <Picture N>、<Video N>、<Audio N> 标签，不要重编号、调换顺序或凭空创造标签。"
+            "如果一个媒体在某段负责人物、外观、场景、风格、动作、镜头、声音或连续性，就在该段明确引用；真正没有使用的媒体不要强行加入。媒体无法读取时，不要编造其内容。\n"
+            "7. 对白必须放在 <d>...</d> 中并保留原语言。"
+        )
     if has_storyboard:
         mode_rules = (
             "The user already supplied a multi-segment draft. Treat each divider-delimited part "
@@ -1586,6 +1918,8 @@ def _optimizer_segment_rules(segment_count: int, seconds_spec: str, source_promp
         "\n\n=== CONTEXT MULTI-CLIP OPTIMIZATION RULES (CONTEXT NODE ONLY) ===\n"
         "These rules apply only to the MiniMax H3 Aicg Context Segments node. Do not alter the "
         "ordinary image/reference prompt optimization contract.\n"
+        "The multi-block output and `---` separator requirements in this section override any generic "
+        "instruction about returning one complete prompt or a single-clip result.\n"
         "The final output is a list of ordinary standalone video prompts. Internally you may plan "
         "a connected sequence, but the prompt text itself must not talk about segments, shots, "
         "previous or next clips, continuation, stitching, or prompt planning. Do not add labels such "
@@ -1594,6 +1928,13 @@ def _optimizer_segment_rules(segment_count: int, seconds_spec: str, source_promp
         f"{mode_rules}\n"
         f"Return exactly {requested} standalone prompt blocks, separated ONLY by a line containing "
         "three hyphens (---). No numbering, titles, commentary, or markdown fences.\n"
+        "Before writing, allocate the source idea's events across the blocks in chronological order. "
+        "Assign each event once. Persistent identity, environment, and carried state may be restated when "
+        "needed, but NEVER copy the complete beginning-development-ending arc or the complete shot list into "
+        "every block.\n"
+        f"Strict duration allocation: {duration_plan}. Each block describes only its assigned local content. "
+        "Its local timeline resets to 0.00 seconds, and no timecode, action, or sound may extend beyond that "
+        "block's own end time. The sequence total is never an individual block duration.\n"
         "1. Before writing, identify the minimum continuity anchors: subject identity and appearance, "
         "wardrobe, visual style, location/geography, time and lighting, palette, persistent props, "
         "typography rules, audio bed, and emotional direction. Carry an anchor into a shot when it "
@@ -1608,7 +1949,8 @@ def _optimizer_segment_rules(segment_count: int, seconds_spec: str, source_promp
         "block already makes the referent clear.\n"
         f"4. Planned clip durations are: {str(seconds_spec or '').strip()} seconds at 24 fps. Pace "
         "each block to its duration and preserve meaningful differences in action density, camera, "
-        "and sound between blocks.\n"
+        "and sound between blocks. If timecodes are used, reset them to 0.00 in every block rather than "
+        "using cumulative sequence time.\n"
         "5. Keep audio continuity adaptive: preserve the global music/ambience identity where it is "
         "present, while allowing local sound changes, silence, accents, or transitions when the "
         "story calls for them. Do not mechanically repeat a full audio paragraph if it adds nothing.\n"
@@ -1649,6 +1991,59 @@ def _normalize_optimized_segments(text: str, expected_count: int) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _optimizer_segment_format_correction_rules(expected_count: int) -> str:
+    """Add a narrow retry contract when an LLM ignores the segment schema.
+
+    The regular context rules already ask for the exact count.  Some providers
+    nevertheless prefer the generic single-prompt instruction from a base
+    guide.  Retrying with an explicit output-only contract is safer than
+    silently duplicating or mechanically splitting the returned text.
+    """
+    count = max(2, int(expected_count))
+    return (
+        "\n\n=== REQUIRED OUTPUT FORMAT CORRECTION ===\n"
+        f"Your previous result could not be used because it did not contain exactly {count} prompt blocks. "
+        "Return a corrected final result now. This is a strict schema requirement: output exactly "
+        f"{count} non-empty standalone MiniMax H3 prompts, with each adjacent pair separated by one "
+        "line containing only `---`. Do not output a title, explanation, numbering, markdown fence, "
+        "or any text before or after the prompt blocks. Do not merge the requested blocks into one "
+        "long prompt; distribute the idea into a coherent sequence."
+    )
+
+
+def _optimizer_segment_format_correction_prompt(source_prompt: str, expected_count: int) -> str:
+    count = max(2, int(expected_count))
+    return (
+        "The original user request below must be returned as exactly "
+        f"{count} standalone prompt blocks. The previous response used the wrong number of blocks. "
+        "Rewrite from the original request and return only the corrected blocks.\n\n"
+        "=== ORIGINAL USER REQUEST ===\n"
+        + str(source_prompt or "")
+    )
+
+
+def _normalize_optimized_segments_with_retry(
+    text: str,
+    expected_count: int,
+    retry: Any = None,
+) -> str:
+    """Validate the optimizer's segment schema, with one safe corrective retry."""
+    try:
+        return _normalize_optimized_segments(text, expected_count)
+    except ValueError:
+        if not callable(retry):
+            raise
+        try:
+            corrected = retry()
+            return _normalize_optimized_segments(corrected, expected_count)
+        except ValueError as correction_error:
+            raise ValueError(
+                f"Prompt optimization must return exactly {max(2, int(expected_count))} non-empty "
+                "segments separated by a standalone --- line; the automatic correction also failed "
+                f"({correction_error})"
+            ) from correction_error
+
+
 def _optimizer_resource_counts(resources: list[Mapping[str, Any]]) -> dict[str, int]:
     counts = {"image": 0, "video": 0, "audio": 0}
     for resource in resources:
@@ -1676,6 +2071,7 @@ def _optimizer_context_segment_call(
     read_media: bool,
     unload_ollama_after_optimize: bool,
     settings: Mapping[str, Any] | None = None,
+    language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
 ) -> str:
     resolved_prompt, selected_resources = _optimizer_segment_resources(
         current_prompt, resources, items or []
@@ -1709,10 +2105,11 @@ def _optimizer_context_segment_call(
         float(seconds),
         _optimizer_resource_counts(attached_resources),
         attached_media_count,
-        str(engine_settings.get("output_language") or ""),
+        language=language,
+        output_language=str(engine_settings.get("output_language") or ""),
         user_prompt=resolved_prompt,
     )
-    system += _optimizer_single_segment_rules(segment_index, segment_count, seconds)
+    system += _optimizer_single_segment_rules(segment_index, segment_count, seconds, language)
     if mode == MODE_DIGITAL_HUMAN:
         system += _optimizer_digital_human_rules()
     optimized = _optimizer_request(
@@ -1778,6 +2175,7 @@ def _optimize_context_segments_sync(
             read_media=read_media,
             unload_ollama_after_optimize=bool(settings.get("unload_ollama_after_optimize", True)),
             settings=settings,
+            language=_normalize_optimizer_language(settings.get("language")),
         )
 
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="h3-prompt") as executor:
@@ -1812,6 +2210,7 @@ def _optimize_prompt_on_run(
 ) -> _RuntimePromptOptimization:
     source_prompt = str(prompt or "")
     settings = _read_prompt_optimizer_config()
+    scene_guide = _configured_prompt_scene_guide(settings, scene_guide)
     if not bool(settings.get("optimize_on_run")) or not source_prompt.strip() or bool(prompt_connected):
         return _RuntimePromptOptimization(source_prompt)
 
@@ -1845,6 +2244,7 @@ def _optimize_prompt_on_run(
             counts,
             resources,
             items,
+            segment_seconds=segment_spec[1] if segment_spec is not None else "",
             extra=(
                 f"seg:{segment_spec[0]}:{segment_spec[1]}:{effective_scope}:"
                 f"{max(1, min(CONTEXT_PROMPT_OPTIMIZER_MAX_CONCURRENCY, int(context_optimizer_concurrency or CONTEXT_PROMPT_OPTIMIZER_DEFAULT_CONCURRENCY)))}"
@@ -1903,11 +2303,18 @@ def _optimize_prompt_on_run(
             float(seconds),
             counts if attached_resources else {"image": 0, "video": 0, "audio": 0},
             attached_media_count,
-            str(settings.get("output_language") or ""),
+            language=_normalize_optimizer_language(settings.get("language")),
+            segment_seconds=segment_spec[1] if segment_spec is not None else "",
+            output_language=str(settings.get("output_language") or ""),
             user_prompt=request_prompt,
         )
         if segment_spec is not None:
-            system += _optimizer_segment_rules(segment_spec[0], segment_spec[1], request_prompt)
+            system += _optimizer_segment_rules(
+                segment_spec[0],
+                segment_spec[1],
+                request_prompt,
+                _normalize_optimizer_language(settings.get("language")),
+            )
         if str(mode or "") == MODE_DIGITAL_HUMAN:
             system += _optimizer_digital_human_rules()
         optimized = _optimizer_request(
@@ -1933,7 +2340,27 @@ def _optimize_prompt_on_run(
         if not cleaned:
             return _RuntimePromptOptimization(source_prompt)
         if segment_spec is not None:
-            cleaned = _normalize_optimized_segments(cleaned, segment_spec[0])
+            expected_count = max(2, int(segment_spec[0]))
+
+            def retry_segment_format() -> str:
+                return _optimizer_http_json(
+                    api_url,
+                    api_key,
+                    model,
+                    api_format,
+                    system + _optimizer_segment_format_correction_rules(expected_count),
+                    _optimizer_segment_format_correction_prompt(request_prompt, expected_count),
+                    media_parts,
+                    timeout_seconds=PROMPT_OPTIMIZER_ON_RUN_TIMEOUT_SECONDS,
+                    unload_ollama_after_optimize=bool(settings.get("unload_ollama_after_optimize", True)),
+                    max_output_tokens=CONTEXT_PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS,
+                )
+
+            cleaned = _normalize_optimized_segments_with_retry(
+                cleaned,
+                expected_count,
+                retry=retry_segment_format,
+            )
         return _RuntimePromptOptimization(
             cleaned,
             {
@@ -1943,6 +2370,19 @@ def _optimize_prompt_on_run(
             },
         )
     except Exception as exc:
+        # If a single undivided idea was explicitly paired with multiple
+        # segment durations, falling back to that one-block source would only
+        # defer the same mismatch to _prepare_segments.  Surface the actual
+        # optimizer/schema failure instead of producing the misleading
+        # "seconds count does not match" error later in execution.
+        if segment_spec is not None:
+            expected_count = max(2, int(segment_spec[0]))
+            source_count = len(split_prompt_segments(source_prompt))
+            if source_count != expected_count:
+                raise ValueError(
+                    f"Prompt optimization did not produce the required {expected_count} segments "
+                    f"for the configured segment durations (source contains {source_count})"
+                ) from exc
         print(f"[MiniMax H3 Aicg] Prompt optimization skipped; using the original prompt: {exc}")
         return _RuntimePromptOptimization(source_prompt)
 
@@ -1984,13 +2424,14 @@ class MiniMaxH3PromptOptimizer:
         if not str(model or "").strip():
             raise ValueError("Prompt optimization model is required")
         counts = {"image": 0, "video": 0, "audio": 0}
+        language = _normalize_optimizer_language(_read_prompt_optimizer_config().get("language"))
         system = _optimizer_system_prompt(
             str(scene_guide or "none"),
             str(mode or MODE_IMAGE),
             float(seconds),
             counts,
-            0,
-            "",
+            attached_media_count=0,
+            language=language,
             user_prompt=str(prompt or ""),
         )
         return (_optimizer_http_json(str(api_url), str(api_key), str(model), api_format, system, str(prompt or "")),)
@@ -2099,6 +2540,8 @@ def _register_prompt_optimizer_route() -> bool:
                 return web.json_response({"ok": True, "prompt": result, "segment_index": segment_index})
 
             read_media = bool(settings.get("read_media"))
+            if mode == MODE_SEGMENTS and not _optimizer_media_read_allowed(resources):
+                read_media = False
             local_engine = _prompt_optimizer_mode(settings) == "local"
             attached_resources = _optimizer_attached_resources(
                 resources, read_media, prompt, resource_limit
@@ -2111,17 +2554,25 @@ def _register_prompt_optimizer_route() -> bool:
                 if local_engine
                 else len(media_parts)
             )
+            language = _normalize_optimizer_language(settings.get("language"))
             system = _optimizer_system_prompt(
                 scene_guide,
                 optimizer_mode,
                 seconds,
                 counts if attached_resources else {"image": 0, "video": 0, "audio": 0},
                 attached_media_count,
-                str(settings.get("output_language") or ""),
+                language=language,
+                segment_seconds=segment_seconds_raw if expected_segments >= 2 else "",
+                output_language=str(settings.get("output_language") or ""),
                 user_prompt=prompt,
             )
             if expected_segments >= 2:
-                system += _optimizer_segment_rules(expected_segments, segment_seconds_raw, prompt)
+                system += _optimizer_segment_rules(
+                    expected_segments,
+                    segment_seconds_raw,
+                    prompt,
+                    language,
+                )
             if optimizer_mode == MODE_DIGITAL_HUMAN:
                 system += _optimizer_digital_human_rules()
             result = await asyncio.to_thread(
@@ -2143,7 +2594,26 @@ def _register_prompt_optimizer_route() -> bool:
                 maximum=resource_limit,
             )
             if expected_segments >= 2:
-                result = _normalize_optimized_segments(result, expected_segments)
+                expected_count = max(2, int(expected_segments))
+
+                def retry_segment_format() -> str:
+                    return _optimizer_http_json(
+                        api_url,
+                        api_key,
+                        model,
+                        api_format,
+                        system + _optimizer_segment_format_correction_rules(expected_count),
+                        _optimizer_segment_format_correction_prompt(prompt, expected_count),
+                        media_parts,
+                        unload_ollama_after_optimize=bool(settings.get("unload_ollama_after_optimize", True)),
+                        max_output_tokens=CONTEXT_PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS,
+                    )
+
+                result = _normalize_optimized_segments_with_retry(
+                    result,
+                    expected_count,
+                    retry=retry_segment_format,
+                )
             return web.json_response({"ok": True, "prompt": result})
         except Exception as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=500)
@@ -2241,14 +2711,54 @@ def _vae_choices(needles: tuple[str, ...], fallback: str) -> list[str]:
     return _all_weight_choices(("vae",), fallback)
 
 
+def _is_h3_video_vae(vae: Any) -> bool:
+    """Return whether *vae* exposes the video-VAE contract used by H3.
+
+    Native ComfyUI H3 VAEs advertise ``latent_dim == 3``.  Some accelerated
+    VAE wrappers (notably TensorRT implementations) intentionally omit that
+    metadata even though they provide the same ``encode``/``decode`` API.
+    Keep the normal metadata check first, then use a narrow capability-based
+    fallback for H3-compatible wrappers instead of importing or naming a
+    particular third-party node.
+    """
+    if getattr(vae, "latent_dim", None) == 3:
+        return True
+
+    if not callable(getattr(vae, "encode", None)) or not callable(getattr(vae, "decode", None)):
+        return False
+
+    stage = getattr(vae, "first_stage_model", None)
+    if stage is None:
+        return False
+
+    # MiniMax H3 video VAE invariants: 16x spatial compression, 4x temporal
+    # compression, and the native 17-frame causal clip.  The runner fields
+    # distinguish an accelerated wrapper from an unrelated generic VAE that
+    # happens to expose encode/decode methods.
+    try:
+        h3_geometry = (
+            int(getattr(stage, "vae_ratio", 0)) == 16
+            and int(getattr(stage, "vae_ratio_t", 0)) == 4
+            and int(getattr(stage, "clip_length", 0)) == 17
+        )
+    except (TypeError, ValueError):
+        return False
+
+    has_runner = any(
+        hasattr(stage, name)
+        for name in ("decoder_runner", "encoder_runner")
+    )
+    return h3_geometry and has_runner
+
+
 def _validate_h3_vae_roles(video_vae: Any, audio_vae: Any, video_name: str, audio_name: str) -> None:
     """Fail early when the two explicitly named VAE slots are swapped."""
     video_dim = getattr(video_vae, "latent_dim", None)
     audio_dim = getattr(audio_vae, "latent_dim", None)
-    if video_dim != 3:
+    if not _is_h3_video_vae(video_vae):
         raise ValueError(
             "MiniMax H3 Loader video VAE slot must contain a video VAE "
-            f"(latent_dim=3), but {video_name!r} is not a video VAE."
+            f"(latent_dim=3 or an H3-compatible accelerated wrapper), but {video_name!r} is not a video VAE."
         )
     if audio_dim != 2:
         raise ValueError(
@@ -2465,6 +2975,9 @@ class MiniMaxH3SegmentSample:
     # can rebuild the final plan, including an optional external prompt override.
     prompt: str | None = None
     media: tuple[Any, ...] | None = None
+    # Motion Context keeps a phase-aligned slice of the sampled latent tail so
+    # the next segment can continue it without a lossy VAE round trip.
+    motion_context_tail_latent: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -2475,6 +2988,7 @@ class MiniMaxH3SegmentSampleSetup:
     model: Any
     sampler: Any
     sigmas: Any
+    sampling_plan: MiniMaxH3SamplingPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -2738,7 +3252,8 @@ class MiniMaxH3EasyMediaSplitter:
     )
     DESCRIPTION = (
         "Split one Media Bundle into standard IMAGE, VIDEO, and AUDIO outputs. "
-        "Set the counts to expose the resources you want to use downstream."
+        "Set the counts to expose the resources you want to use downstream; "
+        "choose whether missing requested outputs should keep the original blocked-branch behavior or return None."
     )
 
     @classmethod
@@ -2757,6 +3272,10 @@ class MiniMaxH3EasyMediaSplitter:
                 "audio_count": (
                     "INT",
                     {"default": 0, "min": 0, "max": MEDIA_SPLITTER_MAX_AUDIOS, "step": 1},
+                ),
+                "empty_output_mode": (
+                    list(MEDIA_SPLITTER_EMPTY_OUTPUT_MODES),
+                    {"default": MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL},
                 ),
             }
         }
@@ -2803,9 +3322,106 @@ class MiniMaxH3EasyMediaSplitter:
             "sample_rate": _audio_sample_rate(value),
         }
 
-    def split(self, media_bundle, image_count=1, video_count=0, audio_count=0):
+    @staticmethod
+    def _empty_output_mode(value: Any) -> str:
+        """Normalize the UI value while accepting localized display labels."""
+        raw = str(value or MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL).strip().casefold()
+        # The translated frontend label can arrive with either ASCII or
+        # full-width parentheses, and some ComfyUI builds preserve a space
+        # before the parentheses.  Normalize those harmless presentation
+        # differences before matching the canonical choices.
+        compact = (
+            raw.replace(" ", "")
+            .replace("（", "(")
+            .replace("）", ")")
+        )
+        if "允许空输出" in compact and "none" in compact:
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ALLOW_NONE
+        if compact in {
+            "默认(跳过缺失输出)",
+            "跳过缺失输出",
+            "原有模式(空端口不报错)",
+            "原有模式(阻断空端口分支)",
+            "原有模式(空端口阻断)",
+        }:
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL
+        if compact == "original(missingoutputsdo noterror)":
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL
+        if compact == "original(blockmissing-outputbranches)":
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL
+        # ``strict`` and the former Media Count Check labels were briefly
+        # exposed in a development build.  Treat them as the original mode so
+        # existing local test workflows remain runnable after that option is
+        # removed from the UI.
+        if compact in {
+            "媒体数量校验",
+            "mediacountcheck",
+            "严格模式(媒体不足时报错)",
+            "strict(errorifmediaismissing)",
+        }:
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL
+        if raw in {
+            MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL,
+            "original",
+            "original mode",
+            "默认（跳过缺失输出）",
+            "default (skip missing outputs)",
+            "跳过缺失输出",
+            "skip missing outputs",
+            "原有模式",
+            "原有模式（空端口不报错）",
+            "原有模式（阻断空端口分支）",
+            "原有模式（空端口阻断）",
+            "strict",
+            "error",
+            "strict mode",
+            "strict (error if media is missing)",
+            "媒体数量校验",
+            "media count check",
+            "严格模式",
+            "严格模式（媒体不足时报错）",
+        }:
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL
+        if raw in {
+            MEDIA_SPLITTER_EMPTY_OUTPUT_ALLOW_NONE,
+            "none",
+            "allow empty outputs",
+            "allow empty outputs (none)",
+            "allow empty output (none)",
+            "允许空输出",
+            "允许空输出（none）",
+            "允许空输出(None)",
+        }:
+            return MEDIA_SPLITTER_EMPTY_OUTPUT_ALLOW_NONE
+        raise ValueError(
+            "Media Splitter empty_output_mode must be 'block_missing' or 'allow_none'"
+        )
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, empty_output_mode=MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL):
+        """Accept the localized combo label sent by the frontend.
+
+        The web UI replaces combo values with translated display labels.  A
+        custom validator lets ComfyUI validate the canonical value after that
+        localization instead of rejecting the translated label first.
+        """
+        try:
+            cls._empty_output_mode(empty_output_mode)
+        except ValueError as exc:
+            return str(exc)
+        return True
+
+    def split(
+        self,
+        media_bundle,
+        image_count=1,
+        video_count=0,
+        audio_count=0,
+        empty_output_mode=MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL,
+    ):
         if not isinstance(media_bundle, MiniMaxH3MediaBundle):
             raise ValueError("Connect a Media Bundle from Media Loader or Media Bridge")
+        empty_mode = self._empty_output_mode(empty_output_mode)
         counts = {
             "image": max(0, min(MEDIA_SPLITTER_MAX_IMAGES, int(image_count))),
             "video": max(0, min(MEDIA_SPLITTER_MAX_VIDEOS, int(video_count))),
@@ -2823,17 +3439,19 @@ class MiniMaxH3EasyMediaSplitter:
             ("audio", MEDIA_SPLITTER_MAX_AUDIOS, counts["audio"]),
         ):
             values = by_type[kind]
-            # The count widgets control how many ports are visible, not how
-            # many resources the bundle must contain. This lets a workflow
-            # expose spare ports in advance without failing when only the
-            # first few resources are currently present.
             for index in range(count):
                 value = values[index] if index < len(values) else None
                 if value is None:
-                    # Silently skip every downstream branch connected to an
-                    # unpopulated spare port. Populated sibling outputs remain
-                    # executable, including Save Image/Video/Audio nodes.
-                    outputs.append(ExecutionBlocker(None))
+                    if empty_mode == MEDIA_SPLITTER_EMPTY_OUTPUT_ORIGINAL:
+                        # Preserve the original behavior: ComfyUI blocks only
+                        # the branch connected to this missing output without
+                        # raising a Media Splitter validation error.
+                        outputs.append(ExecutionBlocker(None))
+                    else:
+                        # ``None`` is intentionally opt-in: some aggregating
+                        # nodes treat it as an absent optional input, while
+                        # many ordinary media nodes cannot consume it safely.
+                        outputs.append(None)
                     continue
                 if kind == "video":
                     value = self._standard_video(value)
@@ -3261,9 +3879,91 @@ def _selected_video_segment_boundaries(
     return boundaries
 
 
+def _motion_context_selected_video_boundaries(
+    boundaries: list[tuple[int, int]],
+    total_frames: int,
+) -> list[tuple[int, int]]:
+    """Snap selected-video interior cuts to the Motion Context latent grid.
+
+    A first clip ending at ``17k+5`` frames has a native H3 latent whose tail
+    can be sliced directly.  Every later visible body then spans ``17k``
+    frames; after its ``17m+5`` context head is added, the complete sample is
+    again ``17n+5``.  Aligning cumulative cuts, rather than rounding every
+    body independently, preserves that relationship across the whole chain.
+
+    The source beginning and ending are never moved.  An interior cut can
+    move by at most eight frames (half of the 17-frame grid); closer cuts that
+    cannot be represented without a larger change are rejected rather than
+    silently changing which prompt owns a substantial part of the video.
+    """
+    cuts = [int(end) for _start, end in boundaries[:-1]]
+    if not cuts:
+        return boundaries
+
+    total = max(5, int(total_frames))
+    candidates = list(range(5, max(5, total - 4), 17))
+    candidates = [value for value in candidates if value <= total - 5]
+    if len(candidates) < len(cuts):
+        raise ValueError(
+            "Selected-video cuts are too close for Motion Context: each interior "
+            "boundary must fit the native 17-frame latent grid"
+        )
+
+    # Dynamic programming finds the globally closest strictly increasing set
+    # of legal cuts.  This avoids two nearby desired cuts independently
+    # snapping onto the same boundary.
+    count = len(cuts)
+    inf = float("inf")
+    costs = [[inf] * len(candidates) for _ in range(count)]
+    parents = [[-1] * len(candidates) for _ in range(count)]
+    for candidate_index, candidate in enumerate(candidates):
+        costs[0][candidate_index] = abs(candidate - cuts[0])
+    for cut_index in range(1, count):
+        best_cost = inf
+        best_parent = -1
+        for candidate_index, candidate in enumerate(candidates):
+            previous_index = candidate_index - 1
+            if previous_index >= 0 and costs[cut_index - 1][previous_index] < best_cost:
+                best_cost = costs[cut_index - 1][previous_index]
+                best_parent = previous_index
+            if best_parent >= 0:
+                costs[cut_index][candidate_index] = best_cost + abs(candidate - cuts[cut_index])
+                parents[cut_index][candidate_index] = best_parent
+
+    final_index = min(range(len(candidates)), key=lambda index: costs[-1][index])
+    if not math.isfinite(costs[-1][final_index]):
+        raise ValueError("Selected-video cuts cannot be aligned to the Motion Context latent grid")
+    aligned = [0] * count
+    for cut_index in range(count - 1, -1, -1):
+        aligned[cut_index] = candidates[final_index]
+        final_index = parents[cut_index][final_index]
+
+    shifts = [abs(actual - requested) for actual, requested in zip(aligned, cuts)]
+    if any(shift > 8 for shift in shifts):
+        raise ValueError(
+            "Selected-video cuts are too close for Motion Context alignment; "
+            "increase the distance between adjacent cuts"
+        )
+
+    result = []
+    start = 0
+    for end in (*aligned, total):
+        result.append((start, int(end)))
+        start = int(end)
+    return result
+
+
 def _selected_video_prompt_parts(prompt: str, segment_count: int) -> list[str]:
-    """Match a selected-video prompt to its cut count without forcing optimization."""
+    """Match a selected-video prompt to its cut count without forcing optimization.
+
+    Whole-video mode has one source segment, so its prompt is always treated as
+    one complete block.  In particular, standalone ``---`` lines are ordinary
+    prompt text there; divider validation only applies after the candidate video
+    has been explicitly split into multiple segments.
+    """
     count = max(1, int(segment_count))
+    if count == 1:
+        return [str(prompt or "").strip()]
     parts = split_prompt_segments(str(prompt or ""))
     if not parts:
         parts = [""]
@@ -3351,6 +4051,20 @@ def _frame_length(seconds: float, fps: float) -> int:
     target_frames = max(5.0, float(seconds) * float(fps))
     block_count = max(0, round((target_frames - 5) / 17))
     return block_count * 17 + 5
+
+
+def _motion_context_output_frame_length(seconds: float, fps: float, position: int) -> int:
+    """Resolve visible frames without adding a hidden warm-up.
+
+    The first segment starts at the real timeline origin and therefore keeps
+    H3's native ``17k+5`` length.  Later visible bodies use ``17k`` frames so
+    adding any supported Motion Context head (also ``17m+5``) produces a
+    complete native-length sample with no trailing alignment padding.
+    """
+    if int(position) <= 0:
+        return _frame_length(seconds, fps)
+    target_frames = max(1.0, float(seconds) * float(fps))
+    return max(17, round(target_frames / 17) * 17)
 
 
 def _segment_context_frame_count(
@@ -3525,6 +4239,49 @@ def _segment_tile_blend(
     return torch.minimum(vertical[:, None], horizontal[None, :]).view(1, 1, 1, height, width)
 
 
+def _segment_tile_color_match(
+    value: torch.Tensor,
+    references: list[tuple[torch.Tensor | None, torch.Tensor | None]],
+    *,
+    clamp: float = 0.05,
+    min_samples: int = 256,
+) -> torch.Tensor:
+    """Correct a tiled latent's channel-wise DC drift against existing regions.
+
+    Spatial second-pass tiles are sampled independently.  Even with the same
+    noise field, their latent channel baselines can drift slightly, which
+    becomes a visible brightness/color seam after VAE decoding.  Match only
+    the robust median channel offset; preserve all local detail and avoid a
+    second sampling pass.
+    """
+    pairs = [
+        (new, ref)
+        for new, ref in references
+        if isinstance(new, torch.Tensor)
+        and isinstance(ref, torch.Tensor)
+        and new.numel() >= min_samples
+        and ref.numel() >= min_samples
+    ]
+    if not pairs:
+        return value
+
+    deltas = []
+    for new, ref in pairs:
+        if new.shape != ref.shape:
+            continue
+        new_flat = new.float().permute(0, 2, 3, 4, 1).reshape(-1, new.shape[1])
+        ref_flat = ref.float().permute(0, 2, 3, 4, 1).reshape(-1, ref.shape[1])
+        deltas.append(torch.median(new_flat - ref_flat, dim=0).values)
+    if not deltas:
+        return value
+
+    dc = torch.stack(deltas, dim=0).median(dim=0).values.clamp(-float(clamp), float(clamp))
+    return value - dc.view(1, value.shape[1], 1, 1, 1).to(
+        device=value.device,
+        dtype=value.dtype,
+    )
+
+
 def _segment_crop_keyframe_conditioning(
     conditioning: Any,
     source_height: int,
@@ -3593,30 +4350,137 @@ def _segment_context_keyframes(
 def _segment_context_keyframes_from_latent(
     latent: torch.Tensor, context_frames: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Build context guides directly from a delivered H3 video latent.
+    """Build MotionContext-style guides from a delivered H3 video latent.
 
     This avoids the lossy RGB -> VAE round trip for segments produced by the
-    same renderer. External media and the first segment still use the RGB
-    guide path above.
+    same renderer.  Each latent step is emitted as its own keyframe at its
+    real pixel-frame offset, matching the native MotionContext node.  A
+    single multi-step block at frame zero looks equivalent on paper, but it
+    makes the conditioning layout treat the whole tail as one anchor and is
+    noticeably less reliable at a chained boundary.
     """
     if not isinstance(latent, torch.Tensor) or latent.ndim != 5 or latent.shape[2] < 1:
         raise ValueError("Segment latent context has no usable video latent")
     requested = _segment_context_frame_count(context_frames)
     wanted_tokens = int(h3.temporal_shape(requested)[1])
+    frame_per_token = tuple(getattr(h3, "FRAME_PER_TOKEN", SEGMENT_FRAME_PER_TOKEN))
     available = int(latent.shape[2])
     if available >= wanted_tokens:
-        tail = latent[:, :, -wanted_tokens:]
+        tail_start = available - wanted_tokens
+        if tail_start % len(frame_per_token) != 0:
+            raise ValueError(
+                "Segment latent context does not start on the H3 temporal phase "
+                "required by MotionContext; pass the complete sampled segment "
+                "latent instead of an already-cropped body latent"
+            )
+        tail = latent[:, :, tail_start:]
     else:
         tail = torch.cat(
             [latent[:, :, :1].repeat(1, 1, wanted_tokens - available, 1, 1), latent],
             dim=2,
         )
-    frame_per_token = tuple(getattr(h3, "FRAME_PER_TOKEN", SEGMENT_FRAME_PER_TOKEN))
-    covered_frames = sum(
-        int(frame_per_token[index % len(frame_per_token)])
-        for index in range(int(tail.shape[2]))
+    guides: list[dict[str, Any]] = []
+    resolved_frame_index = 0
+    for index in range(int(tail.shape[2])):
+        guides.append({
+            "resolved_frame_index": int(resolved_frame_index),
+            "latent": tail[:, :, index:index + 1].detach().to("cpu").contiguous(),
+        })
+        resolved_frame_index += int(frame_per_token[index % len(frame_per_token)])
+    return guides, int(resolved_frame_index)
+
+
+def _segment_motion_context_tail_from_latent(
+    latent: torch.Tensor,
+    context_frames: int,
+) -> torch.Tensor:
+    """Slice a native, phase-aligned Motion Context tail without VAE loss."""
+    guides, _covered = _segment_context_keyframes_from_latent(latent, context_frames)
+    if not guides:
+        raise RuntimeError("Motion Context latent did not contain a usable tail")
+    return torch.cat(
+        [guide["latent"] for guide in guides],
+        dim=2,
+    ).detach().to("cpu").contiguous()
+
+
+def _segment_has_visual_reference(items: list[_MediaInput] | tuple[_MediaInput, ...] | None) -> bool:
+    """Return whether the current segment has an image/video reference.
+
+    Context noise is a visual handoff aid.  Audio-only inputs (including a
+    digital-human driving track) must not enable it, because the audio stream
+    is deliberately kept untouched and the visual continuity should remain
+    deterministic in those workflows.
+    """
+    return any(
+        getattr(item, "media_type", None) in {"image", "video"}
+        for item in (items or ())
     )
-    return [{"resolved_frame_index": 0, "latent": tail.detach().to("cpu").contiguous()}], covered_frames
+
+
+def _segment_apply_context_noise(
+    latent: torch.Tensor,
+    context_frames: int,
+    seed: int,
+) -> torch.Tensor:
+    """Apply the validated latent context-noise taper to a video tail.
+
+    The previous segment remains the source of the Motion Context keyframes,
+    but its final context tokens receive a deterministic Gaussian perturbation.
+    The perturbation is intentionally limited to the video latent tail; audio
+    is stored separately and never enters this helper.
+
+    The taper is the H3 Context Noise recipe: ``0.45`` for the older context
+    steps, linearly released to ``0.10`` across the final two steps.  If a
+    latent is too short or is not phase-aligned for Motion Context, the
+    original latent is returned so this feature cannot introduce a new
+    workflow validation failure.
+    """
+    if not isinstance(latent, torch.Tensor) or latent.ndim != 5 or latent.shape[2] < 1:
+        return latent
+
+    requested = _segment_context_frame_count(context_frames)
+    wanted_tokens = int(h3.temporal_shape(requested)[1])
+    available = int(latent.shape[2])
+    if wanted_tokens < 1 or available < wanted_tokens:
+        return latent
+
+    frame_per_token = tuple(getattr(h3, "FRAME_PER_TOKEN", SEGMENT_FRAME_PER_TOKEN))
+    tail_start = available - wanted_tokens
+    if tail_start % len(frame_per_token) != 0:
+        return latent
+
+    tail = latent[:, :, tail_start:]
+    if tail.numel() == 0:
+        return latent
+    latent_scale = float(tail.detach().float().std().item())
+    if not math.isfinite(latent_scale) or latent_scale <= 0.0:
+        latent_scale = 1.0
+
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed) & 0xFFFFFFFFFFFFFFFF)
+    result = latent.detach().clone()
+    step_count = int(tail.shape[2])
+    ramp_steps = min(SEGMENT_CONTEXT_NOISE_RAMP_STEPS, step_count)
+    for index in range(step_count):
+        from_end = step_count - 1 - index
+        if from_end >= ramp_steps:
+            amount = SEGMENT_CONTEXT_NOISE_ALPHA
+        else:
+            amount = SEGMENT_CONTEXT_NOISE_ALPHA + (
+                SEGMENT_CONTEXT_NOISE_ALPHA_END - SEGMENT_CONTEXT_NOISE_ALPHA
+            ) * (ramp_steps - from_end) / float(ramp_steps)
+        if amount <= 0.0:
+            continue
+        target = result[:, :, tail_start + index]
+        noise = torch.randn(
+            target.shape,
+            generator=generator,
+            device="cpu",
+            dtype=torch.float32,
+        ).mul_(latent_scale).to(device=target.device, dtype=target.dtype)
+        result[:, :, tail_start + index] = target * (1.0 - amount) + noise * amount
+    return result
 
 
 def _segment_prefix_latent(latent: torch.Tensor, token_count: int) -> torch.Tensor:
@@ -3813,8 +4677,20 @@ def _segment_apply_guide_handoff(
 def _segment_context_audio_reference(
     sampled: Mapping[str, Any], source_end_frame: int, context_frames: int,
 ) -> dict[str, Any] | None:
-    """Return the previous tail audio for a native frame-zero Guide."""
-    _video, audio = _segment_latent_streams(sampled)
+    """Return the previous tail audio for a MotionContext-style guide.
+
+    ``overhang`` records the tiny signed difference between the source
+    latent's audio grid and its final pixel frame.  MotionContext uses this
+    when placing the audio keyframe so the carried sound ends at the same
+    boundary as the carried picture instead of slowly drifting across a
+    chain.
+    """
+    video, audio = _segment_latent_streams(sampled)
+    frame_per_token = tuple(getattr(h3, "FRAME_PER_TOKEN", SEGMENT_FRAME_PER_TOKEN))
+    frames = sum(
+        int(frame_per_token[index % len(frame_per_token)])
+        for index in range(int(video.shape[2]))
+    )
     requested_frames = max(1, int(context_frames))
     audio_steps_per_frame = 40.0 / float(h3.FPS)
     requested_steps = max(1, round(requested_frames * audio_steps_per_frame))
@@ -3825,6 +4701,7 @@ def _segment_context_audio_reference(
         return None
     return {
         "audio_latent": audio[..., source_end_steps - requested_steps:source_end_steps].detach().to("cpu").contiguous(),
+        "overhang": float(total_steps - (float(h3.FRAME_RESCALE) * float(frames))),
     }
 
 
@@ -3844,11 +4721,41 @@ def _segment_source_audio_reference(
     return {"audio_latent": audio_latent.detach().to("cpu").contiguous()}
 
 
+def _segment_motion_context_audio_index(
+    audio_reference: Mapping[str, Any] | None,
+    context_frames: int,
+) -> float:
+    """Place a carried audio tail so it ends at the visual context boundary.
+
+    H3 audio rows use a 40 Hz grid while video positions use 5/3 rows per
+    pixel frame.  MotionContext therefore starts the audio row slightly
+    before/after frame zero when the source clip's grid has a fractional
+    overhang.  Keep the same calculation here; exact-grid clips naturally
+    resolve to zero.
+    """
+    if not isinstance(audio_reference, Mapping):
+        return 0.0
+    audio_latent = audio_reference.get("audio_latent")
+    if not isinstance(audio_latent, torch.Tensor) or audio_latent.ndim != 4:
+        return 0.0
+    audio_steps = int(audio_latent.shape[-1])
+    if audio_steps <= 0:
+        return 0.0
+    frame_rescale = float(getattr(h3, "FRAME_RESCALE", 5.0 / 3.0))
+    end_frame = float(max(1, int(context_frames)))
+    overhang = float(audio_reference.get("overhang") or 0.0)
+    end_frame += overhang / frame_rescale
+    end_coord = round(frame_rescale * end_frame)
+    end_frame = end_coord / frame_rescale
+    return end_frame - audio_steps / frame_rescale
+
+
 def _segment_add_context_conditioning(
     conditioning: Any,
     keyframes: list[dict[str, Any]],
     frame_count: int,
     audio_reference: Mapping[str, Any] | None = None,
+    audio_resolved_frame_index: int | float = 0,
 ) -> Any:
     if not keyframes and not isinstance(audio_reference, Mapping):
         return conditioning
@@ -3858,16 +4765,14 @@ def _segment_add_context_conditioning(
         existing = list(values.get("minimax_keyframes") or [])
         guides = [dict(item) for item in keyframes]
         if isinstance(audio_reference, Mapping) and isinstance(audio_reference.get("audio_latent"), torch.Tensor):
-            # Native Add Guide accepts visual and audio conditions on the same
-            # keyframe. Keep an independent source track anchored at frame zero;
-            # reference-media blocks remain separate in ``minimax_refs``.
-            if guides:
-                guides[0]["audio_latent"] = audio_reference["audio_latent"]
-            else:
-                guides = [{
-                    "resolved_frame_index": 0,
-                    "audio_latent": audio_reference["audio_latent"],
-                }]
+            # MotionContext keeps audio in its own conditioning row.  Do not
+            # attach it to the first visual block: with one visual keyframe
+            # per latent step that would place the entire audio tail at the
+            # first visual offset and create an avoidable A/V phase error.
+            guides.append({
+                "resolved_frame_index": audio_resolved_frame_index,
+                "audio_latent": audio_reference["audio_latent"],
+            })
         if guides:
             # Match MiniMaxH3AddGuide exactly: preserve existing keyframes and
             # append the newly added guide instead of changing their order.
@@ -3881,6 +4786,29 @@ def _segment_target_length(delivery_frames: int, context_frames: int = 0) -> int
     while required % 17 != 5:
         required += 1
     return required
+
+
+def _segment_stream_window(
+    head_frames: int,
+    body_frames: int,
+    stream_index: int,
+    motion_context: bool = False,
+) -> tuple[int, int]:
+    """Return a latent-stream interval for a visible segment body.
+
+    Legacy continuity modes build each body on its own ``17k+5`` grid, so
+    their existing phase-zero body size remains unchanged.  Motion Context
+    deliberately uses ``17k`` bodies after the first segment; their token
+    count must therefore be measured as ``shape(head + body) - shape(head)``
+    on the combined timeline.  This applies independently to video and audio.
+    """
+    head = max(0, int(head_frames))
+    body = max(1, int(body_frames))
+    prefix = int(h3.temporal_shape(head)[stream_index]) if head else 0
+    if bool(motion_context) and head:
+        total = int(h3.temporal_shape(head + body)[stream_index])
+        return prefix, max(1, total - prefix)
+    return prefix, int(h3.temporal_shape(body)[stream_index])
 
 
 def _segment_trim_audio(audio: Mapping[str, Any] | None, start_frames: int, delivery_frames: int) -> dict[str, Any] | None:
@@ -4639,16 +5567,21 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
         frames = _normalize_video_frames(frames)
         frames = _resample_video_frames(frames, float(source_fps or h3.FPS))
         source_frame_count = max(5, int(frames.shape[0]))
-        max_frames = _frame_length(MAX_SECONDS, h3.FPS)
-        if source_frame_count > max_frames:
-            raise ValueError(
-                f"Selected Video Context supports candidate videos up to {MAX_SECONDS:g} seconds"
-            )
+        normalized_continuity_mode = (
+            str(continuity_mode)
+            if str(continuity_mode) in CONTEXT_CONTINUITY_MODES
+            else CONTEXT_CONTINUITY_LATENT
+        )
         boundaries = _selected_video_segment_boundaries(
             source_frame_count,
             str(segment_mode or SELECTED_VIDEO_SEGMENT_WHOLE),
             segment_cuts,
         )
+        if normalized_continuity_mode == CONTEXT_CONTINUITY_LATENT and len(boundaries) > 1:
+            boundaries = _motion_context_selected_video_boundaries(
+                boundaries,
+                source_frame_count,
+            )
         segment_count = len(boundaries)
         duration_spec = ",".join(
             f"{(end - start) / float(h3.FPS):.6f}" for start, end in boundaries
@@ -4664,7 +5597,7 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
         optimization = _optimize_prompt_on_run(
             prompt,
             optimizer_mode,
-            min(MAX_SECONDS, max(MIN_SECONDS, source_frame_count / float(h3.FPS))),
+            max(MIN_SECONDS, source_frame_count / float(h3.FPS)),
             str(prompt_optimizer_scene_guide or "none"),
             items,
             kwargs.get("prompt_optimizer_resources"),
@@ -4696,7 +5629,11 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
                 "index": index,
                 "prompt": rewritten,
                 "seconds": output_frames / float(h3.FPS),
-                "delivery_frames": _selected_video_delivery_frames(output_frames),
+                "delivery_frames": (
+                    output_frames
+                    if normalized_continuity_mode == CONTEXT_CONTINUITY_LATENT and segment_count > 1
+                    else _selected_video_delivery_frames(output_frames)
+                ),
                 "output_frames": output_frames,
                 "source_start_frame": start,
                 "source_end_frame": end,
@@ -4710,11 +5647,7 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
             "context_length": _segment_context_frame_count_for_mode(
                 context_length, continuity_mode,
             ),
-            "continuity_mode": (
-                str(continuity_mode)
-                if str(continuity_mode) in CONTEXT_CONTINUITY_MODES
-                else CONTEXT_CONTINUITY_LATENT
-            ),
+            "continuity_mode": normalized_continuity_mode,
             "audio_mode": CONTEXT_AUDIO_GENERATED,
             "source_audio": source_audio,
             "model_role": "ref2va" if uses_visual_media else "fl2va",
@@ -4825,9 +5758,13 @@ class MiniMaxH3EasyContextSegments:
     def IS_CHANGED(cls, **kwargs):
         if bool(_read_prompt_optimizer_config().get("optimize_on_run")):
             return float("nan")
+        # In Context Segments, the comma-separated segment_seconds input is
+        # the authoritative duration plan; `seconds` is only its UI summary.
+        # A linked or stale summary value must not invalidate the node by
+        # itself when the actual segment plan is unchanged.
         return repr(tuple(kwargs.get(key) for key in (
             "mode", "audio_mode", "prompt", "resolution", "aspect_ratio",
-            "width", "height", "seconds", "segment_seconds", "context_length",
+            "width", "height", "segment_seconds", "context_length",
             "continuity_mode", "advanced", "fps", "keyframe_role", "ref_image_size",
             "reference_mention_mode", "prompt_optimizer_settings",
             "prompt_optimizer_scene_guide", "context_prompt_optimizer_mode",
@@ -4876,7 +5813,11 @@ class MiniMaxH3EasyContextSegments:
                 "index": index,
                 "prompt": rewritten,
                 "seconds": seconds,
-                "delivery_frames": _frame_length(seconds, h3.FPS),
+                "delivery_frames": (
+                    _motion_context_output_frame_length(seconds, h3.FPS, index - 1)
+                    if normalized_continuity_mode == CONTEXT_CONTINUITY_LATENT
+                    else _frame_length(seconds, h3.FPS)
+                ),
                 "media": media,
             })
         plan = {
@@ -5114,6 +6055,151 @@ class MiniMaxH3EasyRenderAdvanced:
         return (video,)
 
 
+class MiniMaxH3EasySelfLiftStrategy:
+    """Build one reusable SelfLift sampling plan without patching the MODEL."""
+
+    CATEGORY = "MiniMax H3 Easy"
+    FUNCTION = "build"
+    RETURN_TYPES = (SAMPLING_PLAN_TYPE,)
+    RETURN_NAMES = ("sampling_plan",)
+    DESCRIPTION = (
+        "Create a progressive-resolution SelfLift sampling strategy. Connect it to the optional Sampling plan "
+        "input of MiniMax H3 Easy Sample, Segment Sample, or Sample Setup."
+    )
+
+    @classmethod
+    def _upscaler_choices(cls) -> tuple[list[str], str]:
+        try:
+            detected = [name for name in scan_latent_upscaler_models() if name and not str(name).startswith("(")]
+        except Exception:
+            detected = []
+        values = ["none", *detected]
+        return values, detected[0] if detected else "none"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        models, default_model = cls._upscaler_choices()
+        return {
+            "required": {
+                "transition_step": ("INT", {"default": 5, "min": 1, "max": 100, "step": 1}),
+                "lowres_scale": ("FLOAT", {"default": 0.8, "min": 0.25, "max": 1.0, "step": 0.05}),
+                "upscaler_model": (models, {"default": default_model}),
+                "advanced": ("BOOLEAN", {"default": False}),
+                "cfg": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1}),
+                "rho": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "w_min": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "w_max": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "upscaler_device": (["cuda", "rocm", "cpu"], {"default": "cuda"}),
+                "upscaler_precision": (["fp32", "fp16", "bf16"], {"default": "fp16"}),
+                "upscaler_chunking": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return repr(tuple(kwargs.get(key) for key in (
+            "transition_step", "lowres_scale", "upscaler_model", "cfg", "rho",
+            "w_min", "w_max", "upscaler_device", "upscaler_precision", "upscaler_chunking",
+        )))
+
+    @staticmethod
+    def build(
+        transition_step,
+        lowres_scale,
+        upscaler_model,
+        advanced,
+        cfg,
+        rho,
+        w_min,
+        w_max,
+        upscaler_device,
+        upscaler_precision,
+        upscaler_chunking,
+    ):
+        del advanced
+        minimum = float(w_min)
+        maximum = float(w_max)
+        if minimum > maximum:
+            raise ValueError("SelfLift w_min must not be greater than w_max")
+        return (MiniMaxH3SamplingPlan(
+            kind=SELFLIFT_KIND,
+            cfg=float(cfg),
+            transition_step=int(transition_step),
+            lowres_scale=float(lowres_scale),
+            correction_ratio=float(rho),
+            correction_min=minimum,
+            correction_max=maximum,
+            upscaler_model=NONE_MODEL if _is_none_model(upscaler_model) else str(upscaler_model or NONE_MODEL),
+            upscaler_device=str(upscaler_device or "cuda"),
+            upscaler_precision=str(upscaler_precision or "fp16"),
+            upscaler_chunking=bool(upscaler_chunking),
+        ),)
+
+
+class MiniMaxH3EasySampler:
+    """Sample a normal Easy context with either the stock path or a strategy."""
+
+    CATEGORY = "MiniMax H3 Easy"
+    FUNCTION = "sample"
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("sampled_latent",)
+    DESCRIPTION = (
+        "Sample a normal MiniMax H3 Easy context. Without a Sampling plan this is equivalent to the ordinary "
+        "Basic Guider path; connect a strategy such as SelfLift to switch execution."
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "h3_context": ("MINIMAX_H3_CONTEXT",),
+                "model": ("MODEL",),
+                "sampler": ("SAMPLER",),
+                "sigmas": ("SIGMAS",),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 4294967295,
+                        "control_after_generate": True,
+                    },
+                ),
+            },
+            "optional": {
+                "sampling_plan": (SAMPLING_PLAN_TYPE,),
+            },
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return repr((kwargs.get("seed"), kwargs.get("sampling_plan")))
+
+    @classmethod
+    def sample(cls, h3_context, model, sampler, sigmas, seed, sampling_plan=None):
+        if not isinstance(h3_context, MiniMaxH3Context):
+            raise ValueError("Connect the H3 Context output from a MiniMax H3 Easy node")
+        if h3_context.segment_plan is not None:
+            raise ValueError("Use Segment Sample for a Context Segments H3 Context")
+        if h3_context.conditioning is None or h3_context.latent is None:
+            raise ValueError("The connected H3 Context has no sampleable conditioning or latent")
+        steps = max(1, int(sigmas.shape[-1]) - 1)
+        progress = comfy.utils.ProgressBar(steps)
+        return (MiniMaxH3EasySegmentRender._sample_one(
+            model,
+            h3_context.conditioning,
+            h3_context.latent,
+            sampler,
+            sigmas,
+            int(seed) % 4294967296,
+            progress,
+            0,
+            steps,
+            sampling_plan=sampling_plan,
+            video_vae=h3_context.video_vae,
+        ),)
+
+
 class MiniMaxH3EasySegmentRender:
     """Sample a Context Segment chain and emit a post-processing intermediate."""
 
@@ -5122,7 +6208,7 @@ class MiniMaxH3EasySegmentRender:
     RETURN_TYPES = (SEGMENT_RESULT_TYPE,)
     RETURN_NAMES = ("segments",)
     DESCRIPTION = (
-        "Sample the Context Segment plan with guide continuity. Connect the result to "
+        "Sample the Context Segment plan with MotionContext-style latent continuity. Connect the result to "
         "Segment Decode for a preview or Segment Refine for per-segment second-pass refinement."
     )
 
@@ -5131,7 +6217,7 @@ class MiniMaxH3EasySegmentRender:
         # Sampling is deterministic for fixed inputs and seeds, so let
         # ComfyUI cache the complete node output.  ``randomize`` still changes
         # the widget value after a run and therefore naturally invalidates it.
-        return repr((kwargs.get("seed"), kwargs.get("segment_seeds")))
+        return repr((kwargs.get("seed"), kwargs.get("segment_seeds"), kwargs.get("sampling_plan")))
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -5151,7 +6237,10 @@ class MiniMaxH3EasySegmentRender:
                 ),
                 "segment_seeds": ("STRING", {"default": "default", "multiline": False}),
             },
-            "optional": {"model": ("MODEL",)},
+            "optional": {
+                "model": ("MODEL",),
+                "sampling_plan": (SAMPLING_PLAN_TYPE,),
+            },
         }
 
     @staticmethod
@@ -5166,16 +6255,39 @@ class MiniMaxH3EasySegmentRender:
         start_step,
         total_steps,
         noise=None,
+        sampling_plan=None,
+        video_vae=None,
     ):
-        guider = nodes_custom_sampler.Guider_Basic(model)
-        guider.set_conds(conditioning)
-        if noise is None:
-            noise = comfy.sample.prepare_noise(latent["samples"], int(seed))
         step_count = max(1, int(sigmas.shape[-1]) - 1)
 
         def callback(step, _x0, _x, _total_steps):
             comfy.model_management.throw_exception_if_processing_interrupted()
             progress.update_absolute(start_step + min(step + 1, step_count), total_steps)
+
+        if sampling_plan is not None:
+            if noise is not None:
+                raise ValueError("A custom noise tensor cannot be combined with a MiniMax H3 sampling strategy")
+            if video_vae is None:
+                raise ValueError("The connected sampling strategy needs the MiniMax H3 video VAE")
+            sampled = sample_with_sampling_plan(
+                sampling_plan,
+                model=model,
+                positive=conditioning,
+                latent=latent,
+                sampler=sampler,
+                sigmas=sigmas,
+                seed=int(seed),
+                video_vae=video_vae,
+                callback=callback,
+                disable_pbar=True,
+            )
+            progress.update_absolute(start_step + step_count, total_steps)
+            return sampled
+
+        guider = nodes_custom_sampler.Guider_Basic(model)
+        guider.set_conds(conditioning)
+        if noise is None:
+            noise = comfy.sample.prepare_noise(latent["samples"], int(seed))
 
         sampled = guider.sample(
             noise,
@@ -5293,7 +6405,10 @@ class MiniMaxH3EasySegmentRender:
         return MiniMaxH3SegmentResult(plan=prepared_plan, samples=tuple(samples))
 
     @classmethod
-    def render_chain(cls, h3_context, model=None, sampler=None, sigmas=None, seed=0, segment_seeds="default"):
+    def render_chain(
+        cls, h3_context, model=None, sampler=None, sigmas=None, seed=0,
+        segment_seeds="default", sampling_plan=None,
+    ):
         model = _resolve_h3_model(h3_context, model)
         plan = getattr(h3_context, "segment_plan", None)
         shots = plan.get("shots") if isinstance(plan, Mapping) else None
@@ -5305,6 +6420,8 @@ class MiniMaxH3EasySegmentRender:
         if not isinstance(bundle, MiniMaxH3Bundle):
             raise ValueError("The segment plan has no MiniMax H3 bundle")
         if plan.get("selected_video") is not None or getattr(h3_context, "selected_video", None) is not None:
+            if sampling_plan is not None:
+                raise ValueError("Sampling strategies do not yet support selected-video preparation/refinement")
             return (cls._prepare_selected_video_chain(h3_context, plan),)
         width = int(plan["width"])
         height = int(plan["height"])
@@ -5318,6 +6435,8 @@ class MiniMaxH3EasySegmentRender:
         segment_seed_values = parse_segment_seeds(segment_seeds, len(shots), seed)
         source_audio = plan.get("source_audio")
         digital_human = str(plan.get("audio_mode") or CONTEXT_AUDIO_GENERATED) == CONTEXT_AUDIO_DIGITAL_HUMAN
+        if sampling_plan is not None and continuity_mode in CONTEXT_CONTINUITY_AV_MODES:
+            raise ValueError("SelfLift sampling currently supports Motion Context and RGB Guide continuity, not Soft/Hard AV")
         steps_per_shot = max(1, int(sigmas.shape[-1]) - 1)
         total_steps = max(1, len(shots) * steps_per_shot)
         progress = comfy.utils.ProgressBar(total_steps)
@@ -5326,6 +6445,7 @@ class MiniMaxH3EasySegmentRender:
         segment_samples = []
         tail_frames = None
         delivered_video_latent = None
+        previous_motion_context_tail_latent = None
         audio_reference = None
         timeline_frame = 0
 
@@ -5333,16 +6453,17 @@ class MiniMaxH3EasySegmentRender:
             terminal_progress.update(position, f"segment {position + 1} sampling")
             delivery_frames = max(5, int(shot.get("delivery_frames") or 5))
             output_frames = max(5, int(shot.get("output_frames") or delivery_frames))
-            # Native Add Guide samples a target that starts with the guide
-            # prefix. The workflow discards that repeated/noisy prefix before
-            # delivering the new segment. Keep the same temporal handoff for
-            # RGB Guide; latent/AV modes use the same prefix as their explicit
-            # overlapping latent region.
+            # MotionContext-style continuity samples a target that starts
+            # with a fresh context-sized head. The workflow discards that
+            # repeated/noisy head before delivering the new segment. The head
+            # is only a temporal canvas here; Motion Context supplies the
+            # previous motion exclusively through conditioning keyframes,
+            # while the AV modes still use their explicit latent overlap.
             hidden_prefix_frames = context_length if position else 0
             sample_length = _segment_target_length(delivery_frames, hidden_prefix_frames)
-            # The H3 frame grid may add padding at the end of the sampled
-            # latent. Delivery below takes exactly the requested new frames
-            # after the repeated guide prefix, ignoring grid padding.
+            # Motion Context uses a native combined time grid; legacy modes
+            # and the final arbitrary selected-video interval may still carry
+            # trailing padding. Delivery always takes the requested body only.
             head_frames = hidden_prefix_frames
             prompt_text = str(shot.get("prompt") or "")
             items = list(shot.get("media") or [])
@@ -5376,11 +6497,18 @@ class MiniMaxH3EasySegmentRender:
             shot_seed = segment_seed_values[position]
             guides = []
             if (
-                delivered_video_latent is not None
+                previous_motion_context_tail_latent is not None
                 and continuity_mode == CONTEXT_CONTINUITY_LATENT
             ):
+                guide_latent = previous_motion_context_tail_latent
+                if _segment_has_visual_reference(items):
+                    guide_latent = _segment_apply_context_noise(
+                        guide_latent,
+                        context_length,
+                        shot_seed,
+                    )
                 guides, _covered = _segment_context_keyframes_from_latent(
-                    delivered_video_latent, context_length,
+                    guide_latent, context_length,
                 )
             elif tail_frames is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
                 guides, _covered = _segment_context_keyframes(
@@ -5391,14 +6519,10 @@ class MiniMaxH3EasySegmentRender:
                 guides,
                 h3.temporal_shape(sample_length)[0],
                 audio_context_reference,
+                _segment_motion_context_audio_index(
+                    audio_context_reference, context_length,
+                ) if continuity_mode == CONTEXT_CONTINUITY_LATENT else 0,
             )
-            if delivered_video_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
-                latent = _segment_apply_guide_handoff(
-                    latent,
-                    delivered_video_latent,
-                    audio_context_reference,
-                    context_length,
-                )
             if delivered_video_latent is not None and continuity_mode in CONTEXT_CONTINUITY_AV_MODES:
                 latent = _segment_apply_av_prefix(
                     latent,
@@ -5413,11 +6537,26 @@ class MiniMaxH3EasySegmentRender:
             sampled = cls._sample_one(
                 model, conditioning, latent, sampler, sigmas,
                 shot_seed, progress, position * steps_per_shot, total_steps,
+                sampling_plan=sampling_plan,
+                video_vae=bundle.video_vae,
             )
             video_stream, audio_stream = _segment_latent_streams(sampled)
-            video_prefix = h3.temporal_shape(head_frames)[1] if head_frames else 0
-            video_length = h3.temporal_shape(output_frames)[1]
+            video_prefix, video_length = _segment_stream_window(
+                head_frames,
+                output_frames,
+                1,
+                motion_context=continuity_mode == CONTEXT_CONTINUITY_LATENT,
+            )
             delivered_video_latent = video_stream[:, :, video_prefix:video_prefix + video_length].detach().to("cpu").contiguous()
+            previous_motion_context_tail_latent = None
+            if (
+                continuity_mode == CONTEXT_CONTINUITY_LATENT
+                and position + 1 < len(shots)
+            ):
+                previous_motion_context_tail_latent = _segment_motion_context_tail_from_latent(
+                    video_stream,
+                    context_length,
+                )
 
             if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
                 # RGB Guide needs the delivered tail before the next segment is sampled.
@@ -5443,6 +6582,7 @@ class MiniMaxH3EasySegmentRender:
                     output_frames=shot.get("output_frames"),
                     prompt=prompt_text,
                     media=tuple(items),
+                    motion_context_tail_latent=previous_motion_context_tail_latent,
                 )
             )
             audio_reference = (
@@ -5523,11 +6663,14 @@ class MiniMaxH3EasySegmentSampleSetup:
                 "sampler": ("SAMPLER",),
                 "sigmas": ("SIGMAS",),
             },
-            "optional": {"model": ("MODEL",)},
+            "optional": {
+                "model": ("MODEL",),
+                "sampling_plan": (SAMPLING_PLAN_TYPE,),
+            },
         }
 
     @staticmethod
-    def build_setup(h3_context, model=None, sampler=None, sigmas=None):
+    def build_setup(h3_context, model=None, sampler=None, sigmas=None, sampling_plan=None):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from MiniMax H3 Aicg Context Segments")
         plan = h3_context.segment_plan
@@ -5535,7 +6678,16 @@ class MiniMaxH3EasySegmentSampleSetup:
             raise ValueError("The connected H3 Context contains no segment plan")
         if plan.get("selected_video") is not None or h3_context.selected_video is not None:
             raise ValueError("Segment Sample Setup supports generated Context Segments, not selected-video preparation")
-        return (MiniMaxH3SegmentSampleSetup(h3_context, _resolve_h3_model(h3_context, model), sampler, sigmas),)
+        continuity_mode = str(plan.get("continuity_mode") or CONTEXT_CONTINUITY_LATENT)
+        if sampling_plan is not None and continuity_mode in CONTEXT_CONTINUITY_AV_MODES:
+            raise ValueError("SelfLift sampling currently supports Motion Context and RGB Guide continuity, not Soft/Hard AV")
+        return (MiniMaxH3SegmentSampleSetup(
+            h3_context,
+            _resolve_h3_model(h3_context, model),
+            sampler,
+            sigmas,
+            sampling_plan=sampling_plan,
+        ),)
 
 
 class MiniMaxH3EasySegmentStep:
@@ -5660,29 +6812,47 @@ class MiniMaxH3EasySegmentStep:
             )
 
         previous_video = None
+        previous_full_video = None
+        previous_motion_context_tail_latent = None
         previous_audio_reference = None
         tail_frames = None
         if previous_sample is not None:
-            previous_video, _previous_audio = MiniMaxH3EasySegmentRefine._delivered_streams(previous_sample)
-            previous_latent = _segment_pack_latent(
+            # Keep the delivered body for masked AV modes. Motion Context uses
+            # the separately cached, phase-aligned tail sliced directly from
+            # the sampled video latent.
+            previous_video, previous_audio = MiniMaxH3EasySegmentRefine._delivered_streams(
+                previous_sample,
+                motion_context=continuity_mode == CONTEXT_CONTINUITY_LATENT,
+            )
+            previous_motion_context_tail_latent = previous_sample.motion_context_tail_latent
+            previous_full_latent = _segment_pack_latent(
                 previous_sample.video_latent,
                 previous_sample.audio_latent,
             )
+            previous_full_video, _previous_full_audio = _segment_latent_streams(previous_full_latent)
             if source_audio is None:
                 previous_audio_reference = _segment_context_audio_reference(
-                    previous_latent,
-                    previous_sample.head_frames + previous_sample.delivery_frames,
+                    previous_full_latent,
+                    int(previous_sample.head_frames + previous_sample.delivery_frames),
                     context_length,
                 )
             if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
-                previous_images = nodes.VAEDecode().decode(bundle.video_vae, previous_latent)[0]
+                previous_images = nodes.VAEDecode().decode(bundle.video_vae, previous_full_latent)[0]
                 previous_output = int(previous_sample.output_frames or previous_sample.delivery_frames)
                 delivered = previous_images[
                     previous_sample.head_frames:previous_sample.head_frames + previous_output
                 ].detach().to("cpu").contiguous()
                 keep = min(context_length, int(delivered.shape[0]))
                 tail_frames = delivered[-keep:].contiguous()
-                del previous_images, delivered
+                del previous_images, delivered, previous_full_latent
+            elif continuity_mode == CONTEXT_CONTINUITY_LATENT and previous_motion_context_tail_latent is None:
+                previous_motion_context_tail_latent = _segment_motion_context_tail_from_latent(
+                    previous_full_video,
+                    context_length,
+                )
+                del previous_full_latent
+            else:
+                del previous_full_latent
 
         audio_context_reference = None if digital_human else (
             source_audio_reference if source_audio_reference is not None else previous_audio_reference
@@ -5690,8 +6860,18 @@ class MiniMaxH3EasySegmentStep:
         if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
             audio_context_reference = None
         guides = []
-        if previous_video is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
-            guides, _covered = _segment_context_keyframes_from_latent(previous_video, context_length)
+        if previous_motion_context_tail_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
+            guide_latent = previous_motion_context_tail_latent
+            if _segment_has_visual_reference(items):
+                guide_latent = _segment_apply_context_noise(
+                    guide_latent,
+                    context_length,
+                    int(seed),
+                )
+            guides, _covered = _segment_context_keyframes_from_latent(
+                guide_latent,
+                context_length,
+            )
         elif tail_frames is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
             guides, _covered = _segment_context_keyframes(
                 bundle, tail_frames, width, height, context_length,
@@ -5701,11 +6881,10 @@ class MiniMaxH3EasySegmentStep:
             guides,
             h3.temporal_shape(sample_length)[0],
             audio_context_reference,
+            _segment_motion_context_audio_index(
+                audio_context_reference, context_length,
+            ) if continuity_mode == CONTEXT_CONTINUITY_LATENT else 0,
         )
-        if previous_video is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
-            latent = _segment_apply_guide_handoff(
-                latent, previous_video, audio_context_reference, context_length,
-            )
         if previous_video is not None and continuity_mode in CONTEXT_CONTINUITY_AV_MODES:
             latent = _segment_apply_av_prefix(
                 latent, previous_video, audio_context_reference, context_length, continuity_mode,
@@ -5725,8 +6904,16 @@ class MiniMaxH3EasySegmentStep:
             progress,
             0,
             steps,
+            sampling_plan=setup.sampling_plan,
+            video_vae=bundle.video_vae,
         )
         video_stream, audio_stream = _segment_latent_streams(sampled)
+        motion_context_tail_latent = None
+        if continuity_mode == CONTEXT_CONTINUITY_LATENT and index < len(shots):
+            motion_context_tail_latent = _segment_motion_context_tail_from_latent(
+                video_stream,
+                context_length,
+            )
         sample = MiniMaxH3SegmentSample(
             video_latent=video_stream.detach().to("cpu").contiguous(),
             audio_latent=audio_stream.detach().to("cpu").contiguous(),
@@ -5735,6 +6922,7 @@ class MiniMaxH3EasySegmentStep:
             output_frames=shot.get("output_frames"),
             prompt=prompt_text,
             media=tuple(items),
+            motion_context_tail_latent=motion_context_tail_latent,
         )
         return (MiniMaxH3SegmentStep(
             plan=plan,
@@ -5913,14 +7101,25 @@ class MiniMaxH3EasySegmentRefine:
         return torch.cat([stream, last.repeat(*repeats)], dim=time_dim).contiguous()
 
     @staticmethod
-    def _delivered_streams(sample: MiniMaxH3SegmentSample) -> tuple[torch.Tensor, torch.Tensor]:
+    def _delivered_streams(
+        sample: MiniMaxH3SegmentSample,
+        motion_context: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         video = sample.video_latent
         audio = sample.audio_latent
-        video_prefix = h3.temporal_shape(sample.head_frames)[1] if sample.head_frames else 0
-        audio_prefix = h3.temporal_shape(sample.head_frames)[2] if sample.head_frames else 0
         output_frames = int(sample.output_frames or sample.delivery_frames)
-        video_length = h3.temporal_shape(output_frames)[1]
-        audio_length = h3.temporal_shape(output_frames)[2]
+        video_prefix, video_length = _segment_stream_window(
+            sample.head_frames,
+            output_frames,
+            1,
+            motion_context=motion_context,
+        )
+        audio_prefix, audio_length = _segment_stream_window(
+            sample.head_frames,
+            output_frames,
+            2,
+            motion_context=motion_context,
+        )
         video = video[:, :, video_prefix:video_prefix + video_length]
         audio = audio[..., audio_prefix:audio_prefix + audio_length]
         return (
@@ -5934,6 +7133,7 @@ class MiniMaxH3EasySegmentRefine:
         sample: MiniMaxH3SegmentSample,
         head_frames: int,
         delivery_frames: int,
+        motion_context: bool = False,
     ) -> torch.Tensor:
         """Keep the hidden temporal prefix while preparing a refine source.
 
@@ -5942,9 +7142,13 @@ class MiniMaxH3EasySegmentRefine:
         look like a new clip at that transform boundary.  Keep the exact
         prefix plus body here, then crop it again after the transform.
         """
-        video_prefix = h3.temporal_shape(head_frames)[1] if head_frames else 0
         output_frames = int(sample.output_frames or delivery_frames)
-        video_length = h3.temporal_shape(output_frames)[1]
+        video_prefix, video_length = _segment_stream_window(
+            head_frames,
+            output_frames,
+            1,
+            motion_context=motion_context,
+        )
         wanted = video_prefix + video_length
         return cls._fit_time_tokens(sample.video_latent, wanted, 2)
 
@@ -5954,10 +7158,15 @@ class MiniMaxH3EasySegmentRefine:
         video_latent: torch.Tensor,
         head_frames: int,
         delivery_frames: int,
+        motion_context: bool = False,
     ) -> torch.Tensor:
         """Remove the temporary refine prefix after a temporal transform."""
-        video_prefix = h3.temporal_shape(head_frames)[1] if head_frames else 0
-        video_length = h3.temporal_shape(delivery_frames)[1]
+        video_prefix, video_length = _segment_stream_window(
+            head_frames,
+            delivery_frames,
+            1,
+            motion_context=motion_context,
+        )
         video = cls._fit_time_tokens(video_latent, video_prefix + video_length, 2)
         return video[:, :, video_prefix:video_prefix + video_length].contiguous()
 
@@ -5981,6 +7190,7 @@ class MiniMaxH3EasySegmentRefine:
         latent_upscale_precision: str,
         head_frames: int,
         delivery_frames: int,
+        motion_context: bool = False,
         sampling_model=None,
     ) -> tuple[torch.Tensor, int, int]:
         base_width = int(plan["width"])
@@ -5994,7 +7204,12 @@ class MiniMaxH3EasySegmentRefine:
             if not isinstance(encoded, torch.Tensor) or encoded.ndim != 5:
                 raise RuntimeError("Segment refine pixel resize did not produce a video latent")
             return (
-                cls._crop_refine_video_body(encoded, head_frames, delivery_frames)
+                cls._crop_refine_video_body(
+                    encoded,
+                    head_frames,
+                    delivery_frames,
+                    motion_context=motion_context,
+                )
                 .detach()
                 .to("cpu")
                 .contiguous(),
@@ -6035,7 +7250,12 @@ class MiniMaxH3EasySegmentRefine:
         upscaled = result.get("samples") if isinstance(result, Mapping) else None
         if not isinstance(upscaled, torch.Tensor) or upscaled.ndim != 5:
             raise RuntimeError("H3 latent upscaler returned an invalid video latent")
-        upscaled = cls._crop_refine_video_body(upscaled, head_frames, delivery_frames)
+        upscaled = cls._crop_refine_video_body(
+            upscaled,
+            head_frames,
+            delivery_frames,
+            motion_context=motion_context,
+        )
         return upscaled.detach().to("cpu").contiguous(), int(upscaled.shape[-1]) * 16, int(upscaled.shape[-2]) * 16
 
     @staticmethod
@@ -6065,6 +7285,7 @@ class MiniMaxH3EasySegmentRefine:
         head_frames: int,
         video_body: torch.Tensor,
         audio_body: torch.Tensor,
+        motion_context: bool = False,
     ) -> dict[str, Any]:
         latent, _frame_count = h3._empty_av_latent(
             target_width, target_height, sample_length,
@@ -6072,10 +7293,18 @@ class MiniMaxH3EasySegmentRefine:
         video, audio = _segment_latent_streams(latent)
         video = video.detach().to("cpu").clone()
         audio = audio.detach().to("cpu").clone()
-        video_prefix = h3.temporal_shape(head_frames)[1] if head_frames else 0
-        audio_prefix = h3.temporal_shape(head_frames)[2] if head_frames else 0
-        video_length = h3.temporal_shape(delivery_frames)[1]
-        audio_length = h3.temporal_shape(delivery_frames)[2]
+        video_prefix, video_length = _segment_stream_window(
+            head_frames,
+            delivery_frames,
+            1,
+            motion_context=motion_context,
+        )
+        audio_prefix, audio_length = _segment_stream_window(
+            head_frames,
+            delivery_frames,
+            2,
+            motion_context=motion_context,
+        )
         video[:, :, video_prefix:video_prefix + video_length] = MiniMaxH3EasySegmentRefine._fit_time_tokens(
             video_body, video_length, 2,
         ).to(dtype=video.dtype)
@@ -6117,7 +7346,11 @@ class MiniMaxH3EasySegmentRefine:
             )
         if refine_mode != "latent_upscale":
             raise ValueError(f"Unsupported segment refine mode: {refine_mode}")
-        source_video, _source_audio = cls._delivered_streams(first_pass)
+        source_video, _source_audio = cls._delivered_streams(
+            first_pass,
+            motion_context=str(plan.get("continuity_mode") or CONTEXT_CONTINUITY_LATENT)
+            == CONTEXT_CONTINUITY_LATENT,
+        )
         scale = float(latent_upscale_scale)
         grid = 32
         latent_width = max(1, int(round(round(source_video.shape[-1] * 16 * scale / grid) * grid / 16)))
@@ -6261,11 +7494,43 @@ class MiniMaxH3EasySegmentRefine:
                 )
                 sampled_video, _sampled_audio = _segment_latent_streams(sampled)
                 sampled_video = sampled_video.detach().to("cpu").contiguous()
+
+                # Each spatial tile is sampled independently.  Match its
+                # robust channel baseline to the already assembled overlap
+                # (and pin the first tile to the original source).  This is
+                # the low-risk part of the MMH3 Split Upscale seam strategy:
+                # it removes latent DC/color drift without changing detail or
+                # adding another diffusion pass.
+                color_references = []
+                if top_overlap:
+                    color_references.append((
+                        sampled_video[:, :, :, :top_overlap, :],
+                        previous[:, :, :, :top_overlap, :],
+                    ))
+                if left_overlap:
+                    color_references.append((
+                        sampled_video[:, :, :, :, :left_overlap],
+                        previous[:, :, :, :, :left_overlap],
+                    ))
+                if not color_references and not top and not left:
+                    color_references.append((sampled_video, tile_video))
+                sampled_video = _segment_tile_color_match(
+                    sampled_video,
+                    color_references,
+                )
                 assembled[
                     :, :, :, top:top + current_height, left:left + current_width
                 ] = previous * (1.0 - seam_blend) + sampled_video * seam_blend
                 tile_index += 1
                 del sampled
+
+        # Keep the completed spatial pass from accumulating a global latent
+        # channel shift relative to the input segment.  The clamp is small so
+        # the second pass can still change structure and texture normally.
+        assembled = _segment_tile_color_match(
+            assembled,
+            [(assembled, source_video)],
+        )
 
         return _segment_pack_latent(assembled, source_audio)
 
@@ -6307,6 +7572,7 @@ class MiniMaxH3EasySegmentRefine:
         continuity_mode = str(plan.get("continuity_mode") or CONTEXT_CONTINUITY_LATENT)
         if continuity_mode not in CONTEXT_CONTINUITY_MODES:
             continuity_mode = CONTEXT_CONTINUITY_LATENT
+        motion_context = continuity_mode == CONTEXT_CONTINUITY_LATENT
         context_length = _segment_context_frame_count_for_mode(
             plan.get("context_length", SEGMENT_DEFAULT_CONTEXT_FRAMES),
             continuity_mode,
@@ -6342,8 +7608,11 @@ class MiniMaxH3EasySegmentRefine:
         completed_steps = 0
         refined_samples = []
         previous_video = None
-        previous_audio = None
-        previous_delivery_frames = 0
+        previous_full_video = None
+        previous_motion_context_tail_latent = None
+        previous_full_audio = None
+        previous_full_head_frames = 0
+        previous_full_delivery_frames = 0
         previous_tail_frames = None
         timeline_frame = 0
 
@@ -6361,8 +7630,16 @@ class MiniMaxH3EasySegmentRefine:
             # crops it from the delivered segment after sampling.
             head_frames = context_length if position else 0
             sample_length = _segment_target_length(delivery_frames, head_frames)
-            _, source_audio_latent = cls._delivered_streams(first_pass)
-            source_video = cls._refine_source_video(first_pass, head_frames, delivery_frames)
+            _, source_audio_latent = cls._delivered_streams(
+                first_pass,
+                motion_context=motion_context,
+            )
+            source_video = cls._refine_source_video(
+                first_pass,
+                head_frames,
+                delivery_frames,
+                motion_context=motion_context,
+            )
             video_body, resolved_width, resolved_height = cls._prepare_video_body(
                 bundle,
                 source_video,
@@ -6376,7 +7653,8 @@ class MiniMaxH3EasySegmentRefine:
                 str(latent_upscale_precision),
                 head_frames,
                 output_frames,
-                model,
+                motion_context=motion_context,
+                sampling_model=model,
             )
 
             prompt_text = (
@@ -6416,6 +7694,7 @@ class MiniMaxH3EasySegmentRefine:
                 head_frames,
                 video_body,
                 source_audio_latent,
+                motion_context=motion_context,
             )
 
             source_audio_reference = _segment_source_audio_reference(
@@ -6426,12 +7705,13 @@ class MiniMaxH3EasySegmentRefine:
             ) if source_audio is not None else None
             if digital_human and source_audio_reference is None:
                 raise ValueError("Context Segments digital human audio does not cover this segment")
-            previous_audio_reference = cls._audio_reference_from_previous(
-                previous_video,
-                previous_audio,
-                previous_delivery_frames,
-                context_length,
-            ) if position else None
+            previous_audio_reference = None
+            if previous_full_video is not None and previous_full_audio is not None:
+                previous_audio_reference = _segment_context_audio_reference(
+                    _segment_pack_latent(previous_full_video, previous_full_audio),
+                    int(previous_full_head_frames + previous_full_delivery_frames),
+                    context_length,
+                )
             audio_reference = None if digital_human else (source_audio_reference or previous_audio_reference)
             # Keep RGB Guide equivalent to native MiniMaxH3AddGuide: the
             # carried condition is visual-only. Driving audio remains locked
@@ -6440,10 +7720,18 @@ class MiniMaxH3EasySegmentRefine:
             if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
                 audio_reference = None
 
+            shot_seed = segment_seed_values[position]
             guides = []
-            if previous_video is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
+            if previous_motion_context_tail_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
+                guide_latent = previous_motion_context_tail_latent
+                if _segment_has_visual_reference(items):
+                    guide_latent = _segment_apply_context_noise(
+                        guide_latent,
+                        context_length,
+                        shot_seed,
+                    )
                 guides, _covered = _segment_context_keyframes_from_latent(
-                    previous_video, context_length,
+                    guide_latent, context_length,
                 )
             elif previous_tail_frames is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
                 guides, _covered = _segment_context_keyframes(
@@ -6458,11 +7746,11 @@ class MiniMaxH3EasySegmentRefine:
                 guides,
                 h3.temporal_shape(sample_length)[0],
                 audio_reference,
+                _segment_motion_context_audio_index(
+                    audio_reference, context_length,
+                ) if continuity_mode == CONTEXT_CONTINUITY_LATENT else 0,
             )
-            if previous_video is not None and continuity_mode in (
-                CONTEXT_CONTINUITY_LATENT,
-                CONTEXT_CONTINUITY_GUIDE,
-            ):
+            if previous_video is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
                 latent = _segment_apply_guide_handoff(
                     latent,
                     previous_video,
@@ -6480,7 +7768,6 @@ class MiniMaxH3EasySegmentRefine:
             if digital_human:
                 latent = _lock_audio_latent(latent, source_audio_reference["audio_latent"])
 
-            shot_seed = segment_seed_values[position]
             if execution == SEGMENT_REFINE_TILED:
                 sampled = cls._tiled_sample(
                     model,
@@ -6519,20 +7806,26 @@ class MiniMaxH3EasySegmentRefine:
                 sampling_passes = 1
             completed_steps += sampling_passes * steps_per_segment
             sampled_video, _sampled_audio = _segment_latent_streams(sampled)
-            video_prefix = h3.temporal_shape(head_frames)[1] if head_frames else 0
-            video_length = h3.temporal_shape(output_frames)[1]
+            video_prefix, video_length = _segment_stream_window(
+                head_frames,
+                output_frames,
+                1,
+                motion_context=motion_context,
+            )
             delivered_video = sampled_video[:, :, video_prefix:video_prefix + video_length].detach().to("cpu").contiguous()
             input_video, input_audio = _segment_latent_streams(latent)
-            audio_prefix = h3.temporal_shape(head_frames)[2] if head_frames else 0
-            audio_length = h3.temporal_shape(output_frames)[2]
+            audio_prefix, audio_length = _segment_stream_window(
+                head_frames,
+                output_frames,
+                2,
+                motion_context=motion_context,
+            )
             refined_audio = input_audio.detach().to("cpu").clone()
             if isinstance(audio_reference, Mapping) and audio_prefix > 0:
                 reference_audio = audio_reference.get("audio_latent")
                 if isinstance(reference_audio, torch.Tensor):
                     reference_audio = cls._fit_time_tokens(reference_audio, audio_prefix, 3)
                     refined_audio[..., :audio_prefix] = reference_audio.to(dtype=refined_audio.dtype)
-            delivered_audio = refined_audio[..., audio_prefix:audio_prefix + audio_length].detach().to("cpu").contiguous()
-
             if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
                 decoded_full = cls._decode_video_body(bundle, sampled_video)
                 delivered_tail = decoded_full[head_frames:head_frames + output_frames].contiguous()
@@ -6548,6 +7841,13 @@ class MiniMaxH3EasySegmentRefine:
             else:
                 previous_tail_frames = None
 
+            motion_context_tail_latent = None
+            if continuity_mode == CONTEXT_CONTINUITY_LATENT and position + 1 < len(shots):
+                motion_context_tail_latent = _segment_motion_context_tail_from_latent(
+                    sampled_video,
+                    context_length,
+                )
+
             refined_samples.append(
                 MiniMaxH3SegmentSample(
                     video_latent=sampled_video.detach().to("cpu").contiguous(),
@@ -6557,11 +7857,15 @@ class MiniMaxH3EasySegmentRefine:
                     output_frames=shot.get("output_frames") or first_pass.output_frames,
                     prompt=first_pass.prompt if first_pass.prompt is not None else prompt_text,
                     media=first_pass.media if first_pass.media is not None else tuple(items),
+                    motion_context_tail_latent=motion_context_tail_latent,
                 )
             )
             previous_video = delivered_video
-            previous_audio = delivered_audio
-            previous_delivery_frames = output_frames
+            previous_full_video = sampled_video.detach().to("cpu").contiguous()
+            previous_motion_context_tail_latent = motion_context_tail_latent
+            previous_full_audio = refined_audio.detach().to("cpu").contiguous()
+            previous_full_head_frames = head_frames
+            previous_full_delivery_frames = delivery_frames
             timeline_frame += output_frames
             terminal_progress.update(position + 1, f"segment {position + 1} completed")
             del sampled
@@ -6605,6 +7909,7 @@ class MiniMaxH3EasySegmentDecode:
             raise ValueError("The segment result contains no delivered video frames")
 
         temp_root = folder_paths.get_temp_directory()
+        os.makedirs(temp_root, exist_ok=True)
         stream_dir = tempfile.mkdtemp(prefix="minimax_h3_segments_", dir=temp_root)
         raw_video_path = os.path.join(stream_dir, "video.mp4")
         raw_audio_path = os.path.join(stream_dir, "audio.f32le")
@@ -7108,6 +8413,8 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxH3Easy": MiniMaxH3Easy,
     "MiniMaxH3EasyContextSegments": MiniMaxH3EasyContextSegments,
     "MiniMaxH3EasyOutput": MiniMaxH3EasyOutput,
+    "MiniMaxH3EasySampler": MiniMaxH3EasySampler,
+    "MiniMaxH3EasySelfLiftStrategy": MiniMaxH3EasySelfLiftStrategy,
     "MiniMaxH3EasySegmentRender": MiniMaxH3EasySegmentRender,
     "MiniMaxH3EasySegmentSampleSetup": MiniMaxH3EasySegmentSampleSetup,
     "MiniMaxH3EasySegmentStep": MiniMaxH3EasySegmentStep,

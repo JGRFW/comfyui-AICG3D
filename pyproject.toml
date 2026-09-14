@@ -1,7 +1,7 @@
 [project]
 name = "aicg3d-h3-suite"
 description = "把 MiniMax H3 Easy 与 Goohai-MiniMax-H3_Integration 合并成一个 ComfyUI 插件，并补上统一的素材、技能与加载器界面。"
-version = "1.0.1"
+version = "1.0.2"
 license = {text = "GPL-3.0-or-later"}
 dependencies = []
 

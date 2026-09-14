@@ -22,7 +22,7 @@ const PRESET_NODE = "AICG3D_PromptPreset";
 
 /* ------------------------------ 统一配色 ------------------------------ */
 const GROUP_STYLE = [
-    { match: /^MiniMaxH3Easy/, color: "#34517c", bgcolor: "#151b24" },
+    { match: /^(?:MiniMaxH3Easy|AICG3D_H3)/, color: "#34517c", bgcolor: "#151b24" },
     { match: /^AICG3D_/, color: "#26594f", bgcolor: "#131d1c" },
 ];
 

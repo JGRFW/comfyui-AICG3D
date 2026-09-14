@@ -17,6 +17,13 @@ import {
 } from "./aicg3d-core.js";
 
 const LOADER_CLASS = "MiniMaxH3EasyLoader";
+
+/* 本插件的节点 ID 带 AICG3D_H3 前缀（上游 ComfyUI-MiniMaxH3-Easy 同名时两边必须分开），
+   这里换算回上游那套类名，按名字匹配节点的逻辑就不用逐个改。 */
+function h3ClassName(name) {
+    const text = String(name ?? "");
+    return text.startsWith("AICG3D_H3") ? `MiniMaxH3Easy${text.slice("AICG3D_H3".length)}` : text;
+}
 const SLOT_COUNT = 4;
 const NONE_VALUES = new Set(["", "none", "无"]);
 
@@ -406,7 +413,7 @@ function keepLoaderWidget(node) {
 }
 
 function installLoaderNode(nodeType, nodeData) {
-    if (nodeData?.name !== LOADER_CLASS) return;
+    if (h3ClassName(nodeData?.name) !== LOADER_CLASS) return;
     if (nodeType.prototype.__a3LoaderInstalled) return;
     nodeType.prototype.__a3LoaderInstalled = true;
 

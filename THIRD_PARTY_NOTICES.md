@@ -15,7 +15,7 @@
 |---|---|
 | 原始作者 | nkxx188 |
 | 原始仓库 | https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy |
-| 涉及文件 | `h3easy/`、`web/minimax_h3_easy_ui.js`、`workflows/1.*` ~ `workflows/7.*` |
+| 涉及文件 | `h3easy/`（含 `sampling_strategies.py`）、`web/minimax_h3_easy_ui.js`、`workflows/1.*` ~ `workflows/7.*`、`workflows/upstream/`（上游原版工作流）、`prompt_guides/zh_*` 与 `h3_general/*-zh.*`（按语言拆分的通用与场景指南） |
 | 许可证 | MIT，全文见 `third_party/LICENSE-ComfyUI-MiniMaxH3-Easy-MIT.txt` |
 | 修改情况 | **已修改**：合并为 AICG3D 插件、重写加载器/素材库/技能库前端面板、新增 `_optimizer_attached_resources()` 与无引用输出规则、`aicg3d_sampler.py` 适配 ComfyUI 0.35 V3 节点接口 |
 

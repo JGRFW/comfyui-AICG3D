@@ -301,6 +301,44 @@ CreateVideo         ->  合成 VIDEO
 
 **建议**：两个插件二选一，把不用的那个目录改名成 `xxx.disabled`，再重启 ComfyUI。
 
+### 17. 与上游 ComfyUI-MiniMaxH3-Easy 的节点重名问题（本版重点）
+
+**症状**：装了上游插件之后，本插件节点的左上角标签变成 `MiniMaxH3-Easy`，
+加载器面板里的 LoRA 槽位也不见了。
+
+**原因**：两个插件注册的是同一批 Python 节点类名（`MiniMaxH3EasyLoader`、`MiniMaxH3Easy`……），
+ComfyUI 只会保留其中一份 —— 谁被顶掉，谁的节点就归到对方插件包名下，自己的字段也会丢。
+前端扩展名也一样：两边都叫 `MiniMaxH3Easy`，会互相覆盖。
+
+**修复**：本插件注册的节点 ID 统一加 `AICG3D_H3` 前缀（`MiniMaxH3EasyLoader` → `AICG3D_H3Loader`），
+前端扩展改名 `AICG3D.H3EasyUI`，所有按类名匹配节点的代码一次性做换算。
+
+节点 ID 怎么选，启动时自动判断：
+
+| 环境 | 实际注册的节点 ID |
+|---|---|
+| 没装同名插件（绝大多数用户） | 沿用 `MiniMaxH3Easy*`，以前保存的工作流直接能开 |
+| 装了同名插件 | 只用带前缀的 `AICG3D_H3*`，两边各归各的，不再互相顶掉 |
+
+控制台会打印结论。注意第二行那种情况下，旧工作流里写死的 `MiniMaxH3Easy*`
+会连接到上游插件上 —— 想继续用本插件的加载器面板和 LoRA 槽位，把上游插件改名成
+`xxx.disabled` 再重启即可（本插件已经内置了上游那套节点）。
+
+### 18. 同步上游新功能
+
+`h3easy/nodes.py`、`web/minimax_h3_easy_ui.js` 以旧版上游为基线，
+把本插件的改动重新落到新版上游上，带进来这些东西：
+
+- **SelfLift 采样策略**（`sampling_strategies.py`）：低分辨率起手、逐步升到目标分辨率，
+  用 `MiniMax H3 Aicg SelfLift` 生成采样方案，接到采样节点的 `sampling_plan` 输入；
+- 上下文连续模式新增 **Soft AV Prefix / Hard AV Prefix**，加上原有的 Motion Context、RGB Guide；
+- 提示词优化支持**按语言选指南**（中文/英文各一套），并新增 `文戏 / 动作 / 广告` 三个中文方案；
+- 提示词优化新增**分段时长**输入：多段时每段各自计时，而不是共用总时长；
+- 主节点的 `positive / latent / video_vae / audio_vae / fps` 之外，
+  本插件继续保留 `driving_audio` 与 `model` 两条输出；
+- 新增上游工作流放在 `workflows/upstream/`（含 SelfLift、Sigma Latent 放大、ClipProj 4B 等实验流程），
+  本插件原有工作流不变。
+
 ## 鸣谢
 
 本插件的骨架、提示词引擎与提示词规范都不是我写的，来源说清楚比什么都重要：

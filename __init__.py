@@ -13,81 +13,29 @@
 
 基于 MiniMax H3 Easy 节点合并优化，加入统一的素材、技能与加载器界面。
 """
-import os
-
-from .aicg3d.registry import build
+from .aicg3d import compat
+from .aicg3d.registry import build, NODE_ID_PREFIX, plugin_node_id
 
 NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS = build()
 
 WEB_DIRECTORY = "./web"
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY", "warn_duplicate_loader_packs"]
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
-_LOADER_CLASS = "MiniMaxH3EasyLoader"
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
-
-def _declares_loader(path):
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            return _LOADER_CLASS in handle.read()
-    except OSError:
-        return False
-
-
-def warn_duplicate_loader_packs():
-    """列出同样注册了 MiniMaxH3EasyLoader 的其他插件目录名。
-
-    两个插件抢同一个节点名时，前端只会认其中一套控件：另一套的界面建不起来，
-    而它已经把原生控件藏掉了，用户看到的就是一个只剩标题的空白节点。
-    启动时直接把话说清楚，比让人去翻控制台省事。
-    """
-    try:
-        import folder_paths
-
-        roots = folder_paths.get_folder_paths("custom_nodes")
-    except Exception:
-        return []
-
-    duplicates = []
-    for root in roots:
-        try:
-            entries = sorted(os.scandir(root), key=lambda item: item.name)
-        except OSError:
-            continue
-        for entry in entries:
-            name = entry.name
-            lowered = name.lower()
-            if name.startswith(".") or lowered.endswith(".disabled"):
-                continue
-            if lowered == os.path.basename(_HERE).lower():
-                continue
-            if "h3" not in lowered or "minimax" not in lowered:
-                continue
-            try:
-                if not entry.is_dir():
-                    continue
-            except OSError:
-                continue
-            if _declares_loader(os.path.join(entry.path, "nodes.py")) or _declares_loader(
-                os.path.join(entry.path, "__init__.py")
-            ):
-                duplicates.append(name)
-    return duplicates
-
-
-_duplicates = warn_duplicate_loader_packs()
-if _duplicates:
+_conflicts = compat.conflicting_plugins()
+if _conflicts:
     print(
         "\n".join(
             [
                 "",
                 "=" * 78,
-                "[AICG3D] 检测到同样提供 MiniMaxH3EasyLoader 的插件：" + "、".join(_duplicates),
-                "         两者节点同名，同时启用会让「MiniMax H3 Aicg 加载器」显示为空白。",
-                "         请只保留一个：把不需要的那个改名为 xxx.disabled，然后重启 ComfyUI。",
-                "         Duplicate loader nodes found: " + ", ".join(_duplicates),
-                "         Keep only one of them (rename the other to xxx.disabled and restart).",
+                "[AICG3D] 检测到同样提供 MiniMaxH3Easy* 节点的插件：" + "、".join(_conflicts),
+                "         两者节点同名，同时启用会让重复的那份失效。",
+                f"         本插件已自动改用自带前缀的节点 ID（{NODE_ID_PREFIX}*），两边互不干扰。",
+                "         注意：以前保存、引用 MiniMaxH3Easy* 的旧工作流会连接到对方插件上；",
+                "         本插件新保存的工作流则使用带前缀的节点 ID。",
+                "         Duplicate MiniMaxH3Easy* nodes found: " + ", ".join(_conflicts),
+                f"         Using prefixed node ids ({NODE_ID_PREFIX}*) for this pack.",
                 "=" * 78,
                 "",
             ]

@@ -104,6 +104,15 @@ export function selectionText(value) {
              ② 已经建好的节点用 refreshVueWidgets() 触发一次重新映射。 */
 export function markWidgetHidden(widget) {
     if (!widget) return widget;
+    if (!widget.__a3Native) {
+        widget.__a3Native = {
+            type: widget.type,
+            hidden: widget.hidden,
+            computeSize: widget.computeSize,
+            optionsHidden: widget.options?.hidden,
+            optionsCanvasOnly: widget.options?.canvasOnly,
+        };
+    }
     widget.options = widget.options || {};
     widget.options.hidden = true;
     widget.options.canvasOnly = true;
@@ -114,6 +123,25 @@ export function markWidgetHidden(widget) {
     widget.hidden = true;
     widget.type = "hidden";
     widget.computeSize = () => [0, -4];
+    return widget;
+}
+
+/** markWidgetHidden 的逆操作：把原生控件按原样放回来。
+    自定义面板建不起来时（例如与同名节点包撞车）必须走这一步，
+    否则节点只剩标题，用户看到的就是一个空白节点。 */
+export function markWidgetVisible(widget) {
+    if (!widget) return widget;
+    const native = widget.__a3Native;
+    widget.options = widget.options || {};
+    widget.options.hidden = native ? !!native.optionsHidden : false;
+    widget.options.canvasOnly = native ? !!native.optionsCanvasOnly : false;
+    if (widget._state?.options) {
+        widget._state.options.hidden = widget.options.hidden;
+        widget._state.options.canvasOnly = widget.options.canvasOnly;
+    }
+    widget.hidden = native ? !!native.hidden : false;
+    widget.type = native ? (native.type ?? "combo") : widget.type;
+    if (native?.computeSize) widget.computeSize = native.computeSize;
     return widget;
 }
 

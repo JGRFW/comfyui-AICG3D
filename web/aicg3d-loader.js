@@ -13,7 +13,7 @@ import { app } from "../../scripts/app.js";
 import {
     ensureTheme, el, toast, createSelect, widgetOf, setWidgetValue,
     library, formatSize, selectionText,
-    markWidgetHidden, autoHideWidgets, refreshVueWidgets,
+    markWidgetHidden, markWidgetVisible, autoHideWidgets, refreshVueWidgets,
 } from "./aicg3d-core.js";
 
 const LOADER_CLASS = "MiniMaxH3EasyLoader";
@@ -23,6 +23,9 @@ const NONE_VALUES = new Set(["", "none", "无"]);
 // ref2va_model 面板上已移除，但仍保留在此列表中隐藏，以维持旧工作流的 widget 顺序。
 const MODEL_WIDGETS = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae"];
 
+// 面板建不起来时必须让节点退回原生控件，所以只有这 4 个控件算硬要求。
+const REQUIRED_WIDGETS = ["fl2va_model", "text_encoder", "video_vae", "audio_vae"];
+
 function isNone(value) {
     return NONE_VALUES.has(String(value ?? "").trim().toLowerCase());
 }
@@ -31,6 +34,26 @@ function hideWidget(widget) {
     if (!widget) return;
     widget.__a3Hidden = true;
     markWidgetHidden(widget);
+}
+
+function showWidget(widget) {
+    if (!widget) return;
+    widget.__a3Hidden = false;
+    markWidgetVisible(widget);
+}
+
+/** 把 autoHideWidgets 在 addWidget 阶段藏掉的原生控件全部放回来。
+    面板没建起来却把原生控件藏了，节点就是一片空白 —— 这是最坏的结果，必须兜住。 */
+function restoreNativeWidgets(node) {
+    let restored = 0;
+    for (const widget of node?.widgets || []) {
+        if (!widget?.__a3Hidden) continue;
+        showWidget(widget);
+        restored += 1;
+    }
+    if (restored) refreshVueWidgets(node);
+    refreshLayout(node);
+    return restored;
 }
 
 function refreshLayout(node) {
@@ -257,6 +280,13 @@ function buildPanel(node) {
     loraSection.append(loraFoot);
     panel.append(loraSection);
 
+    // 没有 LoRA 控件就别留一块点不动的 LoRA 区域。
+    const missingLora = [];
+    for (let index = 1; index <= SLOT_COUNT; index += 1) {
+        if (!widgetOf(node, `lora_${index}`) || !widgetOf(node, `lora_${index}_strength`)) missingLora.push(index);
+    }
+    if (missingLora.length) loraSection.style.display = "none";
+
     /* ---- LoRA 槽位状态 ---- */
     let loraMeta = [];
     let loraCount = 1;
@@ -363,6 +393,18 @@ function resize(node) {
     refreshLayout(node);
 }
 
+/** 上游 UI 会整表重排 node.widgets，可能把本面板摘掉，这里补回来。 */
+function keepLoaderWidget(node) {
+    const widget = node?.__a3LoaderWidget;
+    const list = node?.widgets;
+    if (!widget || !Array.isArray(list) || list.includes(widget)) return false;
+    list.push(widget);
+    if (Array.isArray(node._widgets)) node._widgets = list;
+    refreshVueWidgets(node);
+    refreshLayout(node);
+    return true;
+}
+
 function installLoaderNode(nodeType, nodeData) {
     if (nodeData?.name !== LOADER_CLASS) return;
     if (nodeType.prototype.__a3LoaderInstalled) return;
@@ -376,6 +418,24 @@ function installLoaderNode(nodeType, nodeData) {
 
     const setup = (node) => {
         if (!node || node.__a3LoaderSetup || typeof node.addDOMWidget !== "function") return;
+
+        /* 节点类被另一个同名插件（ComfyUI-MiniMaxH3-Easy）抢走注册时，节点上没有 LoRA 槽位。
+           这时硬堆面板只会做出一个半残界面，而原生控件已经被 autoHideWidgets 藏了，
+           结果是节点全空 —— 直接放弃面板，把原生控件放回来。 */
+        const missing = REQUIRED_WIDGETS.filter((name) => !widgetOf(node, name));
+        if (missing.length) {
+            node.__a3LoaderSetup = true;
+            if (!node.__a3LoaderSkipped) {
+                node.__a3LoaderSkipped = true;
+                console.warn(
+                    `[AICG3D] 加载器面板已跳过：节点缺少控件 ${missing.join("、")}。`
+                    + "通常是同时启用了 ComfyUI-MiniMaxH3-Easy（与本插件节点同名），已自动退回原生控件。",
+                );
+            }
+            restoreNativeWidgets(node);
+            return;
+        }
+
         node.__a3LoaderSetup = true;
         ensureTheme();
 
@@ -384,10 +444,6 @@ function installLoaderNode(nodeType, nodeData) {
         for (let index = 1; index <= SLOT_COUNT; index += 1) {
             hidden.push(widgetOf(node, `lora_${index}`), widgetOf(node, `lora_${index}_strength`));
         }
-        if (hidden.some((widget) => !widget)) {
-            node.__a3LoaderSetup = false;
-            return;
-        }
 
         let built;
         try {
@@ -395,16 +451,23 @@ function installLoaderNode(nodeType, nodeData) {
         } catch (error) {
             console.error("[AICG3D] 加载器面板初始化失败，保留原生控件", error);
             node.__a3LoaderSetup = false;
+            restoreNativeWidgets(node);
             return;
         }
 
-        const domWidget = node.addDOMWidget("aicg3d_loader", "aicg3d_loader", built.panel, {
-            serialize: false,
-            getMinHeight: () => Math.max(1, Number(node.__a3LoaderMinHeight) || 320),
-            afterResize: () => resize(node),
-        });
+        let domWidget = null;
+        try {
+            domWidget = node.addDOMWidget("aicg3d_loader", "aicg3d_loader", built.panel, {
+                serialize: false,
+                getMinHeight: () => Math.max(1, Number(node.__a3LoaderMinHeight) || 320),
+                afterResize: () => resize(node),
+            });
+        } catch (error) {
+            console.error("[AICG3D] 加载器面板挂载失败，保留原生控件", error);
+        }
         if (!domWidget) {
             node.__a3LoaderSetup = false;
+            restoreNativeWidgets(node);
             return;
         }
         domWidget.serialize = false;
@@ -431,7 +494,11 @@ function installLoaderNode(nodeType, nodeData) {
             .catch(() => applyMeta([]));
 
         node.__a3LoaderSync = () => { built.syncAll(); built.syncLoRA(node.__a3LoraMeta || []); };
-        setTimeout(() => { refreshVueWidgets(node); resize(node); }, 0);
+
+        // 上游 UI 重排 node.widgets 后补几次保险，面板被摘掉就装回去。
+        for (const delay of [0, 300, 1200]) {
+            setTimeout(() => { keepLoaderWidget(node); resize(node); }, delay);
+        }
     };
 
     const chain = (name, after) => {

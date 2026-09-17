@@ -120,20 +120,25 @@ class AICG3DSamplerAdvanced:
         def _progress_callback(*args):
             nonlocal completed_steps
             completed_steps += 1
-            pbar.update_absolute(completed_steps, total_steps)
             if on_step is not None:
                 try:
                     on_step(completed_steps, total_steps)
                 except Exception:
                     pass
+            preview = None
             if on_preview is not None:
                 # 采样器回调签名是 (step, x0, x, total_steps)，这里只取第 2 个参数，
-                # 兼容个别采样器额外塞参数的情况。
+                # 兼容个别采样器额外塞参数的情况。父节点（渲染器）会把这一步的预览图
+                # 解出来，并按 ComfyUI 原生格式返回，好让 Nodes 2.0（Vue 节点）的节点
+                # 预览图也能显示，所以这里要接住它的返回值。
                 x0 = args[1] if len(args) > 1 else None
                 try:
-                    on_preview(x0, completed_steps, total_steps)
+                    preview = on_preview(x0, completed_steps, total_steps)
                 except Exception:
-                    pass
+                    preview = None
+            # preview 是 (格式, PIL 图, 最大边) 或 None：带预览时 ComfyUI 原生的进度
+            # hook 会把图作为二进制预览消息发给前端，Vue 节点模式就画在节点上。
+            pbar.update_absolute(completed_steps, total_steps, preview)
 
         samples = guider.sample(
             noise,

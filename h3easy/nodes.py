@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from fractions import Fraction
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torchaudio
@@ -68,6 +68,7 @@ try:
 except ImportError:
     MiniMaxH3EasyLatentUpscaler3D = None
     scan_latent_upscaler_models = None
+from ..aicg3d import prompt_guides as prompt_guide_lib
 from .sampling_strategies import (
     SAMPLING_PLAN_TYPE,
     SELFLIFT_KIND,
@@ -297,8 +298,9 @@ OPTIMIZER_THINK_CLOSE_LINE_PATTERN = re.compile(
     r"(?im)^[ \t]*</think\s*>[ \t]*$"
 )
 # AICG3D：提示词方案库统一放在插件根目录，三个来源共用同一份。
-PROMPT_GUIDES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompt_guides")
-PROMPT_GUIDE_MANIFEST = os.path.join(PROMPT_GUIDES_DIR, "manifest.json")
+# 方案的增删只要动 prompt_guides/ 里的文件夹，列表与元信息由 prompt_guide_lib 扫描得出。
+PROMPT_GUIDES_DIR = prompt_guide_lib.GUIDES_DIR
+PROMPT_GUIDE_MANIFEST = prompt_guide_lib.MANIFEST_PATH
 PROMPT_OPTIMIZER_TIMEOUT_SECONDS = 1200
 PROMPT_OPTIMIZER_ON_RUN_TIMEOUT_SECONDS = 600
 PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS = 50000
@@ -604,23 +606,19 @@ def _configured_prompt_scene_guide(settings: Mapping[str, Any], fallback: str) -
     guide_map = settings.get("prompt_guide_by_language")
     selected = guide_map.get(language) if isinstance(guide_map, Mapping) else None
     selected = str(selected or fallback or "none").strip() or "none"
-    return selected if _prompt_scene_guide_allowed(selected, language) else "none"
+    if not _prompt_scene_guide_allowed(selected, language):
+        return prompt_guide_lib.GENERAL_ONLY_ID
+    return prompt_guide_lib.resolve(selected)
 
 
 def _prompt_scene_guide_allowed(scene_guide: str, language: str) -> bool:
-    candidate = str(scene_guide or "none").strip() or "none"
-    if candidate == "none":
-        return True
-    normalized_language = _normalize_optimizer_language(language)
-    manifest = _prompt_guide_manifest()
-    for item in manifest.get("scene_guides") or []:
-        if not isinstance(item, Mapping) or str(item.get("id") or "") != candidate:
-            continue
-        languages = item.get("languages")
-        if not isinstance(languages, (list, tuple, set)):
-            return True
-        return normalized_language in {str(value).strip().lower() for value in languages}
-    return False
+    """方案是否可用：节点控件里存的是显示名、设置里存的是 id，两种都认。"""
+    return prompt_guide_lib.is_allowed(scene_guide, _normalize_optimizer_language(language))
+
+
+def _prompt_scene_guide_choices() -> list[str]:
+    """节点参数候选：直接来自 prompt_guides/ 的目录扫描，增删文件夹就自动跟着变。"""
+    return prompt_guide_lib.ids()
 
 
 def _read_prompt_guide_text(relative_path: str) -> str:
@@ -632,14 +630,9 @@ def _read_prompt_guide_text(relative_path: str) -> str:
         return handle.read()
 
 
-@lru_cache(maxsize=1)
 def _prompt_guide_manifest() -> dict[str, Any]:
-    try:
-        with open(PROMPT_GUIDE_MANIFEST, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    """``prompt_guides/manifest.json``；文件改动后缓存按 mtime 自动失效，不用重启。"""
+    return prompt_guide_lib.manifest()
 
 
 def _prompt_guide_bundle(
@@ -651,11 +644,11 @@ def _prompt_guide_bundle(
     language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
     segment_seconds: str = "",
 ) -> str:
-    manifest = _prompt_guide_manifest()
-    general = manifest.get("general") if isinstance(manifest.get("general"), dict) else {}
+    general = prompt_guide_lib.general_entry()
     language = _normalize_optimizer_language(language)
+    scene_guide = prompt_guide_lib.resolve(scene_guide)
     if not _prompt_scene_guide_allowed(scene_guide, language):
-        scene_guide = "none"
+        scene_guide = prompt_guide_lib.GENERAL_ONLY_ID
     raw_segment_seconds = str(segment_seconds or "").replace("\uff0c", ",")
     segment_duration_labels = [item.strip() for item in raw_segment_seconds.split(",") if item.strip()]
     if len(segment_duration_labels) >= 2:
@@ -698,20 +691,12 @@ def _prompt_guide_bundle(
     if ref_path and reference_selected:
         title = "H3 FULL-REFERENCE GUIDE" if language == PROMPT_OPTIMIZER_LANGUAGE_EN else "H3 中文完整参考模式规则"
         blocks.append(f"=== {title} ===\n" + _read_prompt_guide_text(ref_path))
-    if scene_guide and scene_guide != "none":
-        for item in manifest.get("scene_guides") or []:
-            if isinstance(item, dict) and str(item.get("id")) == scene_guide and item.get("path"):
-                scene_path = str(item["path"])
-                blocks.append("=== SELECTED SCENE PROMPT GUIDE ===\n" + _read_prompt_guide_text(scene_path))
-                reference_dir = os.path.join(PROMPT_GUIDES_DIR, os.path.dirname(scene_path), "references")
-                if os.path.isdir(reference_dir):
-                    for root, _dirs, filenames in os.walk(reference_dir):
-                        for filename in sorted(filenames):
-                            if os.path.splitext(filename)[1].lower() not in {".md", ".txt"}:
-                                continue
-                            relative = os.path.relpath(os.path.join(root, filename), PROMPT_GUIDES_DIR).replace(os.sep, "/")
-                            blocks.append(f"=== SELECTED SCENE REFERENCE: {relative} ===\n" + _read_prompt_guide_text(relative))
-                break
+    if scene_guide and scene_guide != prompt_guide_lib.GENERAL_ONLY_ID:
+        scene_path = prompt_guide_lib.guide_path(scene_guide, language)
+        if scene_path:
+            blocks.append("=== SELECTED SCENE PROMPT GUIDE ===\n" + _read_prompt_guide_text(scene_path))
+        for relative in prompt_guide_lib.references(scene_guide):
+            blocks.append(f"=== SELECTED SCENE REFERENCE: {relative} ===\n" + _read_prompt_guide_text(relative))
     return "\n\n".join(blocks)
 
 
@@ -2403,9 +2388,7 @@ class MiniMaxH3PromptOptimizer:
 
     @classmethod
     def INPUT_TYPES(cls):
-        manifest = _prompt_guide_manifest()
-        scene_items = manifest.get("scene_guides") if isinstance(manifest.get("scene_guides"), list) else []
-        choices = [str(item.get("id")) for item in scene_items if isinstance(item, dict) and item.get("id")] or ["none"]
+        choices = _prompt_scene_guide_choices()
         return {
             "required": {
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
@@ -5514,8 +5497,8 @@ class MiniMaxH3Easy:
                 "reference_mention_mode": ([REFERENCE_MENTION_FILENAME, REFERENCE_MENTION_INDEX], {"default": REFERENCE_MENTION_INDEX}),
                 "prompt_optimizer_settings": ("BOOLEAN", {"default": False}),
                 "prompt_optimizer_scene_guide": (
-                    [str(item.get("id")) for item in (_prompt_guide_manifest().get("scene_guides") or []) if isinstance(item, dict) and item.get("id")] or ["none"],
-                    {"default": "none"},
+                    _prompt_scene_guide_choices(),
+                    {"default": prompt_guide_lib.GENERAL_ONLY_ID},
                 ),
             },
             "optional": optional,
@@ -5911,8 +5894,8 @@ class MiniMaxH3EasyContextSegments:
                 "reference_mention_mode": ([REFERENCE_MENTION_FILENAME, REFERENCE_MENTION_INDEX], {"default": REFERENCE_MENTION_INDEX}),
                 "prompt_optimizer_settings": ("BOOLEAN", {"default": False}),
                 "prompt_optimizer_scene_guide": (
-                    [str(item.get("id")) for item in (_prompt_guide_manifest().get("scene_guides") or []) if isinstance(item, dict) and item.get("id")] or ["none"],
-                    {"default": "none"},
+                    _prompt_scene_guide_choices(),
+                    {"default": prompt_guide_lib.GENERAL_ONLY_ID},
                 ),
                 "context_prompt_optimizer_mode": (
                     list(CONTEXT_PROMPT_OPTIMIZER_MODES),
@@ -6122,6 +6105,68 @@ class MiniMaxH3EasyOutput:
         )
 
 
+#: 渲染结束后的清理策略（AICG-渲染器（高级）的面板选项），第一项是默认值。
+RENDER_CLEANUP_UNLOAD = "卸载模型"
+RENDER_CLEANUP_CACHE = "释放缓存"
+RENDER_CLEANUP_NONE = "不处理"
+RENDER_CLEANUP_CHOICES = (RENDER_CLEANUP_UNLOAD, RENDER_CLEANUP_CACHE, RENDER_CLEANUP_NONE)
+
+
+def _memory_snapshot() -> Optional[dict[str, float]]:
+    """(进程内存, 已分配显存, 已保留显存) 的 GB 快照；取不到的项就不放进去。"""
+    snapshot: dict[str, float] = {}
+    try:
+        snapshot["ram"] = psutil.Process(os.getpid()).memory_info().rss / (1024 ** 3)
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            snapshot["vram_used"] = torch.cuda.memory_allocated() / (1024 ** 3)
+            snapshot["vram_reserved"] = torch.cuda.memory_reserved() / (1024 ** 3)
+    except Exception:
+        pass
+    return snapshot
+
+
+def _format_memory(snapshot: Optional[dict[str, float]]) -> str:
+    if not snapshot:
+        return "取不到内存数据"
+    parts = []
+    if "ram" in snapshot:
+        parts.append(f"内存 {snapshot['ram']:.1f}G")
+    if "vram_used" in snapshot:
+        parts.append(f"显存 {snapshot['vram_used']:.1f}G(保留 {snapshot['vram_reserved']:.1f}G)")
+    return "，".join(parts) or "取不到内存数据"
+
+
+def _release_render_resources(mode: Any) -> None:
+    """渲染收尾：按 mode 释放显存与内存。
+
+    ``卸载模型`` 把模型一并卸出显存并回收内存，占用最低，代价是下次运行要重新加载；
+    ``释放缓存`` 只把 PyTorch 缓存的显存块还给驱动、回收 Python 内存，模型仍留在显存里，
+    下次运行更快；``不处理`` 保持 ComfyUI 默认行为。清理只是收尾，任何失败都只记一行日志。
+    """
+    policy = str(mode or "").strip()
+    if policy not in RENDER_CLEANUP_CHOICES or policy == RENDER_CLEANUP_NONE:
+        return
+    before = _memory_snapshot()
+    try:
+        if policy == RENDER_CLEANUP_UNLOAD:
+            comfy.model_management.unload_all_models()
+        comfy.model_management.soft_empty_cache(force=True)
+    except Exception as exc:
+        print(f"[MiniMax H3 Aicg] 渲染后释放显存失败（已忽略）：{exc}")
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    after = _memory_snapshot()
+    print(
+        f"[MiniMax H3 Aicg] 渲染结束已清理（{policy}）："
+        f"{_format_memory(before)} -> {_format_memory(after)}"
+    )
+
+
 class MiniMaxH3EasyRenderAdvanced:
     """AICG-渲染器（高级）
 
@@ -6166,6 +6211,19 @@ class MiniMaxH3EasyRenderAdvanced:
                     "FLOAT",
                     {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01},
                 ),
+                # 追加在最后：旧工作流的 widget 位置不受影响。
+                "cleanup_after_run": (
+                    list(RENDER_CLEANUP_CHOICES),
+                    {
+                        "default": RENDER_CLEANUP_UNLOAD,
+                        "tooltip": (
+                            "跑完这个节点后怎么收尾："
+                            "卸载模型 = 连模型一起卸出显存并回收内存，占用最低，但下次运行要重新加载；"
+                            "释放缓存 = 只把 PyTorch 缓存的显存还给驱动并回收内存，模型留在显存里，下次跑得快；"
+                            "不处理 = 保持 ComfyUI 默认行为。"
+                        ),
+                    },
+                ),
             },
         }
 
@@ -6192,7 +6250,16 @@ class MiniMaxH3EasyRenderAdvanced:
             audio = nodes_audio.vae_decode_audio(h3_context.audio_vae, sampled)
         return frames, audio
 
-    def render(self, h3_context, noise_seed, sampler_name, scheduler, steps, denoise):
+    def render(
+        self,
+        h3_context,
+        noise_seed,
+        sampler_name,
+        scheduler,
+        steps,
+        denoise,
+        cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+    ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
         model = _resolve_h3_model(h3_context)
@@ -6202,12 +6269,16 @@ class MiniMaxH3EasyRenderAdvanced:
                 "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
             )
         from .aicg3d_sampler import AICG3DSamplerAdvanced
-        from .render_progress import RenderPreviewEncoder, RenderProgressReporter
+        from .render_progress import SAMPLE_PREVIEW_ENABLED, RenderPreviewEncoder, RenderProgressReporter
 
         # 前端会在节点底部按这些进度画一条百分比进度条（带已用时间与剩余估计），
-        # 采样占 90%，解码与合成占剩下 10%；每一步再补一张实时预览图。
+        # 采样占 90%，解码与合成占剩下 10%。节点上不显示采样预览图；需要时把
+        # render_progress.SAMPLE_PREVIEW_ENABLED 改成 True 再挂上预览回调。
         reporter = RenderProgressReporter()
-        preview = RenderPreviewEncoder(model)
+        preview = RenderPreviewEncoder(model) if SAMPLE_PREVIEW_ENABLED else None
+        on_preview = None
+        if preview is not None:
+            on_preview = lambda x0, *_info: reporter.update_preview(preview.decode(x0))
         done = False
         try:
             reporter.begin_sample(steps)
@@ -6221,7 +6292,7 @@ class MiniMaxH3EasyRenderAdvanced:
                 steps,
                 denoise,
                 on_step=reporter.update_sample,
-                on_preview=lambda x0, *_info: reporter.update_preview(preview.encode(x0)),
+                on_preview=on_preview,
             )
             reporter.begin_decode()
             frames, audio = self._decode_av(h3_context, sampled)
@@ -6244,6 +6315,9 @@ class MiniMaxH3EasyRenderAdvanced:
             return (video,)
         finally:
             reporter.finish(done)
+            # 采样与解码的大张量到这里已经交出去了，收尾时释放显存与内存，
+            # 让长视频渲染结束后不再一直占着显卡。
+            _release_render_resources(cleanup_after_run)
 
 
 class MiniMaxH3EasySelfLiftStrategy:

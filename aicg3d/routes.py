@@ -18,7 +18,7 @@ from typing import Any
 import folder_paths
 from aiohttp import web
 
-from . import skills as skill_lib
+from . import prompt_guides as guide_lib, skills as skill_lib
 
 VERSION = "1.0.0"
 MEDIA_KINDS = {
@@ -220,8 +220,14 @@ def register_routes() -> bool:
             "version": VERSION,
             "skills": len(skill_lib.discover()),
             "presets": len(skill_lib.discover_presets()),
+            "prompt_guides": len(guide_lib.items()),
             "loras": len(folder_paths.get_filename_list("loras")),
         })
+
+    @routes.get("/aicg3d/api/prompt-guides")
+    async def aicg3d_prompt_guides(_request):
+        """提示词方案列表：直接来自 prompt_guides/ 目录扫描，增删文件夹即时生效。"""
+        return web.json_response({"guides": guide_lib.payload()})
 
     @routes.get("/aicg3d/api/skills")
     async def aicg3d_skills(_request):

@@ -569,6 +569,21 @@ def _has_role(name: str, role: str) -> bool:
     return False
 
 
+def _h3_reference_capable(name: str) -> bool:
+    """这条 H3 权重是否自带参考（多参考 / 参考生视频）能力。
+
+    H3 官方把权重分成 FL2VA（首尾帧）与 REF2VA（多参考）两套，社区还有把两者合进
+    一个文件的版本：``fused``、``hybrid``、``refdelta``。这类文件放进 FL2VA 槽位
+    照样能跑参考模式，不该再报「没有可用的 REF2VA 权重」。
+    """
+    normalised = _normalise_model_name(name)
+    compact = normalised.replace(" ", "")
+    tokens = set(normalised.split())
+    if "minimax" not in tokens and "h3" not in compact:
+        return False
+    return any(word in compact for word in ("ref2va", "ref2v", "refdelta", "hybrid", "fused"))
+
+
 def _sort_model_names(names: list[str]) -> list[str]:
     def sort_key(name: str) -> tuple[int, int, str]:
         normalised = _normalise_model_name(name)
@@ -2669,6 +2684,32 @@ def _ref_model_choices() -> list[str]:
     return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=True)
 
 
+def _reference_capable_names() -> list[str]:
+    """机型里所有自带参考能力的 H3 权重（按稳定顺序）。"""
+    names = _collect_weight_names(("diffusion_models", "unet", "unet_gguf"))
+    return _sort_model_names([name for name in names if _h3_reference_capable(name)])
+
+
+def _preferred_model_default(role: str) -> str:
+    """两个模型槽位新建节点时的默认值。
+
+    以前不给默认值，ComfyUI 就取候选列表的第一项 —— 也就是按字母排序最靠前的那条
+    权重，常见结果是 Anima 这类 2D 图像模型。两个槽位带着一条根本不能用的权重开局，
+    参考模式再静默回落到 FL2VA，用户只看到一句「REF2VA 槽位没有可用权重」。这里按
+    角色挑一条真能用的：REF2VA 优先跟 FL2VA 用同一条自带参考能力的权重（社区 fused
+    版本就是这样，省掉第二个几十 GB 的模型），一条都没有时明确留空，而不是静默顶替。
+    """
+    names = _collect_weight_names(("diffusion_models", "unet", "unet_gguf"))
+    fl2va_names = _sort_model_names([name for name in names if _has_role(name, "fl2va")])
+    fl2va_default = fl2va_names[0] if fl2va_names else ""
+    if role == "ref2va" and fl2va_default and _h3_reference_capable(fl2va_default):
+        return fl2va_default
+    if role != "ref2va" and fl2va_default:
+        return fl2va_default
+    reference_names = _sort_model_names([name for name in names if _h3_reference_capable(name)])
+    return reference_names[0] if reference_names else NONE_MODEL
+
+
 # AICG3D：加载器内置 LoRA 槽位，省掉外挂 LoraLoaderModelOnly 的连线。
 LORA_SLOT_COUNT = 9
 # 前 4 个槽位是初版就有的，位置不能动：旧工作流的 widgets_values 是按位置存的，
@@ -3001,6 +3042,32 @@ class MiniMaxH3Bundle:
         fallback = self.fl2va_model_obj if requested_kind == "ref2va" else self.ref2va_model_obj
         return fallback
 
+    def _report_slot_fallback(self, kind: str, candidate_kind: str, candidate_name: str) -> None:
+        """另一个槽位的权重顶上来时，说清楚是正常替代还是该去换一条参考权重。"""
+        requested = str((self.ref2va_model_name if kind == "ref2va" else self.fl2va_model_name) or "").strip()
+        if not requested or _is_none_model(requested):
+            reason = f"{_h3_slot_label(kind)} 槽位没有选权重"
+        else:
+            detail = _cached_non_h3_detail(requested)
+            reason = (
+                f"{_h3_slot_label(kind)} 槽位选的 {requested} 不是 MiniMax H3 主干（{detail}）"
+                if detail
+                else f"{_h3_slot_label(kind)} 槽位选的 {requested} 当前用不了"
+            )
+        head = (
+            f"[MiniMax H3 Aicg] {reason}，改用 "
+            f"{_h3_slot_label(candidate_kind)} 槽位的 {candidate_name}。"
+        )
+        if kind != "ref2va":
+            print(head + "首尾帧模式不受影响。")
+            return
+        if _h3_reference_capable(candidate_name):
+            print(head + "这条权重自带参考能力（fused / hybrid / refdelta），参考模式可以正常跑。")
+            return
+        options = _reference_capable_names()
+        hint = f" 本机可选：{'、'.join(options[:3])}。" if options else ""
+        print(head + "它只覆盖首尾帧，多参考效果会打折；要真·多参考，请在 REF2VA 槽位选一条 H3 参考权重。" + hint)
+
     def model_for(self, kind: str):
         kind = "ref2va" if kind == "ref2va" else "fl2va"
         with self._lock:
@@ -3050,10 +3117,7 @@ class MiniMaxH3Bundle:
                 self._model_kind = kind
                 self._model_name = candidate_name
                 if candidate_kind != kind:
-                    print(
-                        f"[MiniMax H3 Aicg] {_h3_slot_label(kind)} 槽位没有可用的 MiniMax H3 "
-                        f"权重，已自动改用 {_h3_slot_label(candidate_kind)} 槽位的 {candidate_name}。"
-                    )
+                    self._report_slot_fallback(kind, candidate_kind, candidate_name)
                 return self._with_loras(self._model)
 
             raise _h3_missing_model_error(kind, rejected)
@@ -3611,8 +3675,24 @@ class MiniMaxH3EasyLoader:
         # AICG3D：ref2va_model 保留在列表末尾之外的位置以兼容旧工作流的 widget 顺序。
         # LoRA 槽位分两段追加（见下面的常量说明），保证旧工作流的位置映射不变。
         required = {
-            "fl2va_model": (_model_choices(),),
-            "ref2va_model": (_ref_model_choices(),),
+            "fl2va_model": (
+                _model_choices(),
+                {
+                    "default": _preferred_model_default("fl2va"),
+                    "tooltip": "首尾帧主干（FL2VA）。列表里是本机所有权重，选错会在采样前给出提示。",
+                },
+            ),
+            "ref2va_model": (
+                _ref_model_choices(),
+                {
+                    "default": _preferred_model_default("ref2va"),
+                    "tooltip": (
+                        "多参考主干（REF2VA）：参考生视频 / 数字人模式走这条权重。"
+                        "fused / hybrid / refdelta 这类自带参考能力的融合模型，放在 FL2VA 槽位也够用，"
+                        "这条留空即可；想用官方独立的 REF2VA 权重（注意它不是 turbo 版，步数要给够），才在这里选它。"
+                    ),
+                },
+            ),
             "text_encoder": (_clip_choices(),),
             "video_vae": (_vae_choices(("minimax_h3_video_vae",), "minimax_h3_video_vae_fp16.safetensors"),),
             "audio_vae": (_vae_choices(("minimax_h3_audio_vae",), "minimax_h3_audio_vae_fp32.safetensors"),),

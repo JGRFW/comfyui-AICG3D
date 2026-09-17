@@ -12,12 +12,14 @@
 「已经跑了多久、还要多久」。这里把阶段进度通过 WebSocket 的
 ``aicg3d_render_progress`` 消息推给前端，前端在节点底部画一条百分比进度条。
 
+节点上不显示采样预览图，只显示上面那条百分比进度条（含已用时间与剩余估计）。
+采样预览的整套通道仍然保留（``RenderPreviewEncoder`` + ``preview_native_tuple`` +
+``SAMPLE_PREVIEW_ENABLED``），需要时把开关改成 True 就能恢复。
+
 上报失败一律静默：进度只是观感，绝不能影响出图。
 """
 from __future__ import annotations
 
-import base64
-import io
 import time
 from typing import Any, Optional
 
@@ -33,6 +35,9 @@ _MIN_INTERVAL = 0.2
 
 #: 预览图最长边（像素），和 ComfyUI 原生预览的 MAX_PREVIEW_RESOLUTION 同量级。
 _PREVIEW_MAX_SIDE = 512
+
+#: 是否在节点上显示采样预览图。默认关闭：只有百分比进度条，节点不再画图。
+SAMPLE_PREVIEW_ENABLED = False
 
 
 def executing_ids() -> tuple[Optional[str], Optional[str]]:
@@ -78,9 +83,6 @@ class RenderProgressReporter:
         self.overall = 0.0
         self.finished = False
         self.ok = True
-        #: 最近一张预览（data URL），只在更新过的那次上报里带给前端。
-        self.preview = ""
-        self._preview_dirty = False
         self._last_sent_at = 0.0
 
     # ------------------------------------------------------------------ 内部
@@ -107,9 +109,6 @@ class RenderProgressReporter:
             "done": self.finished,
             "ok": self.ok,
         }
-        if self._preview_dirty and self.preview:
-            # 只有换图的那一次才带预览，避免每条消息都重复几十 KB 的 base64。
-            payload["preview"] = self.preview
         return payload
 
     def _send(self, force: bool = False) -> None:
@@ -119,7 +118,6 @@ class RenderProgressReporter:
         self._last_sent_at = now
         server = progress_server()
         payload = self._payload()
-        self._preview_dirty = False
         if server is None:
             return
         try:
@@ -150,13 +148,14 @@ class RenderProgressReporter:
         self.overall = SAMPLE_SHARE * ratio
         self._send(force=self.stage_total > 0 and self.stage_value >= self.stage_total)
 
-    def update_preview(self, data_url: Optional[str]) -> None:
-        """收到一张新预览图：立刻推给前端，前端在节点里画出来。"""
-        if not data_url:
-            return
-        self.preview = data_url
-        self._preview_dirty = True
-        self._send(force=True)
+    def update_preview(self, image: Any) -> Optional[Any]:
+        """收到一张新预览图：交给采样器走 ComfyUI 原生预览通道上报。
+
+        返回值是 ComfyUI 原生进度 hook 认的 ``(格式, PIL 图, 最大边)``，由
+        ``aicg3d_sampler`` 塞进 ``ProgressBar.update_absolute``。默认关掉预览
+        （``SAMPLE_PREVIEW_ENABLED``）时根本不会走到这里。拿不到图时返回 None。
+        """
+        return preview_native_tuple(image)
 
     def begin_decode(self) -> None:
         """解码 / 合成阶段：没有可拆分的步数，只报阶段名。"""
@@ -175,11 +174,20 @@ class RenderProgressReporter:
             self.stage = STAGE_DECODE
         self._send(force=True)
 
-class RenderPreviewEncoder:
-    """把采样中间结果 x0 编成 JPEG data URL，供前端在节点里实时预览。
+def preview_native_tuple(image: Any) -> Optional[tuple]:
+    """PIL 预览图 -> ComfyUI 原生进度 hook 认的 ``(格式, 图, 最大边)``。
 
-    ComfyUI 自带的预览是挂在「进度条 hook」上发给前端的，只有 Vue 节点模式
-    才会画到节点上；本插件跑的是经典画布模式，所以这里自己解码、自己发。
+    第三个元素是「最大边长」，None 表示让 ComfyUI 原样发送。图在
+    ``RenderPreviewEncoder`` 里已经放大过一次，这里再缩会糊，所以传 None。
+    """
+    if image is None:
+        return None
+    return ("JPEG", image, None)
+
+
+class RenderPreviewEncoder:
+    """把采样中间结果 x0 解成一张放大的 PIL 预览图，交给 ComfyUI 原生预览通道。
+
     任何一步失败都直接返回 None，绝不影响出图。
     """
 
@@ -220,8 +228,8 @@ class RenderPreviewEncoder:
     def available(self) -> bool:
         return self._previewer is not None
 
-    def encode(self, x0: Any) -> Optional[str]:
-        """x0 -> ``data:image/jpeg;base64,...``；拿不到预览就返回 None。"""
+    def decode(self, x0: Any) -> Optional[Any]:
+        """x0 -> 放大后的 PIL 预览图；拿不到预览就返回 None。"""
         if self._previewer is None or x0 is None:
             return None
         try:
@@ -238,10 +246,7 @@ class RenderPreviewEncoder:
             image = decoded[1] if isinstance(decoded, tuple) else decoded
             if image is None:
                 return None
-            image = self._upscale(image).convert("RGB")
-            buffer = io.BytesIO()
-            image.save(buffer, format="JPEG", quality=85)
-            return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+            return self._upscale(image).convert("RGB")
         except Exception:
             return None
 

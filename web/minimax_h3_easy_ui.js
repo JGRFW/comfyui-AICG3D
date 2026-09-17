@@ -77,7 +77,12 @@ const UNRESOLVED_REF_PREFIX = "__MINIMAX_H3_UNRESOLVED_REF_";
 const DIALOGUE_CLASS = "h3-dialogue-block";
 const PROMPT_VIEW_STRUCTURED = "structured";
 const PROMPT_VIEW_RAW = "raw";
-const PROMPT_GUIDES = [
+/* 提示词方案列表：内置这份只是接口拿不到时的兜底。正常运行时会用
+   ``/aicg3d/api/prompt-guides`` 返回的 prompt_guides/ 目录扫描结果整体替换，
+   所以增删方案只需要在 prompt_guides/ 里加目录或删目录。 */
+const PROMPT_GUIDE_ENDPOINT = "/aicg3d/api/prompt-guides";
+const PROMPT_GUIDE_WIDGETS = ["prompt_optimizer_scene_guide", "scene_guide"];
+const BUILTIN_PROMPT_GUIDES = [
     { value: "none", zh: "\u901a\u7528", en: "General only", languages: ["en", "zh"] },
     { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short", languages: ["en", "zh"] },
     { value: "brand_promo", zh: "\u54c1\u724c\u5ba3\u4f20\u7247", en: "Brand Promo Video", languages: ["en", "zh"] },
@@ -96,6 +101,7 @@ const PROMPT_GUIDES = [
     { value: "surreal_cinematic_keyframe_director", zh: "\u8d85\u73b0\u5b9e\u7535\u5f71\u5e95\u56fe\u5bfc\u6f14", en: "Surreal Cinematic Keyframe Director", languages: ["zh"] },
     { value: "short_scene_director_lite", zh: "15 \u79d2\u5267\u60c5\u955c\u5934\u5bfc\u6f14", en: "15s Scene Director Lite", languages: ["zh"] },
 ];
+const PROMPT_GUIDES = [...BUILTIN_PROMPT_GUIDES];
 const MODE_IMAGE = "image";
 const MODE_REFERENCE = "reference";
 const MODE_DIGITAL_HUMAN = "digital_human";
@@ -300,6 +306,7 @@ const TEXT = {
     schedulerLabel: ZH_BROWSER ? "\u8c03\u5ea6\u5668" : "Scheduler",
     stepsLabel: ZH_BROWSER ? "\u6b65\u6570" : "Steps",
     denoiseLabel: ZH_BROWSER ? "\u964d\u566a" : "Denoise",
+    cleanupLabel: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
     renderTitle: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u9ad8\u7ea7\uff09" : "AICG Render (Advanced)",
     renderVideo: ZH_BROWSER ? "\u6210\u7247\u89c6\u9891" : "Video",
     renderPreviewIdle: ZH_BROWSER ? "\u8fd0\u884c\u4e2d\u8fd9\u91cc\u663e\u793a\u5b9e\u65f6\u9884\u89c8" : "Live preview appears here while running",
@@ -912,6 +919,47 @@ function promptGuideOptionsForLanguage(language) {
     );
 }
 
+function promptGuideGraphs() {
+    return renderProgressGraphs();
+}
+
+/** 把接口返回的一条方案整理成下拉要的形状；缺 id 的直接丢掉。 */
+function normalizePromptGuideEntry(raw) {
+    const value = String(raw?.id ?? "").trim();
+    if (!value) return null;
+    const fallbackName = String(raw?.name ?? "").trim() || value;
+    const nameZh = String(raw?.name_zh ?? "").trim() || fallbackName;
+    const nameEn = String(raw?.name_en ?? "").trim() || fallbackName;
+    const languages = Array.isArray(raw?.languages) && raw.languages.length
+        ? [...new Set(raw.languages.map((item) => promptGuideLanguage(item)))]
+        : ["zh", "en"];
+    return { value, zh: nameZh, en: nameEn, languages };
+}
+
+/** 列表变化后，把画布上已有的方案控件重新指向新选项。 */
+function applyPromptGuideOptions() {
+    for (const graph of promptGuideGraphs()) {
+        for (const node of graph?._nodes || []) {
+            for (const widget of node?.widgets || []) {
+                if (!PROMPT_GUIDE_WIDGETS.includes(widget?.name)) continue;
+                localizeComboWidget(widget, node);
+            }
+        }
+    }
+}
+
+/** 用 prompt_guides/ 目录的真实内容替换内置列表：用户增删文件夹即时生效。 */
+async function refreshPromptGuides() {
+    const response = await api.fetchApi(PROMPT_GUIDE_ENDPOINT);
+    if (!response.ok) throw new Error(`${PROMPT_GUIDE_ENDPOINT} -> HTTP ${response.status}`);
+    const payload = await response.json();
+    const guides = (payload?.guides || []).map(normalizePromptGuideEntry).filter(Boolean);
+    if (!guides.length) return false;
+    PROMPT_GUIDES.splice(0, PROMPT_GUIDES.length, ...guides);
+    applyPromptGuideOptions();
+    return true;
+}
+
 function canonicalPromptGuideForLanguage(value, language) {
     const raw = String(value ?? "");
     const found = promptGuidesForLanguage(language).find(
@@ -979,6 +1027,7 @@ function localizeNodeInstance(node) {
             scheduler: TEXT.schedulerLabel,
             steps: TEXT.stepsLabel,
             denoise: TEXT.denoiseLabel,
+            cleanup_after_run: TEXT.cleanupLabel,
         };
         for (const widget of node.widgets || []) {
             if (widgetLabels[widget.name]) widget.label = widgetLabels[widget.name];
@@ -9292,6 +9341,8 @@ function install() {
         }
     }, true);
     setTimeout(() => loadPromptOptimizerSettings().catch(() => {}), 0);
+    // 提示词方案来自 prompt_guides/ 目录，拉一次即可；失败就用内置列表。
+    setTimeout(() => refreshPromptGuides().catch(() => {}), 0);
     const style = document.createElement("style");
     style.textContent = `
       .h3-prompt-editor-wrap {
@@ -9491,21 +9542,17 @@ function install() {
 }
 
 /* ==========================================================================
-   AICG-渲染器（高级）进度条 + 实时预览
+   AICG-渲染器（高级）百分比进度条
    后端 h3easy/render_progress.py 通过 WebSocket 发 aicg3d_render_progress，
-   这里在节点底部画两样东西：
-     1. 实时预览图：采样每一步更新一次（节点的 x0 潜空间预览），跑起来就能看
-        画面对不对，不用等出片；
-     2. 百分比进度条：百分比 + 已用时间 + 剩余估计。
+   这里在节点底部画一条进度条：百分比 + 阶段 + 已用时间 + 剩余估计。
    采样阶段按步数走，解码 / 合成阶段没有步数可拆，改用来回跑的亮条。
+   采样预览图不走这里：交给 ComfyUI 原生预览通道，Nodes 2.0 画在节点正文里。
    ========================================================================== */
 const RENDER_PROGRESS_EVENT = "aicg3d_render_progress";
 const RENDER_PROGRESS_AREA = 34;
-const RENDER_PREVIEW_HEIGHT = 150;
 const RENDER_PROGRESS_TTL = 5000;
 const RENDER_PROGRESS_TICK = 250;
 const RENDER_PROGRESS_STATE = new Map();
-const RENDER_PREVIEW_IMAGE = new Map();
 let renderProgressListenerReady = false;
 let renderProgressTicker = null;
 
@@ -9514,73 +9561,36 @@ function renderProgressNodeId(node) {
     return Number.isFinite(id) ? String(id) : "";
 }
 
+/* 正在跑的节点挂在根图上，但工作流里套了子图、或者用户正在编辑子图时 app.graph
+   不一定拿得到它。找不到就退回按 id 扫一遍所有已知图，免得节点找不到导致预览图
+   与进度条都不刷新。 */
+function renderProgressGraphs() {
+    const graphs = [];
+    for (const graph of [app.graph, app.canvas?.graph, app.rootGraph]) {
+        if (graph && !graphs.includes(graph)) graphs.push(graph);
+    }
+    return graphs;
+}
+
 function renderProgressNodeFor(key) {
-    return app.graph?.getNodeById?.(Number(key)) || null;
-}
-
-function releaseRenderPreview(key) {
-    const entry = RENDER_PREVIEW_IMAGE.get(key);
-    if (!entry) return;
-    RENDER_PREVIEW_IMAGE.delete(key);
-    if (entry.objectUrl) {
-        try {
-            URL.revokeObjectURL(entry.objectUrl);
-        } catch (error) {
-            // 释放失败无所谓，浏览器会自己回收。
+    const numeric = Number(key);
+    const graphs = renderProgressGraphs();
+    for (const graph of graphs) {
+        const node = graph?.getNodeById?.(numeric) || graph?.getNodeById?.(key);
+        if (node) return node;
+    }
+    for (const graph of graphs) {
+        for (const node of graph?._nodes || []) {
+            if (String(node?.id) === String(key)) return node;
         }
     }
+    return null;
 }
 
-/* 后端发的是 data URL（JSON 里没法直接放二进制），这里换成 blob URL 再交给 Image，
-   免得每帧都拿几十 KB 的 base64 字符串去解码。 */
-function renderPreviewDataUrlToObjectUrl(dataUrl) {
-    try {
-        const comma = String(dataUrl).indexOf(",");
-        if (comma < 0) return "";
-        const meta = String(dataUrl).slice(0, comma);
-        const type = (meta.match(/^data:([^;,]+)/) || [])[1] || "image/jpeg";
-        const body = String(dataUrl).slice(comma + 1);
-        let bytes;
-        if (/;base64/i.test(meta)) {
-            const binary = atob(body);
-            bytes = new Uint8Array(binary.length);
-            for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-        } else {
-            bytes = new TextEncoder().encode(decodeURIComponent(body));
-        }
-        return URL.createObjectURL(new Blob([bytes], { type }));
-    } catch (error) {
-        return "";
-    }
-}
-
-function applyRenderPreview(key, dataUrl, node) {
-    const existing = RENDER_PREVIEW_IMAGE.get(key);
-    if (existing?.dataUrl === dataUrl) return;
-    const objectUrl = renderPreviewDataUrlToObjectUrl(dataUrl);
-    if (!objectUrl) return;
-    const entry = existing || { image: new Image(), objectUrl: "", dataUrl: "", ready: false };
-    const previous = entry.objectUrl;
-    entry.dataUrl = dataUrl;
-    entry.objectUrl = objectUrl;
-    entry.ready = false;
-    entry.image.onload = () => {
-        entry.ready = true;
-        if (previous && previous !== objectUrl) {
-            try {
-                URL.revokeObjectURL(previous);
-            } catch (error) {
-                // 释放失败无所谓。
-            }
-        }
-        renderProgressNodeFor(key)?.setDirtyCanvas?.(true, true);
-    };
-    entry.image.onerror = () => {
-        entry.ready = false;
-    };
-    entry.image.src = objectUrl;
-    RENDER_PREVIEW_IMAGE.set(key, entry);
-    node?.setDirtyCanvas?.(true, true);
+/* 换了预览图要主动喊重绘：LiteGraph 只重画「脏」的区域，光换图不会自己触发。 */
+function invalidateRenderCanvas(key, node) {
+    (node || renderProgressNodeFor(key))?.setDirtyCanvas?.(true, true);
+    app.canvas?.setDirty?.(true, true);
 }
 
 function ensureRenderProgressTicker() {
@@ -9591,7 +9601,6 @@ function ensureRenderProgressTicker() {
         for (const [key, state] of [...RENDER_PROGRESS_STATE]) {
             if (state.done && now - (state.finishedAt || 0) > RENDER_PROGRESS_TTL) {
                 RENDER_PROGRESS_STATE.delete(key);
-                releaseRenderPreview(key);
                 renderProgressNodeFor(key)?.setDirtyCanvas?.(true, true);
                 continue;
             }
@@ -9644,18 +9653,14 @@ function installRenderProgressListener() {
         };
         const node = renderProgressNodeFor(key);
         if (done && (!state.ok || state.overall < 1)) {
-            // 报错收尾：直接收起进度条和预览，不留残留。
+            // 报错收尾：直接收起进度条，不留残留。
             RENDER_PROGRESS_STATE.delete(key);
-            releaseRenderPreview(key);
         } else {
             if (done) state.finishedAt = Date.now();
             RENDER_PROGRESS_STATE.set(key, state);
         }
-        if (typeof detail.preview === "string" && detail.preview) applyRenderPreview(key, detail.preview, node);
-        if (node) {
-            reserveRenderProgressSpace(node);
-            node.setDirtyCanvas?.(true, true);
-        }
+        if (node) reserveRenderProgressSpace(node);
+        invalidateRenderCanvas(key, node);
         ensureRenderProgressTicker();
     });
 }
@@ -9664,7 +9669,6 @@ function forgetRenderProgress(node) {
     const key = renderProgressNodeId(node);
     if (!key) return;
     RENDER_PROGRESS_STATE.delete(key);
-    releaseRenderPreview(key);
 }
 
 /* 后端每步才推一次，消息之间用本地时钟把「已用 / 剩余」补圆滑。 */
@@ -9704,40 +9708,6 @@ function renderProgressPath(ctx, x, y, width, height, radius) {
     ctx.closePath();
 }
 
-/* 采样预览：等比缩放塞进预览框，居中显示。 */
-function drawRenderPreviewBox(ctx, key, box, idleText, textColor) {
-    const entry = RENDER_PREVIEW_IMAGE.get(key);
-    const image = entry?.ready ? entry.image : null;
-    const imageWidth = Number(image?.naturalWidth || image?.width || 0);
-    const imageHeight = Number(image?.naturalHeight || image?.height || 0);
-    ctx.save();
-    renderProgressPath(ctx, box.x, box.y, box.width, box.height, 8);
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(127,127,127,0.35)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.clip();
-    if (image && imageWidth > 0 && imageHeight > 0) {
-        const scale = Math.min(box.width / imageWidth, box.height / imageHeight);
-        const drawWidth = Math.max(1, imageWidth * scale);
-        const drawHeight = Math.max(1, imageHeight * scale);
-        ctx.drawImage(
-            image,
-            box.x + (box.width - drawWidth) / 2,
-            box.y + (box.height - drawHeight) / 2,
-            drawWidth,
-            drawHeight,
-        );
-    } else {
-        ctx.fillStyle = textColor;
-        ctx.globalAlpha = 0.35;
-        ctx.font = "11px sans-serif";
-        ctx.fillText(idleText, box.x + box.width / 2, box.y + box.height / 2);
-    }
-    ctx.restore();
-}
-
 function drawRenderProgress(node, ctx) {
     const key = renderProgressNodeId(node);
     if (!key || !ctx || typeof ctx.fillRect !== "function") return;
@@ -9755,21 +9725,6 @@ function drawRenderProgress(node, ctx) {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-
-    if (height >= RENDER_PREVIEW_HEIGHT + RENDER_PROGRESS_AREA + 40) {
-        drawRenderPreviewBox(
-            ctx,
-            key,
-            {
-                x: margin,
-                y: height - RENDER_PROGRESS_AREA - RENDER_PREVIEW_HEIGHT + 6,
-                width: barWidth,
-                height: RENDER_PREVIEW_HEIGHT - 12,
-            },
-            TEXT.renderPreviewIdle,
-            textColor,
-        );
-    }
 
     if (!state) {
         ctx.restore();
@@ -9850,12 +9805,12 @@ function installRenderNode(nodeType, nodeData) {
         setup(this);
         return result;
     };
-    // 底部永久留出「预览图 + 进度条」的位置，免得它们压住最后一个参数控件。
+    // 底部永久留出进度条的位置，免得它压住最后一个参数控件。
     const originalComputeSize = nodeType.prototype.computeSize;
     nodeType.prototype.computeSize = function computeSizeH3Render() {
         const size = originalComputeSize?.apply(this, arguments) || [210, 100];
         if (Array.isArray(size)) {
-            size[1] = (Number(size[1]) || 100) + RENDER_PROGRESS_AREA + RENDER_PREVIEW_HEIGHT;
+            size[1] = (Number(size[1]) || 100) + RENDER_PROGRESS_AREA;
         }
         return size;
     };

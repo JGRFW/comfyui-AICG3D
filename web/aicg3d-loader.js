@@ -39,6 +39,34 @@ function isNone(value) {
     return NONE_VALUES.has(String(value ?? "").trim().toLowerCase());
 }
 
+// 与 h3easy/nodes.py 的 LORA_SLOT_COUNT_LEGACY 保持一致。
+const LEGACY_SLOT_COUNT = 4;
+
+/** LoRA 槽位在 widgets_values 里的下标（顺序由 h3easy/nodes.py 的 INPUT_TYPES 决定）。 */
+function savedLoraIndex(index) {
+    const base = MODEL_WIDGETS.length;
+    if (index <= LEGACY_SLOT_COUNT) return base + (index - 1) * 2;
+    return base + LEGACY_SLOT_COUNT * 2 + 1 + (index - LEGACY_SLOT_COUNT - 1) * 2;
+}
+
+/** 载入工作流后槽位若被前端还原成空值，就按存档把 LoRA 补回去。
+    只补后端仍然提供的权重，避免把一个不存在的文件写进节点。 */
+function repairLoraFromArchive(node, values) {
+    if (!Array.isArray(values)) return;
+    for (let index = 1; index <= SLOT_COUNT; index += 1) {
+        const slot = savedLoraIndex(index);
+        const saved = values[slot];
+        if (saved === undefined || saved === null || isNone(saved)) continue;
+        const widget = widgetOf(node, `lora_${index}`);
+        if (!widget || !isNone(widget.value)) continue;
+        const options = Array.isArray(widget.options?.values) ? widget.options.values : null;
+        if (options && !options.some((item) => String(item) === String(saved))) continue;
+        setWidgetValue(node, `lora_${index}`, saved);
+        const strength = Number(values[slot + 1]);
+        if (Number.isFinite(strength)) setWidgetValue(node, `lora_${index}_strength`, strength);
+    }
+}
+
 function hideWidget(widget) {
     if (!widget) return;
     widget.__a3Hidden = true;
@@ -160,10 +188,24 @@ function buildLoraRow(node, index, loraMeta) {
     number.addEventListener("change", () => writeStrength(number.value));
     number.addEventListener("pointerdown", (event) => event.stopPropagation());
 
+    /* 启用状态与权重都要按控件当前值重算：载入工作流是在面板建好之后
+       才把存档写进控件的，用构造时的快照会让重启后的槽位显示成未启用。 */
+    function syncStrength() {
+        if (!strengthWidget) return;
+        if (slider === document.activeElement || number === document.activeElement) return;
+        const raw = Number(strengthWidget.value);
+        const weight = Number.isFinite(raw) ? raw : 1;
+        if (Math.abs(Number(slider.value) - weight) < 1e-6) return;
+        slider.value = String(weight);
+        number.value = weight.toFixed(2);
+    }
+
     function syncRow() {
-        row.classList.toggle("is-on", enabled);
         const current = String(nameWidget?.value ?? "none");
+        enabled = !isNone(current);
+        row.classList.toggle("is-on", enabled);
         select.setValue(current);
+        syncStrength();
         const meta = loraMeta.find((item) => item.name === current);
         if (meta?.preview) {
             preview.src = meta.preview;
@@ -523,10 +565,23 @@ function installLoaderNode(nodeType, nodeData) {
 
     chain("onNodeCreated", (node) => setup(node));
     chain("onAdded", (node) => setup(node));
-    chain("onConfigure", (node) => {
+    chain("onConfigure", (node, args) => {
         setup(node);
+        const saved = args?.[0]?.widgets_values;
         node.__a3LoaderSync?.();
-        setTimeout(() => resize(node), 0);
+        // 载入工作流后再补几次：Nodes 2.0 的响应式控件表挂载时可能把值推回默认，
+        // 补回存档里的 LoRA 并刷新面板，避免「保存好了、重启后又得重新选」。
+        for (const delay of [0, 200, 800]) {
+            setTimeout(() => {
+                try {
+                    repairLoraFromArchive(node, saved);
+                    node.__a3LoaderSync?.();
+                    resize(node);
+                } catch (error) {
+                    console.error("[AICG3D]", error);
+                }
+            }, delay);
+        }
     });
 }
 

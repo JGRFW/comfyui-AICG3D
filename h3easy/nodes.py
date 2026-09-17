@@ -584,6 +584,22 @@ def _h3_reference_capable(name: str) -> bool:
     return any(word in compact for word in ("ref2va", "ref2v", "refdelta", "hybrid", "fused"))
 
 
+def _reference_capability_note(candidate_name: str, candidate_kind: str) -> str:
+    """按这条权重自己的类型说明参考能力，别把官方 REF2VA 也笼统说成融合权重。"""
+    compact = _normalise_model_name(candidate_name).replace(" ", "")
+    has_ref = "ref2va" in compact or "ref2v" in compact
+    has_flow = "fl2va" in compact or "fl2v" in compact
+    if has_ref and has_flow:
+        note = "这条是 FL2VA + REF2VA 融合权重，多参考可以直接跑。"
+    elif has_ref:
+        note = "这条就是官方 REF2VA 多参考权重，多参考可以直接跑；它不是 turbo 版，步数要给足。"
+    else:
+        note = "这条自带参考能力（fused / refdelta 类融合权重），多参考可以直接跑。"
+    if candidate_kind == "fl2va" and has_ref and not has_flow:
+        note += "不过它更适合放在 REF2VA 槽位，首尾帧 / 纯文生视频请给 FL2VA 槽位另选一条 fl2va 或融合权重。"
+    return note
+
+
 def _sort_model_names(names: list[str]) -> list[str]:
     def sort_key(name: str) -> tuple[int, int, str]:
         normalised = _normalise_model_name(name)
@@ -3046,7 +3062,7 @@ class MiniMaxH3Bundle:
         """另一个槽位的权重顶上来时，说清楚是正常替代还是该去换一条参考权重。"""
         requested = str((self.ref2va_model_name if kind == "ref2va" else self.fl2va_model_name) or "").strip()
         if not requested or _is_none_model(requested):
-            reason = f"{_h3_slot_label(kind)} 槽位没有选权重"
+            reason = f"{_h3_slot_label(kind)} 槽位留空"
         else:
             detail = _cached_non_h3_detail(requested)
             reason = (
@@ -3062,7 +3078,7 @@ class MiniMaxH3Bundle:
             print(head + "首尾帧模式不受影响。")
             return
         if _h3_reference_capable(candidate_name):
-            print(head + "这条权重自带参考能力（fused / hybrid / refdelta），参考模式可以正常跑。")
+            print(head + _reference_capability_note(candidate_name, candidate_kind))
             return
         options = _reference_capable_names()
         hint = f" 本机可选：{'、'.join(options[:3])}。" if options else ""

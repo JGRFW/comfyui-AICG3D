@@ -55,6 +55,7 @@ import comfy.sample
 import comfy.samplers
 import comfy.utils
 import comfy.model_management
+import comfy.latent_formats
 import folder_paths
 import node_helpers
 import nodes
@@ -93,6 +94,11 @@ REFERENCE_MENTION_INDEX = "index"
 NONE_MODEL = "none"
 NONE_MODEL_DISPLAY_VALUES = (NONE_MODEL, "None", "无")
 NONE_MODEL_ALIASES = {value.lower() for value in NONE_MODEL_DISPLAY_VALUES}
+# AICG3D：加载器槽位填了非 MiniMax H3 主干（例如 Anima 这类 2D 图像模型）时的处理方式。
+# 两种都是"能加载任何文件"，区别只在发现跑不了之后怎么办。
+NON_H3_POLICY_FALLBACK = "自动回落"
+NON_H3_POLICY_STRICT = "按所选加载"
+NON_H3_POLICY_CHOICES = (NON_H3_POLICY_FALLBACK, NON_H3_POLICY_STRICT)
 RESOLUTION_360 = "360P"
 RESOLUTION_416 = "416P"
 RESOLUTION_480 = "480P"
@@ -2680,8 +2686,12 @@ def _ref_model_choices() -> list[str]:
     return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=True)
 
 
-# AICG3D：加载器内置 4 个 LoRA 槽位，省掉外挂 LoraLoaderModelOnly 的连线。
-LORA_SLOT_COUNT = 4
+# AICG3D：加载器内置 LoRA 槽位，省掉外挂 LoraLoaderModelOnly 的连线。
+LORA_SLOT_COUNT = 9
+# 前 4 个槽位是初版就有的，位置不能动：旧工作流的 widgets_values 是按位置存的，
+# 把新槽位插在中间会把 non_h3_policy 的值挤到 lora_5 上。第 5 个起统一排在
+# non_h3_policy 后面，见 MiniMaxH3EasyLoader.INPUT_TYPES。
+LORA_SLOT_COUNT_LEGACY = 4
 
 
 def _lora_choices() -> list[str]:
@@ -2816,6 +2826,117 @@ def _load_text_encoder(text_encoder: str):
         return loader.load_clip(text_encoder, type="minimax")[0]
 
 
+def _h3_slot_label(kind: str) -> str:
+    """加载器槽位的中文/英文展示名，用在报错信息里。"""
+    return "REF2VA" if kind == "ref2va" else "FL2VA"
+
+
+def _h3_transformer_mismatch(model: Any) -> str | None:
+    """判断加载出来的 MODEL 是不是 MiniMax H3 主干。
+
+    H3 的 latent 是 5 维音视频嵌套结构，接到普通图像模型（例如 Anima）上会在
+    ComfyUI 采样内部抛出很难读的 "tuple index out of range"。这里提前识别并给出
+    人类可读的模型类型。只有能确定"不是 H3"时才返回描述：拿不到类型信息就返回
+    None 放行，避免误伤自定义包装 / 适配器 / LoRA 路径。
+    """
+    inner = model
+    owner = None
+    for _ in range(5):
+        if inner is None:
+            break
+        if getattr(inner, "latent_format", None) is not None:
+            owner = inner
+            break
+        nxt = getattr(inner, "model", None)
+        if nxt is None or nxt is inner:
+            break
+        inner = nxt
+    if owner is None:
+        return None
+    if "MiniMaxH3" in type(owner).__name__:
+        return None
+    fmt = owner.latent_format
+    fmt_name = fmt.__name__ if isinstance(fmt, type) else type(fmt).__name__
+    if fmt_name.startswith("MiniMaxH3"):
+        return None
+    h3_format_types = tuple(
+        candidate
+        for candidate in (
+            getattr(comfy.latent_formats, "MiniMaxH3Video", None),
+            getattr(comfy.latent_formats, "MiniMaxH3AV", None),
+        )
+        if isinstance(candidate, type)
+    )
+    if h3_format_types:
+        if isinstance(fmt, type):
+            if issubclass(fmt, h3_format_types):
+                return None
+        elif isinstance(fmt, h3_format_types):
+            return None
+    return f"{type(owner).__name__}（latent_format={fmt_name}）"
+
+
+def _h3_missing_model_error(kind: str, rejected: list[str]) -> ValueError:
+    """两个槽位都拿不到 MiniMax H3 主干时的中文错误。"""
+    slot = _h3_slot_label(kind)
+    other = "FL2VA" if slot == "REF2VA" else "REF2VA"
+    if rejected:
+        detail = "；".join(rejected)
+        head = f"加载器的 {slot} / {other} 槽位里都没有 MiniMax H3 主干模型：{detail}。"
+    else:
+        head = f"加载器的 {slot} / {other} 槽位都没有可用的 MiniMax H3 主干（要么是 none，要么填的不是 H3 模型）。"
+    return ValueError(
+        f"{head}H3 的 latent 是 5 维音视频结构，用图像模型只会在采样内部报 "
+        f"\u201ctuple index out of range\u201d，所以这里直接拦下。"
+        f"请在 MiniMax H3 Aicg 加载器的 {slot} 槽位选择 MiniMax H3 的 FL2VA / REF2VA 权重。"
+    )
+
+
+# AICG3D：进程级缓存，记住哪些权重文件已经确认不是 MiniMax H3 主干。加载器节点
+# 每次改变量都会重新构造 bundle，光靠实例字段会导致每个 run 都白加载一遍。
+# 键里带文件大小与修改时间，用户换了同名文件时会自动重新检查。
+_NON_H3_MODEL_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def _model_file_fingerprint(model_name: str) -> tuple[str, int, int]:
+    """用 (文件名, 大小, 修改时间) 当缓存键，文件被替换后自动失效。"""
+    name = str(model_name or "")
+    path = ""
+    try:
+        path = folder_paths.get_full_path("diffusion_models", name) or ""
+    except Exception:
+        path = ""
+    if not path:
+        return (name, -1, -1)
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return (name, -1, -1)
+    return (name, stat.st_size, stat.st_mtime_ns)
+
+
+def _cached_non_h3_detail(model_name: str) -> str | None:
+    return _NON_H3_MODEL_CACHE.get(_model_file_fingerprint(model_name))
+
+
+def _remember_non_h3_model(model_name: str, detail: str) -> None:
+    _NON_H3_MODEL_CACHE[_model_file_fingerprint(model_name)] = detail
+
+
+def _h3_model_kind_error(kind: str, mismatch: str, model_name: str = "") -> ValueError:
+    """槽位选错主干时抛出的中文错误：直接告诉用户该换成什么。"""
+    slot = _h3_slot_label(kind)
+    if model_name:
+        subject = f"{slot} 槽位选的不是 MiniMax H3 模型：{model_name} 实际是"
+    else:
+        subject = f"{slot} 槽位接到的主干不是 MiniMax H3 模型：实际是"
+    return ValueError(
+        f"{subject} {mismatch}。H3 的 latent 是 5 维音视频结构，"
+        f"用图像模型只会在采样内部报 \u201ctuple index out of range\u201d，很难定位。"
+        f"请把 {slot} 换成 MiniMax H3 的权重，或者设为 none（只用另一条 H3 权重）。"
+    )
+
+
 @dataclass
 class MiniMaxH3Bundle:
     fl2va_model_name: str
@@ -2830,6 +2951,8 @@ class MiniMaxH3Bundle:
     ref2va_model_obj: Any = None
     # AICG3D：((lora 文件名, 权重), ...)，在基础模型加载后统一叠加。
     loras: tuple[tuple[str, float], ...] = ()
+    # AICG3D：槽位里选到非 H3 权重时的处理策略（自动回落 / 按所选加载）。
+    non_h3_policy: str = NON_H3_POLICY_FALLBACK
 
     def __post_init__(self) -> None:
         self._model = None
@@ -2863,26 +2986,28 @@ class MiniMaxH3Bundle:
         self._patched_models = {key: (stack, patched)}
         return patched
 
-    def _model_name_for(self, kind: str) -> str:
-        """Return the preferred model, falling back to the other H3 model.
+    def _candidate_models(self, kind: str) -> list[tuple[str, str]]:
+        """按优先级返回可以尝试的 (槽位, 权重名)：首选槽位，然后另一个槽位。
 
-        FL2VA and REF2VA are exposed as separate choices when both are
-        installed, but a user may intentionally install only one of them for
-        testing. In that case, let the remaining transformer serve either
-        generation path instead of rejecting the mode before execution.
+        FL2VA / REF2VA 是两个独立下拉框：可能只装了其中一个，也可能像 Anima
+        那样选错。这里把另一个槽位也列成候选，并跳过已经确认不是 H3 主干的
+        文件，保证只要还有一条 H3 权重就能正常出片。
         """
         requested_kind = "ref2va" if kind == "ref2va" else "fl2va"
-        preferred = self.ref2va_model_name if requested_kind == "ref2va" else self.fl2va_model_name
-        if not _is_none_model(preferred):
-            return preferred
-
-        fallback = self.fl2va_model_name if requested_kind == "ref2va" else self.ref2va_model_name
-        if not _is_none_model(fallback):
-            return fallback
-
-        if requested_kind == "ref2va":
-            raise ValueError("Reference Video mode requires at least one MiniMax H3 transformer model.")
-        raise ValueError("Text-to-video and I2V or First/Last Frame mode require at least one MiniMax H3 transformer model.")
+        ordered = (requested_kind, "fl2va" if requested_kind == "ref2va" else "ref2va")
+        candidates: list[tuple[str, str]] = []
+        for candidate_kind in ordered:
+            raw = self.ref2va_model_name if candidate_kind == "ref2va" else self.fl2va_model_name
+            name = str(raw or "").strip()
+            if not name or _is_none_model(name):
+                continue
+            # 严格模式不吃缓存：用户就是想让这条权重去加载，好看到明确的报错。
+            if self.non_h3_policy != NON_H3_POLICY_STRICT and _cached_non_h3_detail(name) is not None:
+                continue
+            if any(existing == name for _, existing in candidates):
+                continue
+            candidates.append((candidate_kind, name))
+        return candidates
 
     def _model_object_for(self, kind: str):
         """Return an already-loaded transformer, falling back to the other role."""
@@ -2899,26 +3024,56 @@ class MiniMaxH3Bundle:
             self._lora_stack = self._lora_signature()
             supplied_model = self._model_object_for(kind)
             if supplied_model is not None:
+                mismatch = _h3_transformer_mismatch(supplied_model)
+                if mismatch is not None:
+                    raise _h3_model_kind_error(kind, mismatch)
                 return self._with_loras(supplied_model)
-            model_name = self._model_name_for(kind)
+            candidates = self._candidate_models(kind)
             # 只按权重文件名判断是否复用：只有一个 H3 模型时，FL2VA 与
             # REF2VA 会回落到同一个文件，这里必须复用而不是重新加载。
-            if self._model is not None and self._model_name == model_name:
-                return self._model
-
+            # 复用只在"当前加载的正好是本模式首选的那条权重"时成立：否则
+            # REF2VA 模式刚加载的权重会被 FL2VA 模式顺手复用，模型就串了。
             if self._model is not None:
+                if candidates and self._model_name == candidates[0][1]:
+                    return self._with_loras(self._model)
                 self._model = None
                 self._model_kind = ""
                 self._model_name = ""
                 comfy.model_management.soft_empty_cache()
 
-            if _is_gguf_file(model_name):
-                self._model = _load_gguf_unet(model_name)
-            else:
-                self._model, = nodes.UNETLoader().load_unet(model_name, "default")
-            self._model_kind = kind
-            self._model_name = model_name
-            return self._with_loras(self._model)
+            rejected: list[str] = []
+            for candidate_kind, candidate_name in candidates:
+                if _is_gguf_file(candidate_name):
+                    loaded_model = _load_gguf_unet(candidate_name)
+                else:
+                    loaded_model, = nodes.UNETLoader().load_unet(candidate_name, "default")
+                # AICG3D：槽位里塞了 Anima 这类 2D 图像模型时，采样内部只会抛
+                # tuple index out of range。这里记住它，并自动回落到另一个槽位，
+                # 而不是把用户卡在报错上。
+                mismatch = _h3_transformer_mismatch(loaded_model)
+                if mismatch is not None:
+                    if self.non_h3_policy == NON_H3_POLICY_STRICT:
+                        raise _h3_model_kind_error(kind, mismatch, candidate_name)
+                    _remember_non_h3_model(candidate_name, mismatch)
+                    rejected.append(f"{candidate_name} 是 {mismatch}")
+                    loaded_model = None
+                    comfy.model_management.soft_empty_cache()
+                    print(
+                        f"[MiniMax H3 Aicg] 已忽略 {_h3_slot_label(candidate_kind)} 槽位的 "
+                        f"{candidate_name}：它不是 MiniMax H3 主干（{mismatch}）。"
+                    )
+                    continue
+                self._model = loaded_model
+                self._model_kind = kind
+                self._model_name = candidate_name
+                if candidate_kind != kind:
+                    print(
+                        f"[MiniMax H3 Aicg] {_h3_slot_label(kind)} 槽位没有可用的 MiniMax H3 "
+                        f"权重，已自动改用 {_h3_slot_label(candidate_kind)} 槽位的 {candidate_name}。"
+                    )
+                return self._with_loras(self._model)
+
+            raise _h3_missing_model_error(kind, rejected)
 
 
 @dataclass(frozen=True)
@@ -3470,8 +3625,8 @@ class MiniMaxH3EasyLoader:
 
     @classmethod
     def INPUT_TYPES(cls):
-        # AICG3D：ref2va_model 保留在列表末尾之外的位置以兼容旧工作流的
-        # widget 顺序，LoRA 槽位统一追加在最后。
+        # AICG3D：ref2va_model 保留在列表末尾之外的位置以兼容旧工作流的 widget 顺序。
+        # LoRA 槽位分两段追加（见下面的常量说明），保证旧工作流的位置映射不变。
         required = {
             "fl2va_model": (_model_choices(),),
             "ref2va_model": (_ref_model_choices(),),
@@ -3480,7 +3635,28 @@ class MiniMaxH3EasyLoader:
             "audio_vae": (_vae_choices(("minimax_h3_audio_vae",), "minimax_h3_audio_vae_fp32.safetensors"),),
         }
         loras = _lora_choices()
-        for index in range(1, LORA_SLOT_COUNT + 1):
+        for index in range(1, LORA_SLOT_COUNT_LEGACY + 1):
+            required[f"lora_{index}"] = (
+                loras,
+                {"default": NONE_MODEL, "tooltip": f"第 {index} 个 LoRA，选“无”表示不使用。"},
+            )
+            required[f"lora_{index}_strength"] = (
+                "FLOAT",
+                {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重。"},
+            )
+        required["non_h3_policy"] = (
+            list(NON_H3_POLICY_CHOICES),
+            {
+                "default": NON_H3_POLICY_FALLBACK,
+                "tooltip": (
+                    "槽位里选到非 MiniMax H3 权重（例如 Anima 这类图像模型）时："
+                    "自动回落 = 忽略它并改用另一条 H3 权重照常出片；"
+                    "按所选加载 = 严格用你选的那条，发现不是 H3 直接报错。"
+                ),
+            },
+        )
+        # 后补的槽位统一排在 non_h3_policy 后面，旧工作流的 widget 位置不受影响。
+        for index in range(LORA_SLOT_COUNT_LEGACY + 1, LORA_SLOT_COUNT + 1):
             required[f"lora_{index}"] = (
                 loras,
                 {"default": NONE_MODEL, "tooltip": f"第 {index} 个 LoRA，选“无”表示不使用。"},
@@ -3493,7 +3669,7 @@ class MiniMaxH3EasyLoader:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        keys = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae"]
+        keys = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae", "non_h3_policy"]
         for index in range(1, LORA_SLOT_COUNT + 1):
             keys.extend((f"lora_{index}", f"lora_{index}_strength"))
         return "|".join(str(kwargs.get(key, "")) for key in keys)
@@ -3519,6 +3695,7 @@ class MiniMaxH3EasyLoader:
             video_vae=video_vae_obj,
             audio_vae=audio_vae_obj,
             loras=loras,
+            non_h3_policy=str(kwargs.get("non_h3_policy") or NON_H3_POLICY_FALLBACK),
         ),)
 
 
@@ -6025,34 +6202,48 @@ class MiniMaxH3EasyRenderAdvanced:
                 "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
             )
         from .aicg3d_sampler import AICG3DSamplerAdvanced
+        from .render_progress import RenderPreviewEncoder, RenderProgressReporter
 
-        (sampled,) = AICG3DSamplerAdvanced().sample(
-            model,
-            h3_context.conditioning,
-            h3_context.latent,
-            noise_seed,
-            sampler_name,
-            scheduler,
-            steps,
-            denoise,
-        )
-        frames, audio = self._decode_av(h3_context, sampled)
-        if not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.shape[0] == 0:
-            raise RuntimeError("MiniMax H3 渲染器：解码后没有得到可用的视频帧")
-        frames = frames[..., :3].detach().to(device="cpu", dtype=torch.float32).contiguous()
-        if h3_context.source_audio is not None:
-            # 数字人 / 锁定参考音频：驱动音轨就是最终音轨。
-            driver = _segment_trim_audio(h3_context.source_audio, 0, int(frames.shape[0]))
-            if driver is not None:
-                audio = driver
-        video = InputImpl.VideoFromComponents(
-            Types.VideoComponents(
-                images=frames,
-                audio=audio,
-                frame_rate=Fraction(str(float(h3_context.fps or h3.FPS))),
+        # 前端会在节点底部按这些进度画一条百分比进度条（带已用时间与剩余估计），
+        # 采样占 90%，解码与合成占剩下 10%；每一步再补一张实时预览图。
+        reporter = RenderProgressReporter()
+        preview = RenderPreviewEncoder(model)
+        done = False
+        try:
+            reporter.begin_sample(steps)
+            (sampled,) = AICG3DSamplerAdvanced().sample(
+                model,
+                h3_context.conditioning,
+                h3_context.latent,
+                noise_seed,
+                sampler_name,
+                scheduler,
+                steps,
+                denoise,
+                on_step=reporter.update_sample,
+                on_preview=lambda x0, *_info: reporter.update_preview(preview.encode(x0)),
             )
-        )
-        return (video,)
+            reporter.begin_decode()
+            frames, audio = self._decode_av(h3_context, sampled)
+            if not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.shape[0] == 0:
+                raise RuntimeError("MiniMax H3 渲染器：解码后没有得到可用的视频帧")
+            frames = frames[..., :3].detach().to(device="cpu", dtype=torch.float32).contiguous()
+            if h3_context.source_audio is not None:
+                # 数字人 / 锁定参考音频：驱动音轨就是最终音轨。
+                driver = _segment_trim_audio(h3_context.source_audio, 0, int(frames.shape[0]))
+                if driver is not None:
+                    audio = driver
+            video = InputImpl.VideoFromComponents(
+                Types.VideoComponents(
+                    images=frames,
+                    audio=audio,
+                    frame_rate=Fraction(str(float(h3_context.fps or h3.FPS))),
+                )
+            )
+            done = True
+            return (video,)
+        finally:
+            reporter.finish(done)
 
 
 class MiniMaxH3EasySelfLiftStrategy:

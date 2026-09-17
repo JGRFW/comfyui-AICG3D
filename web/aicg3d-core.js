@@ -16,6 +16,61 @@ import { api } from "../../scripts/api.js";
 
 const THEME_URL = new URL("./aicg3d-theme.css", import.meta.url).href;
 
+/* --------------------- 节点归属 --------------------- */
+/* 上游 ComfyUI-MiniMaxH3-Easy 注册的是同一批 MiniMaxH3Easy* 节点。
+   两边同时启用时本插件会改用 AICG3D_H3* 前缀（见 aicg3d/compat.py），
+   但前端原来只按类名比较，会把上游那一整套也当成本插件的节点：名字改成
+   「MiniMax H3 Aicg」、分类改成 AICG3D，节点菜单里就出现两套一样的节点。
+   下面统一判断某个节点定义 / 节点实例是不是本插件注册的那一份。 */
+const NODE_ID_PREFIX = "AICG3D_H3";
+const UPSTREAM_NODE_PREFIX = "MiniMaxH3Easy";
+
+/* 本插件 web 目录名 = custom_nodes 下的插件目录名。后端会把注册该节点的包名
+   写进 nodeData.python_module（custom_nodes.<目录名>），用它就能分辨归属。 */
+const OWN_PACK_NAME = (() => {
+    try {
+        const segments = String(new URL(import.meta.url).pathname).split("/").filter(Boolean);
+        const index = segments.lastIndexOf("extensions");
+        return index >= 0 ? decodeURIComponent(segments[index + 1] || "") : "";
+    } catch (error) {
+        return "";
+    }
+})();
+
+/* 见到带前缀的节点就说明本插件走的是 AICG3D_H3*；没见到不急着定性。 */
+let ownNodesArePrefixed = false;
+
+function ownPrefixedNodesRegistered() {
+    const registered = globalThis.LiteGraph?.registered_node_types || {};
+    return Object.keys(registered).some((id) => id.startsWith(NODE_ID_PREFIX));
+}
+
+function packNameOfModule(moduleName) {
+    const parts = String(moduleName ?? "").split(".");
+    return parts.length >= 2 && parts[0] === "custom_nodes" ? parts[1] : "";
+}
+
+/* 上游那份的节点 ID：本插件已经改用带前缀的 ID 时，MiniMaxH3Easy* 就归对方。 */
+export function isUpstreamH3NodeId(nodeId) {
+    const text = String(nodeId ?? "");
+    if (!text.startsWith(UPSTREAM_NODE_PREFIX)) return false;
+    const prefixed = NODE_ID_PREFIX + text.slice(UPSTREAM_NODE_PREFIX.length);
+    return Boolean(globalThis.LiteGraph?.registered_node_types?.[prefixed]);
+}
+
+/* nodeData 是不是本插件注册的那份节点定义。 */
+export function isOwnH3NodeData(nodeData) {
+    const name = String(nodeData?.name ?? "");
+    if (!name.startsWith(NODE_ID_PREFIX) && !name.startsWith(UPSTREAM_NODE_PREFIX)) return false;
+    if (name.startsWith(NODE_ID_PREFIX)) return true;
+    const packName = packNameOfModule(nodeData?.python_module);
+    if (packName && OWN_PACK_NAME) return packName === OWN_PACK_NAME;
+    // 拿不到包名时退回到"注册表里有没有带前缀的节点"：只要见到过就说明
+    // MiniMaxH3Easy* 归上游。没见到就先按老行为处理，且不缓存这个中间结论。
+    if (!ownNodesArePrefixed && ownPrefixedNodesRegistered()) ownNodesArePrefixed = true;
+    return !ownNodesArePrefixed;
+}
+
 /* ------------------------------ 主题 ------------------------------ */
 export function ensureTheme() {
     if (document.getElementById("aicg3d-theme")) return;

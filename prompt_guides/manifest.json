@@ -22,16 +22,21 @@
   },
   "scene_guides": [
     {"id": "none", "name": "General only", "name_zh": "通用", "languages": ["en", "zh"]},
-    {"id": "3d_animation_short", "name": "3D Animation Short", "name_zh": "3D 动画短片", "path": "3d_animation_short/guide.md", "languages": ["en"]},
-    {"id": "brand_promo", "name": "Brand Promo Video", "name_zh": "品牌宣传片", "path": "brand_promo/guide.md", "languages": ["en"]},
-    {"id": "coop_game_intro", "name": "Co-op Game Intro", "name_zh": "合作游戏开场", "path": "coop_game_intro/guide.md", "languages": ["en"]},
-    {"id": "handdrawn_live", "name": "Hand-drawn Live-action Fusion", "name_zh": "手绘实拍融合", "path": "handdrawn_live/guide.md", "languages": ["en"]},
-    {"id": "minimalist_product_ad", "name": "Minimalist Product Ad", "name_zh": "极简产品广告", "path": "minimalist_product_ad/guide.md", "languages": ["en"]},
-    {"id": "music_video_subtitle", "name": "Music Video Subtitle", "name_zh": "音乐视频字幕", "path": "music_video_subtitle/guide.md", "languages": ["en"]},
-    {"id": "paper_collage", "name": "Paper Collage Explainer", "name_zh": "纸张拼贴解说", "path": "paper_collage/guide.md", "languages": ["en"]},
-    {"id": "papercraft_stop_motion", "name": "Papercraft Stop-motion Explainer", "name_zh": "纸艺定格解说", "path": "papercraft_stop_motion/guide.md", "languages": ["en"]},
+    {"id": "3d_animation_short", "name": "3D Animation Short", "name_zh": "3D 动画短片", "path": "3d_animation_short/guide.md", "languages": ["en", "zh"]},
+    {"id": "brand_promo", "name": "Brand Promo Video", "name_zh": "品牌宣传片", "path": "brand_promo/guide.md", "languages": ["en", "zh"]},
+    {"id": "coop_game_intro", "name": "Co-op Game Intro", "name_zh": "合作游戏开场", "path": "coop_game_intro/guide.md", "languages": ["en", "zh"]},
+    {"id": "handdrawn_live", "name": "Hand-drawn Live-action Fusion", "name_zh": "手绘实拍融合", "path": "handdrawn_live/guide.md", "languages": ["en", "zh"]},
+    {"id": "minimalist_product_ad", "name": "Minimalist Product Ad", "name_zh": "极简产品广告", "path": "minimalist_product_ad/guide.md", "languages": ["en", "zh"]},
+    {"id": "music_video_subtitle", "name": "Music Video Subtitle", "name_zh": "音乐视频字幕", "path": "music_video_subtitle/guide.md", "languages": ["en", "zh"]},
+    {"id": "paper_collage", "name": "Paper Collage Explainer", "name_zh": "纸张拼贴解说", "path": "paper_collage/guide.md", "languages": ["en", "zh"]},
+    {"id": "papercraft_stop_motion", "name": "Papercraft Stop-motion Explainer", "name_zh": "纸艺定格解说", "path": "papercraft_stop_motion/guide.md", "languages": ["en", "zh"]},
     {"id": "zh_dialogue", "name": "Dialogue and Performance", "name_zh": "文戏", "path": "zh_dialogue/guide.md", "languages": ["zh"]},
     {"id": "zh_action", "name": "Action", "name_zh": "动作", "path": "zh_action/guide.md", "languages": ["zh"]},
-    {"id": "zh_advertisement", "name": "Advertisement", "name_zh": "广告", "path": "zh_advertisement/guide.md", "languages": ["zh"]}
+    {"id": "zh_advertisement", "name": "Advertisement", "name_zh": "广告", "path": "zh_advertisement/guide.md", "languages": ["zh"]},
+    {"id": "eastern_megastructure_director", "name": "Eastern Megastructure Director", "name_zh": "东方巨构导演", "path": "天宫仙境eastern-megastructure-director/eastern-megastructure-director/SKILL.md", "languages": ["zh"]},
+    {"id": "phone_vlog", "name": "Real Phone Selfie Vlog", "name_zh": "真实手机自拍 Vlog", "path": "个人Vlogphone-vlog/phone-vlog/SKILL.md", "languages": ["zh"]},
+    {"id": "light_fresh_short_film", "name": "Light Fresh Short Film", "name_zh": "光感小清新短片", "path": "光感小清新skilllight-fresh-short-film-skill/light-fresh-short-film/SKILL.md", "languages": ["zh"]},
+    {"id": "surreal_cinematic_keyframe_director", "name": "Surreal Cinematic Keyframe Director", "name_zh": "超现实电影底图导演", "path": "生图 skillsurreal-cinematic-keyframe-director/surreal-cinematic-keyframe-director/SKILL.md", "languages": ["zh"]},
+    {"id": "short_scene_director_lite", "name": "15s Scene Director Lite", "name_zh": "15 秒剧情镜头导演", "path": "文生视频 skill（通用版）15s-scene-director-lite/short-scene-director-lite/SKILL.md", "languages": ["zh"]}
   ]
 }

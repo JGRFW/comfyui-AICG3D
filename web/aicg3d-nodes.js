@@ -14,6 +14,7 @@ import { app } from "../../scripts/app.js";
 import {
     ensureTheme, el, toast, widgetOf, setWidgetValue,
     library, openSkillPalette, selectionText,
+    isOwnH3NodeData,
     markWidgetHidden, autoHideWidgets, refreshVueWidgets,
 } from "./aicg3d-core.js";
 
@@ -30,6 +31,10 @@ function paintNodeType(nodeType, nodeData) {
     const name = String(nodeData?.name || "");
     const style = GROUP_STYLE.find((entry) => entry.match.test(name));
     if (!style || nodeType.__a3Painted) return;
+    // 上游同名插件（ComfyUI-MiniMaxH3-Easy）注册的 H3 节点不刷本插件的配色，
+    // 否则两套节点在画布上看起来完全一样。
+    const isH3Name = name.startsWith("AICG3D_H3") || name.startsWith("MiniMaxH3Easy");
+    if (isH3Name && !isOwnH3NodeData(nodeData)) return;
     nodeType.__a3Painted = true;
     nodeType.color = style.color;
     nodeType.bgcolor = style.bgcolor;

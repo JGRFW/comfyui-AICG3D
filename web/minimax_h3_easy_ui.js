@@ -7,6 +7,7 @@
 
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { isOwnH3NodeData, isUpstreamH3NodeId } from "./aicg3d-core.js";
 
 const NODE_CLASS = "MiniMaxH3Easy";
 const CONTEXT_SEGMENTS_CLASS = "MiniMaxH3EasyContextSegments";
@@ -78,17 +79,22 @@ const PROMPT_VIEW_STRUCTURED = "structured";
 const PROMPT_VIEW_RAW = "raw";
 const PROMPT_GUIDES = [
     { value: "none", zh: "\u901a\u7528", en: "General only", languages: ["en", "zh"] },
-    { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short", languages: ["en"] },
-    { value: "brand_promo", zh: "\u54c1\u724c\u5ba3\u4f20\u7247", en: "Brand Promo Video", languages: ["en"] },
-    { value: "coop_game_intro", zh: "\u5408\u4f5c\u6e38\u620f\u5f00\u573a", en: "Co-op Game Intro", languages: ["en"] },
-    { value: "handdrawn_live", zh: "\u624b\u7ed8\u5b9e\u62cd\u878d\u5408", en: "Hand-drawn Live-action", languages: ["en"] },
-    { value: "minimalist_product_ad", zh: "\u6781\u7b80\u4ea7\u54c1\u5e7f\u544a", en: "Minimalist Product Ad", languages: ["en"] },
-    { value: "music_video_subtitle", zh: "\u97f3\u4e50\u89c6\u9891\u5b57\u5e55", en: "Music Video Subtitle", languages: ["en"] },
-    { value: "paper_collage", zh: "\u7eb8\u5f20\u62fc\u8d34\u89e3\u8bf4", en: "Paper Collage Explainer", languages: ["en"] },
-    { value: "papercraft_stop_motion", zh: "\u7eb8\u827a\u5b9a\u683c\u89e3\u8bf4", en: "Papercraft Stop-motion", languages: ["en"] },
+    { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short", languages: ["en", "zh"] },
+    { value: "brand_promo", zh: "\u54c1\u724c\u5ba3\u4f20\u7247", en: "Brand Promo Video", languages: ["en", "zh"] },
+    { value: "coop_game_intro", zh: "\u5408\u4f5c\u6e38\u620f\u5f00\u573a", en: "Co-op Game Intro", languages: ["en", "zh"] },
+    { value: "handdrawn_live", zh: "\u624b\u7ed8\u5b9e\u62cd\u878d\u5408", en: "Hand-drawn Live-action", languages: ["en", "zh"] },
+    { value: "minimalist_product_ad", zh: "\u6781\u7b80\u4ea7\u54c1\u5e7f\u544a", en: "Minimalist Product Ad", languages: ["en", "zh"] },
+    { value: "music_video_subtitle", zh: "\u97f3\u4e50\u89c6\u9891\u5b57\u5e55", en: "Music Video Subtitle", languages: ["en", "zh"] },
+    { value: "paper_collage", zh: "\u7eb8\u5f20\u62fc\u8d34\u89e3\u8bf4", en: "Paper Collage Explainer", languages: ["en", "zh"] },
+    { value: "papercraft_stop_motion", zh: "\u7eb8\u827a\u5b9a\u683c\u89e3\u8bf4", en: "Papercraft Stop-motion", languages: ["en", "zh"] },
     { value: "zh_dialogue", zh: "\u6587\u620f", en: "Dialogue and Performance", languages: ["zh"] },
     { value: "zh_action", zh: "\u52a8\u4f5c", en: "Action", languages: ["zh"] },
     { value: "zh_advertisement", zh: "\u5e7f\u544a", en: "Advertisement", languages: ["zh"] },
+    { value: "eastern_megastructure_director", zh: "\u4e1c\u65b9\u5de8\u6784\u5bfc\u6f14", en: "Eastern Megastructure Director", languages: ["zh"] },
+    { value: "phone_vlog", zh: "\u771f\u5b9e\u624b\u673a\u81ea\u62cd Vlog", en: "Real Phone Selfie Vlog", languages: ["zh"] },
+    { value: "light_fresh_short_film", zh: "\u5149\u611f\u5c0f\u6e05\u65b0\u77ed\u7247", en: "Light Fresh Short Film", languages: ["zh"] },
+    { value: "surreal_cinematic_keyframe_director", zh: "\u8d85\u73b0\u5b9e\u7535\u5f71\u5e95\u56fe\u5bfc\u6f14", en: "Surreal Cinematic Keyframe Director", languages: ["zh"] },
+    { value: "short_scene_director_lite", zh: "15 \u79d2\u5267\u60c5\u955c\u5934\u5bfc\u6f14", en: "15s Scene Director Lite", languages: ["zh"] },
 ];
 const MODE_IMAGE = "image";
 const MODE_REFERENCE = "reference";
@@ -116,6 +122,9 @@ const MAX_MEDIA = 15;
 const MAX_IMAGES = 9;
 const MAX_VIDEOS = 3;
 const MAX_AUDIOS = 3;
+/* 提示词编辑器默认高度（含 DOM 控件上下 margin）。
+   base 为一行高的旧默认值，这里放大到约 4 倍。 */
+const PROMPT_EDITOR_MIN_HEIGHT = 140;
 const SEGMENT_MAX_COUNT = 30;
 const SEGMENT_MAX_MEDIA = MAX_MEDIA * 3;
 const SEGMENT_MAX_IMAGES = MAX_IMAGES * 3;
@@ -267,6 +276,7 @@ const TEXT = {
     textEncoder: ZH_BROWSER ? "\u6587\u672c\u7f16\u7801\u5668" : "Text encoder",
     videoVae: ZH_BROWSER ? "\u89c6\u9891 VAE" : "Video VAE",
     audioVae: ZH_BROWSER ? "\u97f3\u9891 VAE" : "Audio VAE",
+    nonH3Policy: ZH_BROWSER ? "\u975e H3 \u6743\u91cd\u5904\u7406" : "Non-H3 weight handling",
     noneModel: ZH_BROWSER ? "\u65e0" : "None",
     outputModel: "Model",
     outputConditioning: "Conditioning",
@@ -292,6 +302,12 @@ const TEXT = {
     denoiseLabel: ZH_BROWSER ? "\u964d\u566a" : "Denoise",
     renderTitle: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u9ad8\u7ea7\uff09" : "AICG Render (Advanced)",
     renderVideo: ZH_BROWSER ? "\u6210\u7247\u89c6\u9891" : "Video",
+    renderPreviewIdle: ZH_BROWSER ? "\u8fd0\u884c\u4e2d\u8fd9\u91cc\u663e\u793a\u5b9e\u65f6\u9884\u89c8" : "Live preview appears here while running",
+    renderProgressSample: ZH_BROWSER ? "\u91c7\u6837\u4e2d" : "Sampling",
+    renderProgressDecode: ZH_BROWSER ? "\u89e3\u7801\u4e0e\u5408\u6210\u4e2d" : "Decoding",
+    renderProgressDone: ZH_BROWSER ? "\u5b8c\u6210" : "Done",
+    renderProgressElapsed: ZH_BROWSER ? "\u5df2\u7528" : "Elapsed",
+    renderProgressEta: ZH_BROWSER ? "\u5269\u4f59\u7ea6" : "ETA",
     renderMediaHint: ZH_BROWSER ? "\u7d20\u6750\u5728\u300cAICG3D\u8d44\u6e90\u5e93\u300d\u8282\u70b9\u91cc\u70b9\u9009" : "Assets come from the AICG3D Resource Library node",
     segmentSeeds: ZH_BROWSER ? "\u5206\u6bb5 Seed\uff08\u53ef\u9009\uff09" : "Segment seeds (optional)",
     segmentRenderTitle: ZH_BROWSER ? "MiniMax H3 Aicg \u5206\u6bb5\u91c7\u6837" : "MiniMax H3 Aicg Segment Sample",
@@ -340,9 +356,9 @@ const OPTION_DEFS = {
     },
     ref_image_size: {
         [REF_IMAGE_MATCH]: ZH_BROWSER ? "\u5339\u914d\u751f\u6210\u5206\u8fa8\u7387" : "Match generation size",
-        [REF_IMAGE_1K]: ZH_BROWSER ? "1K \u9762\u79ef\uff08\u7ea61MP\uff09" : "1K area (~1MP)",
-        [REF_IMAGE_15K]: ZH_BROWSER ? "1.5K \u9762\u79ef\uff08\u7ea62.25MP\uff09" : "1.5K area (~2.25MP)",
-        [REF_IMAGE_2K]: ZH_BROWSER ? "2K \u9762\u79ef\uff08\u7ea64MP\uff09" : "2K area (~4MP)",
+        [REF_IMAGE_1K]: ZH_BROWSER ? "1K \u50cf\u7d20\uff081024\u00d71024 \u7b49\u6bd4\uff09" : "1K pixels (1024x1024 scaled)",
+        [REF_IMAGE_15K]: ZH_BROWSER ? "1.5K \u50cf\u7d20\uff081536\u00d71536 \u7b49\u6bd4\uff09" : "1.5K pixels (1536x1536 scaled)",
+        [REF_IMAGE_2K]: ZH_BROWSER ? "2K \u50cf\u7d20\uff082048\u00d72048 \u7b49\u6bd4\uff09" : "2K pixels (2048x2048 scaled)",
         [REF_IMAGE_ORIGINAL]: ZH_BROWSER ? "\u539f\u56fe\uff08\u4e0d\u7f29\u653e\uff09" : "Original (no scaling)",
     },
     reference_mention_mode: {
@@ -574,6 +590,10 @@ let lastVueNodesMode = null;
 function nodeMatchesClass(node, className, displayName, installedMarker) {
     if (!node) return false;
     if (node.constructor?.prototype?.[installedMarker]) return true;
+    /* 上游同名插件注册的节点实例不认：两套节点的类名一模一样，只比类名会让
+       本插件的面板叠到上游那份节点上。 */
+    const rawClass = String(node.comfyClass ?? node.type ?? node.constructor?.comfyClass ?? node.constructor?.type ?? "");
+    if (rawClass && isUpstreamH3NodeId(rawClass)) return false;
     const candidates = [
         h3ClassName(node.comfyClass),
         h3ClassName(node.type),
@@ -1023,7 +1043,7 @@ function localizeNodeInstance(node) {
     }
     if (isLoader(node)) {
         node.title = TEXT.loaderTitle;
-        const labels = { fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae };
+        const labels = { fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae, non_h3_policy: TEXT.nonH3Policy };
         for (const widget of node.widgets || []) {
             if (labels[widget.name]) widget.label = labels[widget.name];
             if (widget.name === "fl2va_model" || widget.name === "ref2va_model") localizeOptionalModelWidget(widget);
@@ -4660,7 +4680,14 @@ function hideDomEditorWidget(widget) {
 function showDomEditorWidget(widget) {
     if (!widget?.__h3EditorHidden) return;
     widget.type = widget.__h3EditorType || "h3_prompt_mentions";
-    widget.computeSize = widget.__h3EditorComputeSize || (() => [220, 96]);
+    if (widget.__h3EditorComputeSize) widget.computeSize = widget.__h3EditorComputeSize;
+    else {
+        try {
+            delete widget.computeSize;
+        } catch {
+            widget.computeSize = undefined;
+        }
+    }
     widget.hidden = false;
     setWidgetOption(widget, "hidden", false);
     widget.__h3EditorHidden = false;
@@ -6888,26 +6915,10 @@ function ensurePromptEditor(node) {
         event.stopPropagation();
         optimizePromptFromEditor(node);
     });
-    // AICG3D：提示词编辑器两侧的素材库与技能库入口。
+    // AICG3D：提示词编辑器里的技能库入口。素材库按钮已按需求移除，
+    // 单击素材加载器缩略图插入 @ 引用的入口保持不变。
     const tools = [];
     if (canUseMediaMentions(node)) {
-        const assetButton = document.createElement("button");
-        assetButton.type = "button";
-        assetButton.className = "h3-prompt-editor-tool aicg3d-tool aicg3d-tool-assets";
-        assetButton.textContent = "\u25A4";
-        assetButton.title = TEXT.aicg3dAssets;
-        assetButton.setAttribute("aria-label", TEXT.aicg3dAssets);
-        assetButton.addEventListener("pointerdown", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-        });
-        assetButton.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            globalThis.AICG3D?.openAssetPalette?.(node, assetButton);
-        });
-        tools.push(assetButton);
-
         const skillButton = document.createElement("button");
         skillButton.type = "button";
         skillButton.className = "h3-prompt-editor-tool aicg3d-tool aicg3d-tool-skills";
@@ -7161,13 +7172,18 @@ function ensurePromptEditor(node) {
         },
         margin: 10,
         serialize: false,
-        getMinHeight: () => 50,
+        getMinHeight: () => PROMPT_EDITOR_MIN_HEIGHT,
         afterResize: () => {
             applyNativeEditorTheme(wrap);
+            applyPromptEditorWidgetHeight(node);
             node._widgetSlotsDirty = true;
             node.setDirtyCanvas?.(true, true);
         },
-        onDraw: () => applyNativeEditorTheme(wrap),
+        onDraw: () => {
+            applyNativeEditorTheme(wrap);
+            // Nodes 2.0 下前端会按默认高度重算这一行，这里持续只补不回缩。
+            applyPromptEditorWidgetHeight(node);
+        },
     });
     if (!domWidget) {
         restoreOriginalPromptWidget(widget);
@@ -7184,7 +7200,14 @@ function ensurePromptEditor(node) {
     setWidgetOption(domWidget, "serialize", false);
     setWidgetOption(domWidget, "canvasOnly", false);
     domWidget.__h3EditorType = domWidget.type;
-    domWidget.__h3EditorComputeSize = domWidget.computeSize;
+    // 高度一律走 computedHeight / computeLayoutSize；留着 computeSize 的话
+    // 经典布局会按一行高（computeSize()[1] + 4）来分配。
+    domWidget.__h3EditorComputeSize = null;
+    try {
+        delete domWidget.computeSize;
+    } catch {
+        domWidget.computeSize = undefined;
+    }
     const domIndex = node.widgets?.indexOf(domWidget) ?? -1;
     const promptIndex = node.widgets?.indexOf(widget) ?? -1;
     if (domIndex >= 0 && promptIndex >= 0 && domIndex !== promptIndex + 1) {
@@ -7194,6 +7217,7 @@ function ensurePromptEditor(node) {
     }
     bindPromptSlotToEditorWidget(node);
     syncEditorMode(node);
+    keepPromptEditorWidgetHeight(node);
     repairNodeLayout(node);
 }
 
@@ -7243,6 +7267,73 @@ function removePromptEditorWidgets(node) {
     return true;
 }
 
+/* 提示词编辑器的高度：
+   Nodes 2.0（Vue 节点）渲染 DOM 控件时直接读 domWidget.computedHeight，读不到就退回
+   50px（再扣掉上下 margin，看上去只有一行高），所以 options.getMinHeight 在那里不起作用。
+   这里把高度显式写进 computedHeight，经典画布布局则交给 computeLayoutSize。 */
+function applyPromptEditorWidgetHeight(node, widget = node?.__h3DomWidget) {
+    if (!node || !widget) return false;
+    let changed = false;
+    if (!(Number(widget.computedHeight) >= PROMPT_EDITOR_MIN_HEIGHT)) {
+        widget.computedHeight = PROMPT_EDITOR_MIN_HEIGHT;
+        changed = true;
+    }
+    widget.options ||= {};
+    if (typeof widget.options.getMinHeight !== "function") {
+        widget.options.getMinHeight = () => PROMPT_EDITOR_MIN_HEIGHT;
+        changed = true;
+    }
+    if (widget.__h3EditorLayoutHeight !== PROMPT_EDITOR_MIN_HEIGHT) {
+        widget.__h3EditorLayoutHeight = PROMPT_EDITOR_MIN_HEIGHT;
+        widget.computeLayoutSize = () => ({ minHeight: PROMPT_EDITOR_MIN_HEIGHT, maxHeight: undefined, minWidth: 0 });
+        changed = true;
+    }
+    if (changed) node.setDirtyCanvas?.(true, true);
+    return changed;
+}
+
+/* 编辑器变高后，节点自身也要留够位置，否则下面几行会被挤出节点边框。 */
+function growNodeForPromptEditor(node) {
+    const domWidget = node?.__h3DomWidget;
+    if (!domWidget || !Array.isArray(node?.size) || typeof node?.computeSize !== "function") return false;
+    let measured = null;
+    const wasHidden = domWidget.hidden;
+    const wasType = domWidget.type;
+    try {
+        domWidget.hidden = true;
+        domWidget.type = "hidden";
+        measured = node.computeSize();
+    } catch {
+        measured = null;
+    } finally {
+        domWidget.hidden = wasHidden;
+        domWidget.type = wasType;
+    }
+    const fixedHeight = Number(measured?.[1]);
+    if (!Number.isFinite(fixedHeight)) return false;
+    const needed = Math.ceil(fixedHeight + PROMPT_EDITOR_MIN_HEIGHT + 4);
+    const currentHeight = Number(node.size[1]) || 0;
+    if (currentHeight + 1 >= needed) return false;
+    return setNodeSizeExact(node, [Number(node.size[0]) || 320, needed]);
+}
+
+/* 装载后有几次前端布局会把高度重置回默认值，这里补一段时间，只补不回缩。 */
+function keepPromptEditorWidgetHeight(node) {
+    const widget = node?.__h3DomWidget;
+    if (!widget) return;
+    applyPromptEditorWidgetHeight(node, widget);
+    growNodeForPromptEditor(node);
+    if (node.__h3PromptHeightTimer) clearTimeout(node.__h3PromptHeightTimer);
+    let ticks = 8;
+    const tick = () => {
+        node.__h3PromptHeightTimer = null;
+        if (!node.__h3DomWidget || node.__h3DomWidget !== widget) return;
+        applyPromptEditorWidgetHeight(node, widget);
+        growNodeForPromptEditor(node);
+        if (ticks-- > 0) node.__h3PromptHeightTimer = setTimeout(tick, 250);
+    };
+    node.__h3PromptHeightTimer = setTimeout(tick, 250);
+}
 function updatePromptEditor(node) {
     if (!node.__h3Editor) {
         installPromptEditorSoon(node);
@@ -9186,6 +9277,7 @@ function install() {
     patchGraphToPrompt();
     patchEditorKeyHandling();
     installNativeThemeWatcher();
+    installRenderProgressListener();
     installMediaLoaderClipboardPaste();
     for (const delay of [0, 100, 500, 1200]) setTimeout(() => patchCanvas(), delay);
     setTimeout(() => installQuickCreateCapture(app.canvas), 0);
@@ -9210,7 +9302,7 @@ function install() {
         --h3-prompt-text-size: var(--h3-native-widget-text-size, var(--comfy-textarea-font-size, 12px));
         display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%; box-sizing: border-box;
         padding: var(--h3-native-widget-padding, 2px);
-        padding-bottom: calc(var(--h3-native-widget-padding, 2px) + 24px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+        padding-bottom: calc(var(--h3-native-widget-padding, 2px) + 30px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
         white-space: pre-wrap; overflow-wrap: anywhere; border: 0; border-radius: var(--h3-native-widget-radius, 0); outline: none;
         resize: none; background-color: var(--h3-native-widget-bg, var(--comfy-input-bg, #222));
         color: var(--h3-native-widget-text, var(--input-text, #ddd)); caret-color: var(--h3-native-widget-text, var(--input-text, #ddd));
@@ -9231,7 +9323,7 @@ function install() {
       .h3-prompt-editor-wrap.is-loading .h3-prompt-editor { cursor: wait; opacity: .72; }
       .h3-prompt-editor:empty::before { content: attr(data-placeholder); color: var(--h3-native-widget-muted, rgba(255,255,255,.38)); pointer-events: none; }
       .h3-prompt-editor-status {
-        position: absolute; left: 12px; bottom: 4px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 92px);
+        position: absolute; left: 12px; bottom: 4px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 120px);
         overflow: hidden; color: var(--h3-native-widget-text, rgba(255,255,255,.78)); pointer-events: auto; user-select: none;
         font: 600 9px/18px Consolas, "Courier New", monospace; letter-spacing: 0; white-space: nowrap; text-overflow: ellipsis;
       }
@@ -9251,13 +9343,13 @@ function install() {
       }
       @keyframes h3-prompt-status-spin { to { transform: rotate(360deg); } }
       .h3-prompt-editor-tools {
-        position: absolute; right: 14px; bottom: 4px; z-index: 3; display: flex; align-items: center; gap: 3px; pointer-events: auto;
+        position: absolute; right: 12px; bottom: 4px; z-index: 3; display: flex; align-items: center; gap: 4px; pointer-events: auto;
       }
       .h3-prompt-editor-tool {
-        appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 18px; padding: 0;
+        appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; padding: 0;
         border: 1px solid transparent; border-radius: 4px; outline: none; background: transparent; box-shadow: none;
         color: var(--h3-native-widget-text, rgba(255,255,255,.78)); opacity: .34; cursor: pointer; user-select: none;
-        font: 600 9px/1 Consolas, "Courier New", monospace; letter-spacing: -.4px; transition: opacity .12s ease, background-color .12s ease, border-color .12s ease, color .12s ease;
+        font: 600 15px/1 Consolas, "Courier New", monospace; letter-spacing: -.4px; transition: opacity .12s ease, background-color .12s ease, border-color .12s ease, color .12s ease;
       }
       .h3-prompt-editor-tool:hover, .h3-prompt-editor-tool:focus-visible {
         opacity: .62; background: rgba(255,255,255,.045); border-color: rgba(255,255,255,.1);
@@ -9398,6 +9490,346 @@ function install() {
     document.head.append(style);
 }
 
+/* ==========================================================================
+   AICG-渲染器（高级）进度条 + 实时预览
+   后端 h3easy/render_progress.py 通过 WebSocket 发 aicg3d_render_progress，
+   这里在节点底部画两样东西：
+     1. 实时预览图：采样每一步更新一次（节点的 x0 潜空间预览），跑起来就能看
+        画面对不对，不用等出片；
+     2. 百分比进度条：百分比 + 已用时间 + 剩余估计。
+   采样阶段按步数走，解码 / 合成阶段没有步数可拆，改用来回跑的亮条。
+   ========================================================================== */
+const RENDER_PROGRESS_EVENT = "aicg3d_render_progress";
+const RENDER_PROGRESS_AREA = 34;
+const RENDER_PREVIEW_HEIGHT = 150;
+const RENDER_PROGRESS_TTL = 5000;
+const RENDER_PROGRESS_TICK = 250;
+const RENDER_PROGRESS_STATE = new Map();
+const RENDER_PREVIEW_IMAGE = new Map();
+let renderProgressListenerReady = false;
+let renderProgressTicker = null;
+
+function renderProgressNodeId(node) {
+    const id = Number(node?.id);
+    return Number.isFinite(id) ? String(id) : "";
+}
+
+function renderProgressNodeFor(key) {
+    return app.graph?.getNodeById?.(Number(key)) || null;
+}
+
+function releaseRenderPreview(key) {
+    const entry = RENDER_PREVIEW_IMAGE.get(key);
+    if (!entry) return;
+    RENDER_PREVIEW_IMAGE.delete(key);
+    if (entry.objectUrl) {
+        try {
+            URL.revokeObjectURL(entry.objectUrl);
+        } catch (error) {
+            // 释放失败无所谓，浏览器会自己回收。
+        }
+    }
+}
+
+/* 后端发的是 data URL（JSON 里没法直接放二进制），这里换成 blob URL 再交给 Image，
+   免得每帧都拿几十 KB 的 base64 字符串去解码。 */
+function renderPreviewDataUrlToObjectUrl(dataUrl) {
+    try {
+        const comma = String(dataUrl).indexOf(",");
+        if (comma < 0) return "";
+        const meta = String(dataUrl).slice(0, comma);
+        const type = (meta.match(/^data:([^;,]+)/) || [])[1] || "image/jpeg";
+        const body = String(dataUrl).slice(comma + 1);
+        let bytes;
+        if (/;base64/i.test(meta)) {
+            const binary = atob(body);
+            bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        } else {
+            bytes = new TextEncoder().encode(decodeURIComponent(body));
+        }
+        return URL.createObjectURL(new Blob([bytes], { type }));
+    } catch (error) {
+        return "";
+    }
+}
+
+function applyRenderPreview(key, dataUrl, node) {
+    const existing = RENDER_PREVIEW_IMAGE.get(key);
+    if (existing?.dataUrl === dataUrl) return;
+    const objectUrl = renderPreviewDataUrlToObjectUrl(dataUrl);
+    if (!objectUrl) return;
+    const entry = existing || { image: new Image(), objectUrl: "", dataUrl: "", ready: false };
+    const previous = entry.objectUrl;
+    entry.dataUrl = dataUrl;
+    entry.objectUrl = objectUrl;
+    entry.ready = false;
+    entry.image.onload = () => {
+        entry.ready = true;
+        if (previous && previous !== objectUrl) {
+            try {
+                URL.revokeObjectURL(previous);
+            } catch (error) {
+                // 释放失败无所谓。
+            }
+        }
+        renderProgressNodeFor(key)?.setDirtyCanvas?.(true, true);
+    };
+    entry.image.onerror = () => {
+        entry.ready = false;
+    };
+    entry.image.src = objectUrl;
+    RENDER_PREVIEW_IMAGE.set(key, entry);
+    node?.setDirtyCanvas?.(true, true);
+}
+
+function ensureRenderProgressTicker() {
+    if (renderProgressTicker) return;
+    renderProgressTicker = setInterval(() => {
+        const now = Date.now();
+        let active = false;
+        for (const [key, state] of [...RENDER_PROGRESS_STATE]) {
+            if (state.done && now - (state.finishedAt || 0) > RENDER_PROGRESS_TTL) {
+                RENDER_PROGRESS_STATE.delete(key);
+                releaseRenderPreview(key);
+                renderProgressNodeFor(key)?.setDirtyCanvas?.(true, true);
+                continue;
+            }
+            active = true;
+            renderProgressNodeFor(key)?.setDirtyCanvas?.(true, true);
+        }
+        if (!active) {
+            clearInterval(renderProgressTicker);
+            renderProgressTicker = null;
+        }
+    }, RENDER_PROGRESS_TICK);
+}
+
+function reserveRenderProgressSpace(node) {
+    if (!node || node.__h3RenderProgressReserved) return;
+    try {
+        const target = Number(node.computeSize?.()?.[1]) || 0;
+        const current = Number(node.size?.[1]) || 0;
+        node.__h3RenderProgressReserved = true;
+        if (target > current) {
+            node.size[1] = target;
+            node.setDirtyCanvas?.(true, true);
+        }
+    } catch (error) {
+        // 尺寸算不出来也照画，进度条位置靠节点底部兜底。
+    }
+}
+
+function installRenderProgressListener() {
+    if (renderProgressListenerReady) return;
+    renderProgressListenerReady = true;
+    api.addEventListener(RENDER_PROGRESS_EVENT, (event) => {
+        const detail = event?.detail;
+        if (!detail) return;
+        const key = detail.node_id == null ? "" : String(detail.node_id);
+        if (!key) return;
+        const elapsed = Math.max(0, Number(detail.elapsed) || 0);
+        const done = Boolean(detail.done);
+        const state = {
+            stage: String(detail.stage || ""),
+            value: Math.max(0, Number(detail.value) || 0),
+            max: Math.max(0, Number(detail.max) || 0),
+            overall: Math.max(0, Math.min(1, Number(detail.overall) || 0)),
+            elapsed,
+            eta: detail.eta == null ? null : Math.max(0, Number(detail.eta)),
+            done,
+            ok: detail.ok !== false,
+            receivedAt: Date.now(),
+            totalElapsed: elapsed,
+        };
+        const node = renderProgressNodeFor(key);
+        if (done && (!state.ok || state.overall < 1)) {
+            // 报错收尾：直接收起进度条和预览，不留残留。
+            RENDER_PROGRESS_STATE.delete(key);
+            releaseRenderPreview(key);
+        } else {
+            if (done) state.finishedAt = Date.now();
+            RENDER_PROGRESS_STATE.set(key, state);
+        }
+        if (typeof detail.preview === "string" && detail.preview) applyRenderPreview(key, detail.preview, node);
+        if (node) {
+            reserveRenderProgressSpace(node);
+            node.setDirtyCanvas?.(true, true);
+        }
+        ensureRenderProgressTicker();
+    });
+}
+
+function forgetRenderProgress(node) {
+    const key = renderProgressNodeId(node);
+    if (!key) return;
+    RENDER_PROGRESS_STATE.delete(key);
+    releaseRenderPreview(key);
+}
+
+/* 后端每步才推一次，消息之间用本地时钟把「已用 / 剩余」补圆滑。 */
+function renderProgressClock(state) {
+    const drift = Math.max(0, (Date.now() - state.receivedAt) / 1000);
+    return {
+        elapsed: state.elapsed + drift,
+        eta: state.eta == null ? null : Math.max(0, state.eta - drift),
+    };
+}
+
+function formatRenderClock(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    const pad = (value) => String(value).padStart(2, "0");
+    return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${pad(minutes)}:${pad(secs)}`;
+}
+
+function renderProgressPath(ctx, x, y, width, height, radius) {
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(x, y, width, height, r);
+        return;
+    }
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.arcTo(x + width, y, x + width, y + r, r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+    ctx.lineTo(x + r, y + height);
+    ctx.arcTo(x, y + height, x, y + height - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+}
+
+/* 采样预览：等比缩放塞进预览框，居中显示。 */
+function drawRenderPreviewBox(ctx, key, box, idleText, textColor) {
+    const entry = RENDER_PREVIEW_IMAGE.get(key);
+    const image = entry?.ready ? entry.image : null;
+    const imageWidth = Number(image?.naturalWidth || image?.width || 0);
+    const imageHeight = Number(image?.naturalHeight || image?.height || 0);
+    ctx.save();
+    renderProgressPath(ctx, box.x, box.y, box.width, box.height, 8);
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(127,127,127,0.35)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.clip();
+    if (image && imageWidth > 0 && imageHeight > 0) {
+        const scale = Math.min(box.width / imageWidth, box.height / imageHeight);
+        const drawWidth = Math.max(1, imageWidth * scale);
+        const drawHeight = Math.max(1, imageHeight * scale);
+        ctx.drawImage(
+            image,
+            box.x + (box.width - drawWidth) / 2,
+            box.y + (box.height - drawHeight) / 2,
+            drawWidth,
+            drawHeight,
+        );
+    } else {
+        ctx.fillStyle = textColor;
+        ctx.globalAlpha = 0.35;
+        ctx.font = "11px sans-serif";
+        ctx.fillText(idleText, box.x + box.width / 2, box.y + box.height / 2);
+    }
+    ctx.restore();
+}
+
+function drawRenderProgress(node, ctx) {
+    const key = renderProgressNodeId(node);
+    if (!key || !ctx || typeof ctx.fillRect !== "function") return;
+    const state = RENDER_PROGRESS_STATE.get(key);
+    const width = Number(node.size?.[0]) || 0;
+    const height = Number(node.size?.[1]) || 0;
+    if (width < 80 || height < 70) return;
+
+    const margin = 10;
+    const barHeight = 12;
+    const barTop = height - RENDER_PROGRESS_AREA + 8;
+    const barWidth = Math.max(20, width - margin * 2);
+    const textColor = globalThis.LiteGraph?.NODE_TEXT_COLOR || "#ddd";
+
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    if (height >= RENDER_PREVIEW_HEIGHT + RENDER_PROGRESS_AREA + 40) {
+        drawRenderPreviewBox(
+            ctx,
+            key,
+            {
+                x: margin,
+                y: height - RENDER_PROGRESS_AREA - RENDER_PREVIEW_HEIGHT + 6,
+                width: barWidth,
+                height: RENDER_PREVIEW_HEIGHT - 12,
+            },
+            TEXT.renderPreviewIdle,
+            textColor,
+        );
+    }
+
+    if (!state) {
+        ctx.restore();
+        return;
+    }
+
+    const ratio = state.done && state.ok ? 1 : Math.max(0, Math.min(1, state.overall));
+
+    ctx.fillStyle = "rgba(127,127,127,0.25)";
+    renderProgressPath(ctx, margin, barTop, barWidth, barHeight, barHeight / 2);
+    ctx.fill();
+
+    const filled = Math.max(0, Math.min(barWidth, barWidth * ratio));
+    if (filled > 1) {
+        const gradient = ctx.createLinearGradient(margin, 0, margin + barWidth, 0);
+        gradient.addColorStop(0, "#2f7cf6");
+        gradient.addColorStop(1, "#38d39f");
+        ctx.fillStyle = gradient;
+        renderProgressPath(ctx, margin, barTop, filled, barHeight, barHeight / 2);
+        ctx.fill();
+    }
+
+    if (!state.done && state.stage === "decode") {
+        // 解码 / 合成没有可拆分的步数：让亮条在槽里来回跑，表示还在动。
+        const sweep = (Date.now() % 1400) / 1400;
+        const sweepWidth = Math.min(barWidth * 0.32, 90);
+        const sweepX = margin + (barWidth + sweepWidth) * sweep - sweepWidth;
+        ctx.save();
+        renderProgressPath(ctx, margin, barTop, barWidth, barHeight, barHeight / 2);
+        ctx.clip();
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.fillRect(Math.max(margin, sweepX), barTop, sweepWidth, barHeight);
+        ctx.restore();
+    }
+
+    const clock = renderProgressClock(state);
+    ctx.font = "11px sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 3;
+    ctx.fillText(`${Math.round(ratio * 100)}%`, margin + barWidth / 2, barTop + barHeight / 2 + 0.5);
+    ctx.shadowBlur = 0;
+
+    let detail;
+    if (state.done) {
+        detail = `${TEXT.renderProgressDone} · ${TEXT.renderProgressElapsed} ${formatRenderClock(state.totalElapsed)}`;
+    } else {
+        const head = state.stage === "decode"
+            ? TEXT.renderProgressDecode
+            : state.max > 0
+                ? `${TEXT.renderProgressSample} ${Math.round(state.value)}/${Math.round(state.max)}`
+                : TEXT.renderProgressSample;
+        const tail = clock.eta == null ? "" : ` · ${TEXT.renderProgressEta} ${formatRenderClock(clock.eta)}`;
+        detail = `${head} · ${TEXT.renderProgressElapsed} ${formatRenderClock(clock.elapsed)}${tail}`;
+    }
+    ctx.fillStyle = textColor;
+    ctx.globalAlpha = state.done ? 0.75 : 1;
+    ctx.fillText(detail, width / 2, barTop + barHeight + 9);
+    ctx.restore();
+}
 function installRenderNode(nodeType, nodeData) {
     if (h3ClassName(nodeData?.name) !== RENDER_CLASS) return;
     if (nodeType.prototype.__h3RenderNodeInstalled) return;
@@ -9418,6 +9850,26 @@ function installRenderNode(nodeType, nodeData) {
         setup(this);
         return result;
     };
+    // 底部永久留出「预览图 + 进度条」的位置，免得它们压住最后一个参数控件。
+    const originalComputeSize = nodeType.prototype.computeSize;
+    nodeType.prototype.computeSize = function computeSizeH3Render() {
+        const size = originalComputeSize?.apply(this, arguments) || [210, 100];
+        if (Array.isArray(size)) {
+            size[1] = (Number(size[1]) || 100) + RENDER_PROGRESS_AREA + RENDER_PREVIEW_HEIGHT;
+        }
+        return size;
+    };
+    const originalDraw = nodeType.prototype.onDrawForeground;
+    nodeType.prototype.onDrawForeground = function onDrawForegroundH3Render(ctx) {
+        const result = originalDraw?.apply(this, arguments);
+        drawRenderProgress(this, ctx);
+        return result;
+    };
+    const originalRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function onRemovedH3Render() {
+        forgetRenderProgress(this);
+        return originalRemoved?.apply(this, arguments);
+    };
 }
 
 app.registerExtension({
@@ -9427,8 +9879,13 @@ app.registerExtension({
         install();
     },
     beforeRegisterNodeDef(nodeType, nodeData) {
-        localizeNodeDefinition(nodeData);
+        // LoadImage / LoadVideo / LoadAudio 这类通用素材节点照旧处理。
         installMediaSourceNode(nodeType, nodeData);
+        // 上游 ComfyUI-MiniMaxH3-Easy 注册的是一模一样的类名，以前会被一起改名、
+        // 一起挪进 AICG3D 菜单，节点菜单里就出现两套重复的「MiniMax H3 Aicg」。
+        // 这里只处理本插件自己注册的那份，上游那份留在它自己的 MiniMax H3 Easy 分类下。
+        if (!isOwnH3NodeData(nodeData)) return;
+        localizeNodeDefinition(nodeData);
         installLoaderNode(nodeType, nodeData);
         installAdapterNode(nodeType, nodeData);
         installMediaLoaderNode(nodeType, nodeData);

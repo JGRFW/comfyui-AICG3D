@@ -22,12 +22,30 @@
 """
 from __future__ import annotations
 
+import random
+
 import comfy.model_management
 import comfy.sample
 import comfy.samplers
 import comfy.utils
 import latent_preview
 from comfy_extras import nodes_custom_sampler
+
+
+def _roll_inference_seed() -> int:
+    """取一个 64 位随机种子（和 ComfyUI 自带 RandomNoise 的范围一致）。
+
+    ComfyUI 0.35 的 comfy.model_management 里没有 roll_inference_rng，
+    直接调用会抛 AttributeError。这里做兼容：有该接口就用它，没有就退回
+    Python 随机数，保证节点在任何版本上都能跑。
+    """
+    roll = getattr(comfy.model_management, "roll_inference_rng", None)
+    if callable(roll):
+        try:
+            return int(roll()) & 0xFFFFFFFFFFFFFFFF
+        except Exception:
+            pass
+    return random.randint(0, 0xFFFFFFFFFFFFFFFF)
 
 
 class AICG3DSamplerAdvanced:
@@ -48,7 +66,7 @@ class AICG3DSamplerAdvanced:
             "required": {
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
-                "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFF}),
+                "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
                 "sampler_name": (comfy.samplers.SAMPLER_NAMES, {"default": "euler"}),
                 "scheduler": (comfy.samplers.SCHEDULER_NAMES, {"default": "normal"}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
@@ -64,9 +82,24 @@ class AICG3DSamplerAdvanced:
         keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise")
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
-    def sample(self, model, conditioning, latent, noise_seed, sampler_name, scheduler, steps, denoise):
+    def sample(
+        self,
+        model,
+        conditioning,
+        latent,
+        noise_seed,
+        sampler_name,
+        scheduler,
+        steps,
+        denoise,
+        on_step=None,
+        on_preview=None,
+    ):
+        # 上一个节点（渲染器）的 seed 是 64 位控件，可能大于 32 位；这里统一落到
+        # 64 位无符号区间，0 表示随机，避免大 seed / 负 seed 传进采样器时出问题。
+        noise_seed = int(noise_seed) & 0xFFFFFFFFFFFFFFFF
         if noise_seed == 0:
-            noise_seed = comfy.model_management.roll_inference_rng()
+            noise_seed = _roll_inference_seed()
 
         noise = comfy.sample.prepare_noise(latent["samples"], noise_seed)
         sampler = comfy.samplers.sampler_object(sampler_name)
@@ -78,14 +111,38 @@ class AICG3DSamplerAdvanced:
         latent = latent.copy()
         latent["noise_mask"] = None
 
+        # 进度条按「实际采样步数」算：父节点（渲染器）会把每步回调转成前端进度条，
+        # 这里的 pbar 继续走 ComfyUI 原生进度，两边互不影响。
+        total_steps = max(1, len(sigmas) - 1)
+        pbar = comfy.utils.ProgressBar(total_steps)
+        completed_steps = 0
+
+        def _progress_callback(*args):
+            nonlocal completed_steps
+            completed_steps += 1
+            pbar.update_absolute(completed_steps, total_steps)
+            if on_step is not None:
+                try:
+                    on_step(completed_steps, total_steps)
+                except Exception:
+                    pass
+            if on_preview is not None:
+                # 采样器回调签名是 (step, x0, x, total_steps)，这里只取第 2 个参数，
+                # 兼容个别采样器额外塞参数的情况。
+                x0 = args[1] if len(args) > 1 else None
+                try:
+                    on_preview(x0, completed_steps, total_steps)
+                except Exception:
+                    pass
+
         samples = guider.sample(
             noise,
             latent["samples"],
             sampler,
             sigmas,
             denoise_mask=None,
-            callback=None,
-            disable_pbar=True,
+            callback=_progress_callback,
+            disable_pbar=False,
             seed=noise_seed,
         )
         samples = samples.to(comfy.model_management.intermediate_device())

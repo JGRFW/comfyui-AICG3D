@@ -6,7 +6,7 @@
 
 /* ==========================================================================
     AICG3D · MiniMax H3 加载器面板
-   一个模型 + 4 个 LoRA 槽位 + 文本编码器 + 双 VAE。
+   一个模型 + LoRA 槽位（面板上 1 条起，最多 9 条）+ 文本编码器 + 双 VAE。
    原生 combo 被隐藏，改由本面板统一驱动。
    ========================================================================== */
 import { app } from "../../scripts/app.js";
@@ -14,6 +14,7 @@ import {
     ensureTheme, el, toast, createSelect, widgetOf, setWidgetValue,
     library, formatSize, selectionText,
     markWidgetHidden, markWidgetVisible, autoHideWidgets, refreshVueWidgets,
+    isOwnH3NodeData,
 } from "./aicg3d-core.js";
 
 const LOADER_CLASS = "MiniMaxH3EasyLoader";
@@ -24,7 +25,8 @@ function h3ClassName(name) {
     const text = String(name ?? "");
     return text.startsWith("AICG3D_H3") ? `MiniMaxH3Easy${text.slice("AICG3D_H3".length)}` : text;
 }
-const SLOT_COUNT = 4;
+// 与 h3easy/nodes.py 的 LORA_SLOT_COUNT 保持一致，改后端必须同步改这里。
+const SLOT_COUNT = 9;
 const NONE_VALUES = new Set(["", "none", "无"]);
 
 // ref2va_model 面板上已移除，但仍保留在此列表中隐藏，以维持旧工作流的 widget 顺序。
@@ -414,6 +416,8 @@ function keepLoaderWidget(node) {
 
 function installLoaderNode(nodeType, nodeData) {
     if (h3ClassName(nodeData?.name) !== LOADER_CLASS) return;
+    // 上游同名插件（ComfyUI-MiniMaxH3-Easy）注册的那份加载器不要装本插件的面板。
+    if (!isOwnH3NodeData(nodeData)) return;
     if (nodeType.prototype.__a3LoaderInstalled) return;
     nodeType.prototype.__a3LoaderInstalled = true;
 

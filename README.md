@@ -1,4 +1,6 @@
 <img width="1591" height="585" alt="image" src="https://github.com/user-attachments/assets/a0073ab0-ed68-43b6-a866-ce80f8601e16" />
+<img width="2281" height="1203" alt="image" src="https://github.com/user-attachments/assets/cec9a58b-ff7b-4c30-b0c1-f74c0d28a13b" />
+<img width="2479" height="1201" alt="image" src="https://github.com/user-attachments/assets/34fe97ff-3670-4f41-ac9c-c56f560c6e89" />
 
 # comfyui-AICG3D
 

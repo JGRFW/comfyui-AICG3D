@@ -393,10 +393,19 @@ export function createSelect({ options = [], value = "", placeholder = "未选�
         }
     }
 
+    /* 列表宽度跟着下拉框一起变：节点被拉宽之后菜单也要跟着变宽，否则 LoRA 那种
+       带目录的长文件名会被省略号截掉。下限 220px，上限留出屏幕边距。 */
+    const MENU_MIN_WIDTH = 220;
+    const MENU_MAX_WIDTH = 900;
+
     function position() {
         if (!menu) return;
         const rect = trigger.getBoundingClientRect();
-        const width = Math.max(220, Math.min(320, rect.width + 40));
+        const available = Math.max(MENU_MIN_WIDTH, window.innerWidth - 16);
+        const width = Math.round(Math.max(
+            MENU_MIN_WIDTH,
+            Math.min(rect.width + 40, MENU_MAX_WIDTH, available),
+        ));
         menu.style.width = `${width}px`;
         const height = Math.min(320, menu.scrollHeight || 200);
         let left = rect.left;

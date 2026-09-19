@@ -19,16 +19,23 @@
 | 9 | `9.AICG3D_合并采样器_测试.json` | 验证 **AICG-采样器（高级）**：原生五个采样节点合并成一个 | 加载器 → 主节点 → AICG-采样器（高级）→ 解码 → 合成 | 同 8 | VHS、pysssss |
 | 10 | `10.AICG3D_渲染器_测试.json` | 验证 **AICG-渲染器（高级）**：主节点一条线到底直接出片（只有 7 个节点） | 加载器 → 主节点 → 渲染器（内部完成采样+解码+合成）→ 保存视频 | 同 8 | pysssss（ShowText 旁支） |
 | 11 | `11.AICG3D_测试样板.json` | 上手样板：提示词模板 + 技能库 + 渲染器整套串起来 | 提示词模板 → 主节点 → 渲染器 → 保存视频；旁支技能库 | 同 8 | pysssss |
+| 13 | `13.AICG3D_渲染器_二采_单节点.json` | **二采单节点**：一采 + Latent 3D 放大 + 二采收成一个节点，只剩两条连线 | 加载器 → 主节点 → 渲染器（二采，内部完成一采+放大+二采+解码+合成，可开「二采分块采样」防爆显存）→ 保存视频 | 同 8，另加 3D latent 放大器 | 无 |
+| 14 | `14.AICG3D_渲染器_一采二采_拆分.json` | **一采 / 二采放大拆成两个节点**：可以只用一采，也可以自由串上二采放大 | 加载器 → 主节点 → 渲染器（一采）→ 保存视频；一采的「一采数据」→ 渲染器（二采放大）→ 保存视频 | 同 8，另加 3D latent 放大器 | 无 |
+| 15 | `15.AICG3D_无限段落顺序生成.json` | **无限段落顺序生成 + 自动拼接**：全局设置与素材库只接第 1 段、后面段落自动继承，段落可自由增减，段间自动衔接上段尾帧 | 加载器 → 全局设置 → 视频段落 ×3（可无限加）→ 最终合成视频 → 保存视频 | 同 8 | 无 |
 
 **怎么挑**：
 
 - 先跑通、快点看到画面：`11`（上手样板）→ `10`（一条龙渲染）。
 - 做长视频 / 多镜头连续：`4`（基础分段）→ `7`（要逐段重跑）→ `5`（省显存二采）→ `6`（画质优先二采）。
 - 已经有满意的成片、只想挑几段放大：`3`。
-- 单条短片整体二采放大：`2`。
+- 单条短片整体二采放大：`2`（像素级，二采可换模型）/ `13`（latent 级，一个节点搞定，最省事；
+  显存吃紧就把节点里的「二采分块采样」改成「开」，二采会按空间分块跑）。
+- 想让一采 / 二采放大分开用（只跑一采，或临时加上放大）：`14`，两个节点各自独立，接不接二采自己挑。
+- 想让一条长片按段落顺序拍下去、段落数量随时增减：`15`，全局设置只管分辨率 / 宽高比 / 帧率 / 衔接帧数 / 显存，
+  段落节点一段一个，段尾自动接下一段开头，最后 `最终合成视频` 一次拼成完整 mp4。
 - `8` / `9` 是插件自检用的，平时不用跑。
 
-> 二采（`3` / `5` / `6` / `2`）需要额外的二采模型：`latent_upscale` 模式要 3D latent 放大器，
+> 二采（`3` / `5` / `6` / `2` / `13` / `14`）需要额外的二采模型：`latent_upscale` 模式要 3D latent 放大器，
 > `pixel_resize` 模式要第二套 H3 模型或目标分辨率；模型文件按工作流里的加载器选择为准。
 
 ### 可能需要安装的插件
@@ -124,6 +131,58 @@
   要更细的分镜脚本时再把这条线接到主节点。
 - 首次跑通建议 `480P / 16:9 / 3 秒 / 20 步`（渲染器默认），确认无误再提高分辨率或时长。
 
+### 无限段落顺序生成（15.AICG3D_无限段落顺序生成.json）
+
+把「顺序生成长视频」拆成一套最简的独立节点，一条线连到底：
+
+`MiniMax H3 Aicg 加载器` → **`无限段落顺序生成（全局设置）`** → **`视频段落`**（可无限增减）→ **`最终合成视频`** → `SaveVideo`
+
+节点分工：
+
+- `无限段落顺序生成（全局设置）`：`sequence_config` 只在**第 1 段**接一次，后面的段落顺着
+  `previous_segment` 自动继承（想给某段换配置，单独把线接到那一段），管全局的分辨率、宽高比、
+  帧率（H3 原生 24fps 锁定）、参考图尺寸、采样器 / 调度器 / 步数 / 降噪；分辨率只有预设档，宽高由
+  「分辨率 + 宽高比」算出来，节点上只读显示（如 `1920x1080`），不用手填。其中这几项是重点：
+  - **衔接帧数**（`1`~`20`）：每段开头接住上一段结尾多少帧画面。H3 原生时间栅格只有 `5 / 22 / 39 / 56 / 73`，
+    所以填 `1~5` 按 5 帧跑、填 `6~20` 按 22 帧跑（越大越稳、越慢），默认 `5`。
+  - **衔接方式**：`尾帧续写（latent）`＝直接拿上段尾部的 latent 当上下文，无损最快，走 Motion Context 同款机制；
+    `尾帧画面（RGB）`＝把上段尾部画面重新编码成 Guide，画面更贴但多一次解码。
+  - **显存收尾**（`vram_policy`）：每个段落跑完做一次。默认「释放缓存」＝把 PyTorch 占着的缓存显存还给驱动，
+    模型留在显存里，下一段接着跑最快；显存实在吃紧再改「卸载模型」（每段重载权重，长片会慢）。
+  - **音频模式**（`audio_mode`）：默认 `生成音频`＝每段自己出声音；
+    `数字人（锁定音频）`＝素材库里那**一条**音频当驱动音轨，按整条时间轴切片锁进每一段
+    （音频那一半不参与去噪，生成的画面跟着音频走），最终成片也用这条音轨。
+    素材库里只放音频（提示词里只写 `@音频1`）时，参考生视频会报
+    `needs an image or video in addition to audio`，切到这一档就能直接跑，没有画面参考的段落退回纯文字出片。
+    整条链必须共用同一条音频，中途换成另一条会在合成时报错。
+  - **提示词优化设置**：点这一行打开提示词优化面板（优化方式 / API 地址 / API Key / 模型名 / 本地模型）。
+    段落提示词框里的 `✦` 用的就是这份设置；没配好时点 `✦` 会直接把这个面板打开。
+- `视频段落`：一段一个节点，参数只有 `prompt` / `seconds` / `seed`；要参考图、参考视频就从
+  `MiniMax H3 Aicg资源库` 拉一条线到**第 1 段**的 `media`（后面的段落自动沿用同一份素材，想换素材
+  再单独接线），在素材库里点一张素材，引用就插进**光标所在那一段**提示词的光标处。
+  把上一段的 `segment` 接到本节点的 `previous_segment`，
+  它就会自动接住上段结尾往下拍；第一段不接 `previous_segment`。只放一段也是完整流程。
+- `最终合成视频`：只接最后一段的 `segment`，它自己顺着链找回前面每一段，逐段解码、逐段写进同一个编码器
+  （音画一起拼，内存只跟单段有关），保存到 `output` 目录，同时输出 `VIDEO` 方便再接别的节点。
+
+怎么增减段落：
+
+- 加一段：复制现成的 `视频段落` 节点，把上一段的 `segment` 接到新节点的 `previous_segment`，
+  再把新节点的 `segment` 接到 `最终合成视频` 的 `final_segment`。
+- 减一段：删掉中间某个段落节点，把它的前一段 `segment` 直接接到后一段的 `previous_segment` 即可。
+- 只出一段：一个 `视频段落` 直接接 `最终合成视频`。
+
+增删段落只动 `previous_segment` / `segment` 这条链，全局设置与素材线不用重新接：
+20 段的工作流画布上也只有一条主线，不会织成蜘蛛网。
+
+测试要点：
+
+- 先保持默认 `480P / 16:9 / 每段 5 秒 / 20 步 / 衔接 5 帧`，跑通再往上加。
+- 工作流预置三段中文提示词（起手 → 中段 → 收尾），照着改成自己的分镜即可。
+- 采样预览默认关闭，想看正在采样那一段的实时画面，就在全局设置里把「采样预览」改成「开」，
+  `preview_interval` 控制每隔多少步推一张。
+- 每段结束都会打印显存 / 内存收尾日志（`[MiniMax H3 Aicg] ...`），可以用它判断显存够不够。
+
 ---
 
 # MiniMax H3 Aicg Workflow Guide
@@ -147,6 +206,9 @@ Before using any workflow in this folder, install the required custom nodes and 
 | 9 | `9.AICG3D_合并采样器_测试.json` | Verifies **AICG Sampler (Advanced)**: five native sampling nodes collapsed into one | loader -> main node -> AICG sampler -> decode -> mux | same as 8 | VHS, pysssss |
 | 10 | `10.AICG3D_渲染器_测试.json` | Verifies **AICG Render (Advanced)**: one wire from the main node to the file (7 nodes) | loader -> main node -> render node (sampling + decode + mux inside) -> SaveVideo | same as 8 | pysssss (ShowText side branch) |
 | 11 | `11.AICG3D_测试样板.json` | Starter sample: prompt preset + skill library + render node together | prompt preset -> main node -> render node -> SaveVideo; skill side branch | same as 8 | pysssss |
+| 13 | `13.AICG3D_渲染器_二采_单节点.json` | **Single-node second pass** (legacy: its widget list no longer matches the node, re-add the node or use 14) | loader -> main node -> render (pass 2) -> SaveVideo | same as 8, plus 3D latent upscaler | none |
+| 14 | `14.AICG3D_渲染器_一采二采_拆分.json` | **First pass / upscale-refine split into two nodes**: use pass 1 alone, or chain the optional second pass | loader -> main node -> render (pass 1) -> SaveVideo; pass 1 `pass1` -> render (pass 2) -> SaveVideo | same as 8, plus 3D latent upscaler | none |
+| 15 | `15.AICG3D_无限段落顺序生成.json` | **Unlimited ordered segments + auto-stitch**: the global config and media lines connect to segment 1 only and later segments inherit them, the segment count is changed at will, and each segment starts from the previous one tail frames | loader -> global config -> video segment x3 (add as many as you like) -> final combine -> SaveVideo | same as 8 | none |
 
 **Which one to pick**
 
@@ -154,9 +216,11 @@ Before using any workflow in this folder, install the required custom nodes and 
 - Long, multi-shot continuous video: `4` first, then `7` for per-segment reruns, `5` for a low-VRAM second pass, `6` when quality matters most.
 - You already have a clip you like and only want to upscale parts of it: `3`.
 - Whole-clip second pass for a short video: `2`.
+- Want the first pass and the upscale refine to run as separate, optional nodes: `14`.
+- Want a long video built segment by segment with the segment count changed at will: `15`.
 - `8` / `9` are plugin self-tests; you normally do not run them.
 
-> The second-pass workflows (`2` / `3` / `5` / `6`) need extra models: `latent_upscale` mode
+> The second-pass workflows (`2` / `3` / `5` / `6` / `14`) need extra models: `latent_upscale` mode
 > requires a 3D latent upscaler, `pixel_resize` mode uses a second H3 model or a target
 > resolution. Select the files matching the loaders inside each workflow.
 
@@ -251,3 +315,63 @@ What to check:
 - The skill branch is optional: route `AICG3D Skill Loader` `提示词` into `ShowText` to read the body,
   or into the main node when you want a detailed shot script.
 - First run: keep `480P / 16:9 / 3s / 20 steps` (render node defaults), then raise resolution or duration.
+
+### Unlimited ordered segments (15.AICG3D_无限段落顺序生成.json)
+
+Splits ordered long-video generation into a minimal set of standalone nodes, one wire end to end:
+
+`MiniMax H3 Aicg Loader` -> **`Sequence Global`** -> **`Video Segment`** (add as many as you want) -> **`Final Combine`** -> `SaveVideo`
+
+How the nodes split the work:
+
+- `Sequence Global` connects its `sequence_config` wire to the **first** segment only; later segments
+  inherit it through `previous_segment` (wire a segment's own `sequence_config` when it needs different
+  settings). It owns the global resolution, aspect ratio, frame rate (locked to the native 24 fps),
+  reference image size, sampler / scheduler / steps / denoise, plus a few settings that matter here:
+  - **Handoff frames** (`1`-`20`): how many tail frames of the previous segment each segment starts from.
+    H3 only has the native temporal grid `5 / 22 / 39 / 56 / 73`, so `1`-`5` runs as 5 frames and
+    `6`-`20` runs as 22 frames (higher is steadier but slower). Default is `5`.
+  - **Handoff mode**: `latent` reuses the previous tail latent as context (lossless and fastest, the same
+    path as Motion Context); `RGB` re-encodes the previous tail frames as a Guide (a closer match, one
+    extra decode).
+  - **VRAM cleanup** runs after every segment. The default "release cache" hands cached VRAM back to the
+    driver while keeping the model resident so the next segment starts fastest; "unload models" uses the
+    least VRAM but reloads the weights for every segment.
+  - **Audio mode** (`audio_mode`): the default `生成音频` lets every segment generate its own sound;
+    `数字人（锁定音频）` treats the single audio clip in the media library as a driver track, slices it
+    along the whole timeline and locks it into every segment (that half of the AV latent is not denoised,
+    so the generated picture follows the track), and the final combine uses that same track.
+    With an audio-only library (and `@音频1` in the prompt) reference-to-video raises
+    `needs an image or video in addition to audio`; switching to this mode runs it, falling back to
+    text-only generation for segments without a visual reference. The whole chain must share one track -
+    swapping in a different audio mid-chain raises a clear error at combine time.
+- **Prompt optimizer settings**: click this row to open the optimizer panel (engine, API URL, API key,
+  model, local model). The `✦` button in a segment's prompt box uses exactly these settings, and clicking
+  `✦` while the optimizer is unconfigured opens the panel for you.
+- `Video Segment`: one node per segment, with only `prompt` / `seconds` / `seed`. Pull a wire from the
+  media library into the **first** segment's `media` when you need reference images or video; later
+  segments inherit the same library (wire their own `media` to swap it). Clicking media in the library
+  inserts the reference at the caret of the segment you last placed the caret in. Connect the previous
+  segment `segment` into `previous_segment` and it continues from that tail; leave `previous_segment`
+  empty for the first segment. A single segment is a complete run on its own.
+- `Final Combine`: takes only the last segment `segment`, walks the chain back to the first segment,
+  decodes and encodes one segment at a time into a single encoder (video and audio together, so memory
+  only depends on one segment), saves into the `output` folder, and also returns `VIDEO` for other nodes.
+
+Adding and removing segments:
+
+- Add one: copy an existing `Video Segment` node, wire the previous segment `segment` into the new node
+  `previous_segment`, then wire the new node `segment` into `Final Combine` `final_segment`.
+- Remove one: delete a middle segment node and wire the one before it straight into the one after it.
+- Single segment: connect one `Video Segment` straight into `Final Combine`.
+
+Adding or removing segments only touches the `previous_segment` / `segment` chain; the global config and
+media wires stay where they are, so a 20-segment graph keeps a single main line instead of a spider web.
+
+What to check:
+
+- Keep the defaults (`480P / 16:9 / 5s per segment / 20 steps / 5 handoff frames`) for the first run.
+- The workflow ships three Chinese prompts (opening / middle / closing) that you can replace with your own shots.
+- Sampling preview is off by default; turn `sample preview` on in the global node to watch the segment being
+  sampled live, and use `preview interval` to control how often a frame is pushed.
+- Every segment prints a VRAM / RAM cleanup log line (`[MiniMax H3 Aicg] ...`) you can use to judge headroom.

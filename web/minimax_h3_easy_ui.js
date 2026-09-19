@@ -25,6 +25,14 @@ const SEGMENT_COLLECT_CLASS = "MiniMaxH3EasySegmentCollect";
 const SEGMENT_DECODE_CLASS = "MiniMaxH3EasySegmentDecode";
 const OUTPUT_CLASS = "MiniMaxH3EasyOutput";
 const RENDER_CLASS = "MiniMaxH3EasyRenderAdvanced";
+/* AICG-渲染器（一采）：只跑一采，出成片，并顺手递一条「一采数据」给二采放大。 */
+const RENDER_PASS1_CLASS = "MiniMaxH3EasyRenderPass1";
+/* AICG-渲染器（二采放大）：接「一采数据」跑 Latent 放大 + 二采，面板和进度条与高级渲染器共用。 */
+const RENDER_PASS2_CLASS = "MiniMaxH3EasyRenderPass2";
+/* AICG3D 无限段落顺序生成：视频段落只用一条 previous_segment 线串起来。 */
+const SEQUENCE_SEGMENT_CLASS = "MiniMaxH3EasySequenceSegment";
+/* 全局设置节点：分辨率 / 宽高比 / 帧率等全局参数，画布宽高由分辨率算出来只读显示。 */
+const SEQUENCE_GLOBAL_CLASS = "MiniMaxH3EasySequenceGlobal";
 const EASY_SAMPLER_CLASS = "MiniMaxH3EasySampler";
 const SELFLIFT_STRATEGY_CLASS = "MiniMaxH3EasySelfLiftStrategy";
 
@@ -309,9 +317,22 @@ const TEXT = {
     cleanupLabel: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
     renderTitle: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u9ad8\u7ea7\uff09" : "AICG Render (Advanced)",
     renderVideo: ZH_BROWSER ? "\u6210\u7247\u89c6\u9891" : "Video",
+    renderPass1Title: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u4e00\u91c7\uff09" : "AICG Render (Pass 1)",
+    renderPass1Data: ZH_BROWSER ? "\u4e00\u91c7\u6570\u636e" : "Pass-1 data",
+    renderPass2Title: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u4e8c\u91c7\u653e\u5927\uff09" : "AICG Render (Pass 2)",
+    renderFirstPassVideo: ZH_BROWSER ? "\u4e00\u91c7\u6210\u7247" : "First-pass video",
+    pass2SeedLabel: ZH_BROWSER ? "\u4e8c\u91c7\u79cd\u5b50" : "Pass-2 seed",
+    pass2DenoiseLabel: ZH_BROWSER ? "\u4e8c\u91c7\u964d\u566a" : "Pass-2 denoise",
+    pass2TiledLabel: ZH_BROWSER ? "\u4e8c\u91c7\u5206\u5757\u91c7\u6837" : "Pass-2 tiled sampling",
+    samplePreviewLabel: ZH_BROWSER ? "\u91c7\u6837\u9884\u89c8" : "Sampling preview",
+    previewIntervalLabel: ZH_BROWSER ? "\u9884\u89c8\u95f4\u9694" : "Preview interval",
+    upscalerScale: ZH_BROWSER ? "\u653e\u5927\u500d\u6570" : "Upscale scale",
+    outputFirstPassLabel: ZH_BROWSER ? "\u9644\u5e26\u4e00\u91c7\u6210\u7247" : "Also output first pass",
     renderPreviewIdle: ZH_BROWSER ? "\u8fd0\u884c\u4e2d\u8fd9\u91cc\u663e\u793a\u5b9e\u65f6\u9884\u89c8" : "Live preview appears here while running",
     renderProgressSample: ZH_BROWSER ? "\u91c7\u6837\u4e2d" : "Sampling",
     renderProgressDecode: ZH_BROWSER ? "\u89e3\u7801\u4e0e\u5408\u6210\u4e2d" : "Decoding",
+    renderProgressUpscale: ZH_BROWSER ? "Latent \u653e\u5927\u4e2d" : "Latent upscaling",
+    renderProgressSampleSecond: ZH_BROWSER ? "\u4e8c\u91c7\u91c7\u6837\u4e2d" : "Second pass sampling",
     renderProgressDone: ZH_BROWSER ? "\u5b8c\u6210" : "Done",
     renderProgressElapsed: ZH_BROWSER ? "\u5df2\u7528" : "Elapsed",
     renderProgressEta: ZH_BROWSER ? "\u5269\u4f59\u7ea6" : "ETA",
@@ -342,9 +363,16 @@ const TEXT = {
     tileFade: ZH_BROWSER ? "Tile \u63a5\u7f1d\u6e10\u53d8" : "Tile seam fade",
     aicg3dAssets: ZH_BROWSER ? "\u7d20\u6750\u5e93\uff1a\u70b9\u9009\u7d20\u6750\u63d2\u5165 @ \u5f15\u7528" : "Asset library: click a file to insert an @ reference",
     aicg3dSkills: ZH_BROWSER ? "\u6280\u80fd\u5e93\uff1a\u9009\u62e9 Skill \u5199\u5165\u63d0\u793a\u8bcd" : "Skill library: pick a skill for this prompt",
+    canvasSize: ZH_BROWSER ? "\u753b\u5e03\u5c3a\u5bf8" : "Canvas size",
+    handoffFrames: ZH_BROWSER ? "\u8854\u63a5\u5e27\u6570" : "Handoff frames",
+    handoffMode: ZH_BROWSER ? "\u8854\u63a5\u65b9\u5f0f" : "Handoff mode",
+    vramPolicy: ZH_BROWSER ? "\u663e\u5b58\u6536\u5c3e" : "VRAM cleanup",
+    vramTier: ZH_BROWSER ? "\u663e\u5b58\u6863\u4f4d" : "VRAM tier",
+    sequenceConfig: ZH_BROWSER ? "\u5168\u5c40\u8bbe\u7f6e" : "Global settings",
+    sequenceSegmentOutput: ZH_BROWSER ? "\u89c6\u9891\u6bb5\u843d" : "Video segment",
     aicg3dNoTarget: ZH_BROWSER
-        ? "\u8bf7\u5148\u628a AICG3D\u8d44\u6e90\u5e93 \u8fde\u63a5\u5230\u4e3b\u8282\u70b9\u7684 AICG3D \u53e3\uff0c\u5e76\u628a\u4e3b\u8282\u70b9\u5207\u5230\u53c2\u8003\u6216\u5206\u6bb5\u6a21\u5f0f\u3002"
-        : "Connect the AICG3D Resource Library to the main node AICG3D input and switch it to reference or segmented mode first.",
+        ? "\u8bf7\u5148\u628a AICG3D\u8d44\u6e90\u5e93 \u8fde\u63a5\u5230\u4e3b\u8282\u70b9\u6216\u89c6\u9891\u6bb5\u843d\u7684 AICG3D \u53e3\uff0c\u4e3b\u8282\u70b9\u8fd8\u9700\u5207\u5230\u53c2\u8003\u6216\u5206\u6bb5\u6a21\u5f0f\u3002"
+        : "Connect the AICG3D Resource Library to the AICG3D input of a main node or video segment; main nodes also need reference or segmented mode.",
 };
 const OPTION_DEFS = {
     mode: {
@@ -575,6 +603,34 @@ const LOADERS = {
     audio: { classType: "LoadAudio", label: TEXT.loadAudio },
 };
 
+/* 「无限段落顺序生成（全局设置）」用：分辨率的像素总量、宽高比和对齐步长，跟 Python 的
+   RESOLUTION_MEGAPIXELS / ASPECT_RATIOS / h3.CANVAS_MULTIPLE 对齐，只用来算画布尺寸。 */
+const CANVAS_MEGAPIXELS = {
+    "360P": 0.2,
+    "416P": 0.3,
+    "480P": 0.4,
+    "540P": 0.5,
+    "640P": 0.7,
+    "720P": 0.9,
+    "768P": 1.0,
+    "832P": 1.2,
+    "928P": 1.5,
+    "1024P": 1.8,
+    "1080P": 2.0,
+};
+const CANVAS_ASPECT_RATIOS = {
+    "1:1": [1, 1],
+    "2:3": [2, 3],
+    "3:2": [3, 2],
+    "3:4": [3, 4],
+    "4:3": [4, 3],
+    "9:16": [9, 16],
+    "16:9": [16, 9],
+    "21:9": [21, 9],
+};
+const CANVAS_DIMENSION_MULTIPLE = 32;
+const SEQUENCE_CANVAS_SIZE_ROW = 22;
+
 let installed = false;
 let patchedCanvas = false;
 let patchedPrompt = false;
@@ -583,6 +639,7 @@ let createMenu = null;
 let quickCreateCaptureCanvas = null;
 let quickCreateCaptureCleanup = null;
 let activePromptNode = null;
+let activePromptRange = null;
 let lastCapturedDropAt = 0;
 let deferredCreateMenuPending = false;
 let deferredCreateMenuToken = 0;
@@ -619,6 +676,16 @@ function isTarget(node) {
         || nodeMatchesClass(node, SELECTED_VIDEO_CONTEXT_CLASS, TEXT.selectedVideoContextTitle, "__h3SelectedVideoContextNodeInstalled");
 }
 
+/* 「视频段落」「全局设置」不走主节点那套 mode / resolution 虚拟字段，所以故意不在
+   isTarget 里；下面按类名 + 安装标记单独认这两个节点。 */
+function isSequenceSegmentNode(node) {
+    return nodeMatchesClass(node, SEQUENCE_SEGMENT_CLASS, null, "__h3SequenceSegmentInstalled");
+}
+
+function isSequenceGlobalNode(node) {
+    return nodeMatchesClass(node, SEQUENCE_GLOBAL_CLASS, null, "__h3SequenceGlobalInstalled");
+}
+
 function isContextSegmentsNode(node) {
     return nodeMatchesClass(node, CONTEXT_SEGMENTS_CLASS, TEXT.contextSegmentsTitle, "__h3ContextSegmentsNodeInstalled");
 }
@@ -638,6 +705,14 @@ function isSelectedVideoContextSegmented(node) {
 
 function isSegmentRefineNode(node) {
     return nodeMatchesClass(node, SEGMENT_REFINE_CLASS, TEXT.segmentRefineTitle, "__h3SegmentRefineInstalled");
+}
+
+function isRenderPass1Node(node) {
+    return nodeMatchesClass(node, RENDER_PASS1_CLASS, TEXT.renderPass1Title, "__h3RenderPass1NodeInstalled");
+}
+
+function isRenderPass2Node(node) {
+    return nodeMatchesClass(node, RENDER_PASS2_CLASS, TEXT.renderPass2Title, "__h3RenderPass2NodeInstalled");
 }
 
 function isSegmentSampleSetupNode(node) {
@@ -1019,8 +1094,10 @@ function setLocalizedSlotLabel(slot, label) {
 
 function localizeNodeInstance(node) {
     if (!node) return;
-    if (nodeMatchesClass(node, RENDER_CLASS, TEXT.renderTitle, "__h3RenderNodeInstalled")) {
-        node.title = TEXT.renderTitle;
+    const isPass1 = nodeMatchesClass(node, RENDER_PASS1_CLASS, TEXT.renderPass1Title, "__h3RenderPass1NodeInstalled");
+    const isPass2 = nodeMatchesClass(node, RENDER_PASS2_CLASS, TEXT.renderPass2Title, "__h3RenderPass2NodeInstalled");
+    if (isPass1 || isPass2 || nodeMatchesClass(node, RENDER_CLASS, TEXT.renderTitle, "__h3RenderNodeInstalled")) {
+        node.title = isPass1 ? TEXT.renderPass1Title : isPass2 ? TEXT.renderPass2Title : TEXT.renderTitle;
         const widgetLabels = {
             noise_seed: TEXT.seedLabel,
             sampler_name: TEXT.samplerName,
@@ -1028,6 +1105,21 @@ function localizeNodeInstance(node) {
             steps: TEXT.stepsLabel,
             denoise: TEXT.denoiseLabel,
             cleanup_after_run: TEXT.cleanupLabel,
+            second_pass_seed: TEXT.pass2SeedLabel,
+            second_pass_denoise: TEXT.pass2DenoiseLabel,
+            tiled_sampling: TEXT.pass2TiledLabel,
+            tile_width: TEXT.tileWidth,
+            tile_height: TEXT.tileHeight,
+            tile_overlap: TEXT.tileOverlap,
+            tile_fade: TEXT.tileFade,
+            sample_preview: TEXT.samplePreviewLabel,
+            preview_interval: TEXT.previewIntervalLabel,
+            latent_upscale_model: TEXT.upscalerModel,
+            upscale_scale: TEXT.upscalerScale,
+            upscale_device: TEXT.upscalerDevice,
+            upscale_precision: TEXT.upscalerPrecision,
+            upscale_chunking: TEXT.upscalerChunking,
+            output_first_pass: TEXT.outputFirstPassLabel,
         };
         for (const widget of node.widgets || []) {
             if (widgetLabels[widget.name]) widget.label = widgetLabels[widget.name];
@@ -1035,9 +1127,13 @@ function localizeNodeInstance(node) {
         }
         for (const input of node.inputs || []) {
             if (input.name === "h3_context") setLocalizedSlotLabel(input, TEXT.outputContext);
+            if (input.name === "pass1") setLocalizedSlotLabel(input, TEXT.renderPass1Data);
         }
         for (const output of node.outputs || []) {
-            if (String(output.name || "").toLowerCase() === "video") setLocalizedSlotLabel(output, TEXT.renderVideo);
+            const outputName = String(output.name || "").toLowerCase();
+            if (outputName === "video") setLocalizedSlotLabel(output, TEXT.renderVideo);
+            if (outputName === "pass1") setLocalizedSlotLabel(output, TEXT.renderPass1Data);
+            if (outputName === "first_pass_video") setLocalizedSlotLabel(output, TEXT.renderFirstPassVideo);
         }
         return;
     }
@@ -1286,7 +1382,7 @@ function localizeNodeInstance(node) {
 }
 
 function localizeNodeDefinition(nodeData) {
-    if (!nodeData || ![NODE_CLASS, CONTEXT_SEGMENTS_CLASS, SELECTED_VIDEO_CONTEXT_CLASS, LOADER_CLASS, ADAPTER_CLASS, MEDIA_LOADER_CLASS, MEDIA_BRIDGE_CLASS, MEDIA_SPLITTER_CLASS, OUTPUT_CLASS, EASY_SAMPLER_CLASS, SELFLIFT_STRATEGY_CLASS, SEGMENT_RENDER_CLASS, SEGMENT_SAMPLE_SETUP_CLASS, SEGMENT_STEP_CLASS, SEGMENT_COLLECT_CLASS, SEGMENT_REFINE_CLASS, SEGMENT_DECODE_CLASS, RENDER_CLASS].includes(h3ClassName(nodeData.name))) return;
+    if (!nodeData || ![NODE_CLASS, CONTEXT_SEGMENTS_CLASS, SELECTED_VIDEO_CONTEXT_CLASS, LOADER_CLASS, ADAPTER_CLASS, MEDIA_LOADER_CLASS, MEDIA_BRIDGE_CLASS, MEDIA_SPLITTER_CLASS, OUTPUT_CLASS, EASY_SAMPLER_CLASS, SELFLIFT_STRATEGY_CLASS, SEGMENT_RENDER_CLASS, SEGMENT_SAMPLE_SETUP_CLASS, SEGMENT_STEP_CLASS, SEGMENT_COLLECT_CLASS, SEGMENT_REFINE_CLASS, SEGMENT_DECODE_CLASS, RENDER_CLASS, RENDER_PASS1_CLASS, RENDER_PASS2_CLASS].includes(h3ClassName(nodeData.name))) return;
     nodeData.display_name = h3ClassName(nodeData.name) === LOADER_CLASS
         ? TEXT.loaderTitle
         : h3ClassName(nodeData.name) === ADAPTER_CLASS
@@ -1321,6 +1417,10 @@ function localizeNodeDefinition(nodeData) {
             ? TEXT.selectedVideoContextTitle
             : h3ClassName(nodeData.name) === RENDER_CLASS
             ? TEXT.renderTitle
+            : h3ClassName(nodeData.name) === RENDER_PASS1_CLASS
+            ? TEXT.renderPass1Title
+            : h3ClassName(nodeData.name) === RENDER_PASS2_CLASS
+            ? TEXT.renderPass2Title
             : TEXT.mainTitle;
     nodeData.category = TEXT.category;
 }
@@ -1596,6 +1696,8 @@ function mediaReferenceMode(node) {
 // AICG3D：@ 素材引用对所有主节点模式开放（含图生视频 / 首尾帧），素材统一在
 // 「AICG3D资源库」节点里点选，点一下就把 @ 引用写进当前节点。
 function canUseMediaMentions(node) {
+    // 「视频段落」没有 mode 之类的模式控件，写提示词就是在引用素材库里的素材。
+    if (isSequenceSegmentNode(node)) return true;
     if (!isTarget(node)) return false;
     return isReferenceMode(node) || isImageMode(node) || isSegmentMode(node)
         || isContextSegmentsNode(node) || isSelectedVideoContextNode(node);
@@ -2018,7 +2120,9 @@ function scheduleNativeInputLinkReindex(node) {
 }
 
 function getNativeMediaBridgeLink(node) {
-    if (!isTarget(node)) return null;
+    // 「视频段落」不是主节点（没有 mode / 虚拟素材线），但它的 media 输入同样是直接接
+    // AICG3D 资源库的，所以这里一并放行：素材库点选才能把引用写进段落提示词。
+    if (!isTarget(node) && !isSequenceSegmentNode(node)) return null;
     const inputIndex = getMediaInputIndex(node);
     const input = inputIndex >= 0 ? node.inputs?.[inputIndex] : null;
     if (input?.link == null) return null;
@@ -3990,6 +4094,47 @@ function editorFromEvent(event) {
     return active?.closest?.(".h3-prompt-editor") || activePromptNode?.__h3Editor || null;
 }
 
+/* 素材库是独立面板，点它的那一瞬间提示词编辑器已经失焦，实时 selection 找不回光标。
+   所以光标每落一次就记一份「节点 + 位置」，点素材时按这份记录插回原处。 */
+function rememberPromptCaret(node, range) {
+    if (node) activePromptNode = node;
+    if (range) activePromptRange = range;
+}
+
+function currentCaretRange(editor) {
+    if (!editor) return null;
+    const selection = typeof window !== "undefined" ? window.getSelection?.() : null;
+    if (!selection?.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
+    return range.cloneRange();
+}
+
+/* 把光标放回记录下来的位置。必须先聚焦再落 range，因为重新聚焦会把光标重置掉。 */
+function restoreCaretRange(editor, range) {
+    if (!editor || !range || !editor.contains(range.startContainer)) return false;
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection?.();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+}
+
+function captureActivePromptCaret() {
+    if (typeof document === "undefined") return;
+    const selection = window.getSelection?.();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const container = range.startContainer;
+    const element = container?.nodeType === 1 ? container : container?.parentElement;
+    const editor = element?.closest?.(".h3-prompt-editor") || null;
+    if (!editor) return;
+    const node = editorPromptNode(editor);
+    if (!node) return;
+    rememberPromptCaret(node, currentCaretRange(editor));
+}
+
 function isPromptUndoRedoEvent(event) {
     if (!(event?.ctrlKey || event?.metaKey)) return false;
     const key = String(event.key || "").toLowerCase();
@@ -4121,12 +4266,15 @@ function ensurePromptUndoRedoShield() {
     window.addEventListener("keydown", handlePromptUndoRedoCapture, true);
     window.addEventListener("pointerdown", (event) => {
         const editor = event?.target?.closest?.(".h3-prompt-editor");
-        activePromptNode = editorPromptNode(editor);
+        // 点到画布空白或素材库时不清空记录：光标还留在那个段落里，
+        // 素材库点选应该插回原处，而不是落到画布当前选中的节点上。
+        if (editor) rememberPromptCaret(editorPromptNode(editor), null);
     }, true);
     document.addEventListener("focusin", (event) => {
         const editor = event?.target?.closest?.(".h3-prompt-editor");
-        activePromptNode = editorPromptNode(editor);
+        if (editor) rememberPromptCaret(editorPromptNode(editor), null);
     }, true);
+    document.addEventListener("selectionchange", captureActivePromptCaret, true);
     document.addEventListener("beforeinput", handlePromptHistoryBeforeInputCapture, true);
 }
 
@@ -4457,6 +4605,23 @@ function placeCaretAtEditorEnd(editor) {
     selection.addRange(range);
 }
 
+/* 没有富编辑器的节点（例如「视频段落」）把素材引用按官方标签写进 prompt 控件。 */
+function appendMentionTagToWidget(node, option) {
+    const widget = getWidget(node, "prompt");
+    if (!widget) return false;
+    const tag = String(option.tag || option.token || "").trim();
+    if (!tag) return false;
+    const current = String(widget.value || "");
+    const spacer = current && !/\s$/.test(current) ? " " : "";
+    widget.value = `${current}${spacer}${tag} `;
+    if (widget._state) widget._state.value = widget.value;
+    pushPromptHistory(node);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+    return true;
+}
+
 /**
  * 把一个素材引用写进节点的提示词编辑器。range 为空时写在光标处，
  * 编辑器没有焦点时追加到末尾。原始提示词模式下写入官方标签文本。
@@ -4464,26 +4629,23 @@ function placeCaretAtEditorEnd(editor) {
 function insertMentionOption(node, option, range = null) {
     if (!node || !option) return false;
     const editor = node.__h3Editor;
+    // 没有富编辑器就直接写官方标签，跟原始视图同一种写法。
+    if (!editor) return appendMentionTagToWidget(node, option);
+    // 传进来的位置可能已经失效（编辑器重建过），只认还在这个编辑器里的 range。
+    const saved = range && editor.contains(range.startContainer) && editor.contains(range.endContainer)
+        ? range
+        : null;
     if (isRawPromptMode(node)) {
         // 原始视图直接写官方标签（<Picture N> 等），运行时会照常解析。
         const text = `${option.tag || option.token || ""} `;
-        if (editor) {
-            placeCaretAtEditorEnd(editor);
-            insertPlainText(editor, text);
-            syncPromptFromEditor(node);
-            pushPromptHistory(node);
-            return true;
-        }
-        const widget = getWidget(node, "prompt");
-        if (!widget) return false;
-        const current = String(widget.value || "");
-        const spacer = current && !/\s$/.test(current) ? " " : "";
-        widget.value = `${current}${spacer}${text}`;
+        if (!saved || !restoreCaretRange(editor, saved)) placeCaretAtEditorEnd(editor);
+        insertPlainText(editor, text);
+        syncPromptFromEditor(node);
         pushPromptHistory(node);
+        rememberPromptCaret(node, currentCaretRange(editor));
         return true;
     }
-    if (!editor) return false;
-    const target = range || mentionInsertRange(editor);
+    const target = saved || mentionInsertRange(editor);
     target.deleteContents();
     const before = document.createTextNode("\u200B");
     const chip = makeMentionChip(option);
@@ -4492,13 +4654,16 @@ function insertMentionOption(node, option, range = null) {
     fragment.append(before, chip, after);
     target.insertNode(fragment);
     const selection = window.getSelection?.();
+    let nextCaret = null;
     if (selection) {
         const caret = document.createRange();
         caret.setStart(after, after.textContent.length);
         caret.collapse(true);
         selection.removeAllRanges();
         selection.addRange(caret);
+        nextCaret = caret.cloneRange();
     }
+    rememberPromptCaret(node, nextCaret);
     syncPromptFromEditor(node);
     pushPromptHistory(node);
     return true;
@@ -5083,6 +5248,29 @@ function syncSegmentRefineWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "tile_height"), tiled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "tile_overlap"), tiled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "tile_fade"), tiled, { adjustHeight }),
+    ].some(Boolean);
+    if (changed) {
+        refreshVueNodeWidgets(node);
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
+function syncRenderPassWidgets(node, { adjustHeight = true } = {}) {
+    // 一采节点只有采样预览一个联动控件，二采放大节点还多一组分块参数。
+    if (!isRenderPass1Node(node) && !isRenderPass2Node(node)) return false;
+    // 分块参数只在开了「二采分块采样」时才露出来，平时把面板收干净。
+    const tiled = String(getWidgetValue(node, "tiled_sampling", "") || "").trim() === "\u5f00";
+    // 预览间隔同理：只有开了采样预览才有意义。
+    const previewOn = String(getWidgetValue(node, "sample_preview", "") || "").trim() === "\u5f00";
+    const changed = [
+        setConditionalWidgetVisible(node, getWidget(node, "tile_width"), tiled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_height"), tiled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_overlap"), tiled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_fade"), tiled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "preview_interval"), previewOn, { adjustHeight }),
     ].some(Boolean);
     if (changed) {
         refreshVueNodeWidgets(node);
@@ -6282,6 +6470,8 @@ async function optimizePromptFromEditor(node) {
                 ? TEXT.optimizerMissingLocal
                 : TEXT.optimizerMissing
         );
+        // 还没配好就别让人干瞪眼：顺手把设置面板打开，模型 / API 就在里面填。
+        openPromptOptimizerSettings(node);
         return;
     }
     const currentPrompt = promptTextForOptimizer(node);
@@ -6371,7 +6561,9 @@ function syncEditorMode(node) {
     setWidgetOption(domWidget, "canvasOnly", false);
     showDomEditorWidget(domWidget);
     editor.style.display = "block";
-    wrap.style.display = "block";
+    // 外层容器必须是 flex 列：提示词框靠 flex:1 撑满，工具栏固定在底部一行。
+    // 之前写成 block，编辑器只按内容占高，所以拉大节点时提示词框不会跟着变高。
+    wrap.style.display = "flex";
     editor.dataset.placeholder = raw ? TEXT.rawPromptPlaceholder : mediaMentions ? TEXT.referencePromptPlaceholder : TEXT.promptPlaceholder;
     editor.classList.toggle("is-raw", raw);
     wrap.classList.toggle("is-raw", raw);
@@ -7051,6 +7243,14 @@ function ensurePromptEditor(node) {
     editor.addEventListener("pointerdown", () => {
         activePromptNode = node;
     }, true);
+    // 光标每次落下 / 移动都留一份记录，点素材库时才有落点可回。
+    for (const caretEvent of ["mouseup", "keyup", "input"]) {
+        editor.addEventListener(
+            caretEvent,
+            () => rememberPromptCaret(node, currentCaretRange(editor)),
+            true,
+        );
+    }
     editor.addEventListener("keyup", (event) => {
         if (isRawPromptMode(node) || !canUseMediaMentions(node) || ["ArrowUp", "ArrowDown", "Enter", "Escape", "Tab"].includes(event.key)) return;
         syncMentionMenuToCaret(node, editor);
@@ -7200,7 +7400,12 @@ function ensurePromptEditor(node) {
     };
     editor.addEventListener("wheel", wheelHandler, { passive: false, capture: true });
     wrap.addEventListener("wheel", wheelHandler, { passive: false });
-    wrap.append(editor, optimizerStatus, editorTools);
+    // 工具栏不再浮在提示词框里，而是单独占下面一行：提示词框整块留给文字，
+    // 优化状态和按钮各归各位，不用再给悬浮条留底部内边距。
+    const editorFooter = document.createElement("div");
+    editorFooter.className = "h3-prompt-editor-footer";
+    editorFooter.append(optimizerStatus, editorTools);
+    wrap.append(editor, editorFooter);
     node.__h3Editor = editor;
     node.__h3EditorWrap = wrap;
     node.__h3PromptEditorTools = editorTools;
@@ -7547,6 +7752,109 @@ function bindPromptOptimizerWidgetCallbacks(node) {
     }
 }
 
+/* === h3-widget-values-reconcile:start === */
+/* 存档值按「控件名」纠偏。
+   ComfyUI 前端保存时用 widget 的原始下标写 widgets_values（中间夹着 serialize:false 的
+   DOM 控件就留下空洞），还原时却只按顺序数可序列化控件 —— 两套算法不一致；再加上控件
+   列表本身增删 / 换序（比如二采拆成一采 + 二采），旧存档就会整体串位：采样器拿到上一个
+   节点的种子、调度器拿到 control_after_generate 的 "fixed"，节点直接变红。
+   这里用存档自带的 widgets_values_named 校验位置数据，对不上就改按控件名还原，并把
+   位置数组重排成没有空洞的版本，让后面的迁移逻辑继续按位置读数时也不会再串位。 */
+function h3SerializableWidgets(node) {
+    const widgets = [];
+    for (const widget of node?.widgets || []) {
+        if (!widget || widget.serialize === false) continue;
+        widgets.push(widget);
+    }
+    return widgets;
+}
+
+function h3WidgetValuesMatch(left, right) {
+    if (left === right) return true;
+    // 空洞（null）必须当成不一致，它正是错位的源头。
+    if (left === null || left === undefined || right === null || right === undefined) return false;
+    if (typeof left === "object" || typeof right === "object") {
+        try {
+            return JSON.stringify(left) === JSON.stringify(right);
+        } catch {
+            return false;
+        }
+    }
+    return String(left) === String(right);
+}
+
+function h3ApplyWidgetValue(widget, value) {
+    widget.value = value;
+    if (widget._state) widget._state.value = value;
+}
+
+function reconcileWidgetValuesByName(node, info) {
+    if (!node || !info || typeof info !== "object") return false;
+    const named = info.widgets_values_named;
+    if (!named || typeof named !== "object" || Array.isArray(named)) return false;
+    const widgets = h3SerializableWidgets(node);
+    if (!widgets.length) return false;
+    const stored = Array.isArray(info.widgets_values) ? info.widgets_values : [];
+
+    // 先按前端 configure() 的规则回放一次：位置数据跟控件名数据对得上就什么都不做。
+    let compared = 0;
+    let drifted = false;
+    for (let index = 0; index < widgets.length && !drifted; index += 1) {
+        const name = String(widgets[index].name ?? "");
+        if (!name || !Object.prototype.hasOwnProperty.call(named, name)) continue;
+        compared += 1;
+        if (!h3WidgetValuesMatch(index < stored.length ? stored[index] : undefined, named[name])) {
+            drifted = true;
+        }
+    }
+    if (!drifted || !compared) return false;
+
+    const dense = [];
+    let repaired = 0;
+    for (let index = 0; index < widgets.length; index += 1) {
+        const widget = widgets[index];
+        const name = String(widget.name ?? "");
+        if (!name || !Object.prototype.hasOwnProperty.call(named, name)) {
+            // 存档里没有这个名字：控件是后加的，用它自己的默认值，别再被错位值污染一次。
+            dense.push(widget.value ?? null);
+            continue;
+        }
+        // 命名值是空（""/null）而位置值非空时保留位置值：这种不一致多半来自旧存档或
+        // 外部脚本改写，把看得见的那份数据丢掉比留着更糟（比如素材加载器里的素材）。
+        const namedValue = named[name];
+        const archived = index < stored.length ? stored[index] : undefined;
+        const emptyNamed = namedValue === "" || namedValue === null || namedValue === undefined;
+        const emptyArchived = archived === "" || archived === null || archived === undefined;
+        const value = emptyNamed && !emptyArchived ? widget.value : namedValue;
+        h3ApplyWidgetValue(widget, value);
+        dense.push(value ?? null);
+        repaired += 1;
+    }
+    if (!repaired) return false;
+    info.widgets_values = dense;
+    info.__h3WidgetValuesReconciled = true;
+    node._widgetSlotsDirty = true;
+    return true;
+}
+
+/* 所有 AICG3D_H3* 节点共用。故意在 beforeRegisterNodeDef 的最后安装，这样它是最外层
+   钩子：其它节点的迁移 / 布局逻辑跑之前，控件值已经按名字摆正了。 */
+function installWidgetValueReconcileNode(nodeType, nodeData) {
+    if (!nodeType?.prototype || !isOwnH3NodeData(nodeData)) return;
+    if (nodeType.prototype.__h3WidgetValuesReconcileInstalled) return;
+    nodeType.prototype.__h3WidgetValuesReconcileInstalled = true;
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3WidgetValues(info) {
+        try {
+            reconcileWidgetValuesByName(this, info);
+        } catch (error) {
+            console.error("[AICG3D] widget values reconcile failed", error);
+        }
+        return originalConfigure?.apply(this, arguments);
+    };
+}
+/* === h3-widget-values-reconcile:end === */
+
 function repairConfiguredWidgetValues(node, info) {
     const raw = Array.isArray(info?.widgets_values) ? [...info.widgets_values] : [];
     if (!raw.length) return;
@@ -7851,6 +8159,245 @@ function repairConfiguredWidgetValues(node, info) {
     } else {
         info.widgets_values = names.map((name) => normalized[name]);
     }
+}
+
+/* 「视频段落」「全局设置」不在 localizeNodeInstance 的主节点分支里，这里单独补中文控件标签。
+   选项值本身就是 Python 侧定义好的中文 / 预设串，所以不再走 localizeComboWidget。 */
+function localizeSequenceWidgets(node, labels) {
+    if (!node) return;
+    for (const widget of node.widgets || []) {
+        if (widget && labels[widget.name]) widget.label = labels[widget.name];
+    }
+}
+
+const SEQUENCE_GLOBAL_WIDGET_LABELS = {
+    resolution: TEXT.resolution,
+    aspect_ratio: TEXT.aspectRatio,
+    fps: TEXT.fps,
+    handoff_frames: TEXT.handoffFrames,
+    handoff_mode: TEXT.handoffMode,
+    ref_image_size: TEXT.refImageSize,
+    sampler_name: TEXT.samplerName,
+    scheduler: TEXT.schedulerLabel,
+    steps: TEXT.stepsLabel,
+    denoise: TEXT.denoiseLabel,
+    vram_policy: TEXT.vramPolicy,
+    sample_preview: TEXT.samplePreviewLabel,
+    preview_interval: TEXT.previewIntervalLabel,
+    audio_mode: TEXT.audioMode,
+    vram_tier: TEXT.vramTier,
+    // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
+    prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
+};
+
+const SEQUENCE_SEGMENT_WIDGET_LABELS = {
+    prompt: TEXT.prompt,
+    seconds: TEXT.seconds,
+    seed: TEXT.seedLabel,
+};
+
+/* 视频段落节点：把虚拟素材那一堆传输字段（media_N / media_type_N）从前端定义里删掉，
+   面板上只留一个 media 入口，避得节点上挂出一长串空输入。
+   它不走虚拟素材拖拽，所以不能进 isTarget（会被灌上 mode / resolution 等字段）。 */
+function installSequenceSegmentNode(nodeType, nodeData) {
+    if (h3ClassName(nodeData?.name) !== SEQUENCE_SEGMENT_CLASS) return;
+    pruneTransportInputs(nodeData);
+    if (nodeType?.nodeData && nodeType.nodeData !== nodeData) pruneTransportInputs(nodeType.nodeData);
+    if (nodeType?.prototype?.constructor?.nodeData && nodeType.prototype.constructor.nodeData !== nodeData) {
+        pruneTransportInputs(nodeType.prototype.constructor.nodeData);
+    }
+    nodeType.prototype.__h3SequenceSegmentInstalled = true;
+    const setup = (node) => {
+        if (!node) return;
+        pruneTransportInputsFromNode(node, { force: true });
+        localizeNodeInstance(node);
+        localizeSequenceWidgets(node, SEQUENCE_SEGMENT_WIDGET_LABELS);
+        for (const input of node.inputs || []) {
+            if (input.name === "sequence_config") setLocalizedSlotLabel(input, TEXT.sequenceConfig);
+            if (input.name === "previous_segment") setLocalizedSlotLabel(input, TEXT.previousSegment);
+            if (input.name === "media") setLocalizedSlotLabel(input, TEXT.inputMedia);
+        }
+        const segmentOutput = (node.outputs || [])[0];
+        if (String(segmentOutput?.name || "") === "segment") {
+            setLocalizedSlotLabel(segmentOutput, TEXT.sequenceSegmentOutput);
+        }
+        // 段落节点同样要有个能贴素材、能写 @ 引用的提示词框：AICG3D 素材库点选
+        // 就是往这里写引用。
+        installPromptEditorSoon(node);
+    };
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3Sequence() {
+        const result = originalCreated?.apply(this, arguments);
+        setup(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3Sequence(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        setup(this);
+        return result;
+    };
+}
+
+/* 无限段落顺序生成（全局设置）：宽 / 高不再是可填控件，改成在「宽高比」下面只读显示
+   当前分辨率 + 宽高比算出来的画布尺寸（跟 Python _canvas_dimensions 同一套算法）。 */
+/* 显存档位与 Python 侧 VRAM_PROFILES 是同一张表：8G 档画布上限 480P、12G 档上限 720P。
+   前端只是把「实际会跑的画布」显示出来，真正的收口在 h3easy/nodes.py。 */
+const VRAM_TIER_RESOLUTION_CAP = {
+    "12G": "720P",
+    "8G": "480P",
+};
+
+function vramTierResolution(node, resolution) {
+    const cap = VRAM_TIER_RESOLUTION_CAP[String(getWidgetValue(node, "vram_tier", "") || "").trim()];
+    const megapixels = CANVAS_MEGAPIXELS[resolution];
+    const capMegapixels = cap ? CANVAS_MEGAPIXELS[cap] : null;
+    if (!capMegapixels || !megapixels || megapixels <= capMegapixels) {
+        return { resolution, capped: false };
+    }
+    const allowed = Object.keys(CANVAS_MEGAPIXELS).filter((name) => CANVAS_MEGAPIXELS[name] <= capMegapixels);
+    if (!allowed.length) return { resolution: cap, capped: true };
+    const best = allowed.reduce(
+        (current, name) => (CANVAS_MEGAPIXELS[name] > CANVAS_MEGAPIXELS[current] ? name : current),
+    );
+    return { resolution: best, capped: true };
+}
+
+function sequenceCanvasSize(node) {
+    const requested = canonicalOption("resolution", getWidgetValue(node, "resolution", "480P"));
+    const aspectRatio = canonicalOption("aspect_ratio", getWidgetValue(node, "aspect_ratio", "16:9"));
+    const { resolution, capped } = vramTierResolution(node, requested);
+    const megapixels = CANVAS_MEGAPIXELS[resolution];
+    const ratio = CANVAS_ASPECT_RATIOS[aspectRatio];
+    if (!megapixels || !ratio) return "";
+    const scale = Math.sqrt((megapixels * 1024 * 1024) / (ratio[0] * ratio[1]));
+    const align = (value) => Math.max(
+        CANVAS_DIMENSION_MULTIPLE,
+        Math.round(value / CANVAS_DIMENSION_MULTIPLE) * CANVAS_DIMENSION_MULTIPLE,
+    );
+    const size = `${align(ratio[0] * scale)}x${align(ratio[1] * scale)}`;
+    // 档位压了分辨率就在只读那一行写清楚，免得面板显示的尺寸和实际跑的对不上。
+    return capped ? `${size}\uff08\u663e\u5b58\u6863\u4f4d\u6309 ${resolution} \u8dd1\uff09` : size;
+}
+
+function installSequenceCanvasSizeStyles() {
+    let style = document.getElementById("h3-sequence-canvas-size-styles");
+    if (!style) {
+        style = document.createElement("style");
+        style.id = "h3-sequence-canvas-size-styles";
+        document.head.append(style);
+    }
+    style.textContent = `
+      .h3-sequence-canvas-size { display:flex; align-items:center; gap:6px; width:100%; height:100%; box-sizing:border-box; padding:0 6px; color:var(--h3-native-widget-text,#ddd); font-size:12px; line-height:1; }
+      .h3-sequence-canvas-size-label { opacity:.68; }
+      .h3-sequence-canvas-size-value { font-weight:600; letter-spacing:.02em; }
+    `;
+}
+
+function syncSequenceCanvasSize(node) {
+    if (!node) return false;
+    const value = sequenceCanvasSize(node);
+    if (!value) return false;
+    const target = node.__h3SequenceSizeValue;
+    if (target && target.textContent !== value) target.textContent = value;
+    node.__h3SequenceSizeText = value;
+    return true;
+}
+
+/* 旧工作流里全局设置节点还带着 width / height 两行（`480P, 16:9, 宽, 高, 24, …`），
+   现在宽高由分辨率算出来、只读显示，所以这里先把这两个值丢掉，否则后面每个控件都会错位一行。 */
+function dropLegacySequenceCanvasValues(info) {
+    const values = Array.isArray(info?.widgets_values) ? info.widgets_values : null;
+    if (!values || values.length < 6) return false;
+    const numeric = (value) => typeof value === "number"
+        || (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)));
+    // 新布局第 5 格已经是「衔接方式」字符串，旧布局那一格还是 fps 数字。
+    if (!numeric(values[2]) || !numeric(values[3]) || !numeric(values[4])) return false;
+    values.splice(2, 2);
+    return true;
+}
+
+function installSequenceGlobalNode(nodeType, nodeData) {
+    if (h3ClassName(nodeData?.name) !== SEQUENCE_GLOBAL_CLASS) return;
+    if (nodeType.prototype.__h3SequenceGlobalInstalled) return;
+    nodeType.prototype.__h3SequenceGlobalInstalled = true;
+    installSequenceCanvasSizeStyles();
+    const setup = (node) => {
+        if (!node) return;
+        localizeNodeInstance(node);
+        localizeSequenceWidgets(node, SEQUENCE_GLOBAL_WIDGET_LABELS);
+        for (const input of node.inputs || []) {
+            if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
+        }
+        const configOutput = (node.outputs || [])[0];
+        if (String(configOutput?.name || "") === "sequence_config") {
+            setLocalizedSlotLabel(configOutput, TEXT.sequenceConfig);
+        }
+        const aspectWidget = getWidget(node, "aspect_ratio");
+        if (!aspectWidget) return;
+        if (!node.__h3SequenceSizeWidget && typeof node.addDOMWidget === "function"
+            && typeof document !== "undefined" && document.head) {
+            const row = document.createElement("div");
+            row.className = "h3-sequence-canvas-size";
+            const label = document.createElement("span");
+            label.className = "h3-sequence-canvas-size-label";
+            label.textContent = TEXT.canvasSize;
+            const value = document.createElement("span");
+            value.className = "h3-sequence-canvas-size-value";
+            row.append(label, value);
+            const domWidget = node.addDOMWidget("h3_sequence_canvas_size", "h3_sequence_canvas_size", row, {
+                serialize: false,
+                getMinHeight: () => SEQUENCE_CANVAS_SIZE_ROW,
+            });
+            if (domWidget) {
+                domWidget.serialize = false;
+                setWidgetOption(domWidget, "serialize", false);
+                node.__h3SequenceSizeWidget = domWidget;
+                node.__h3SequenceSizeValue = value;
+                // 挪到「宽高比」下面，也就是原来宽 / 高两行的位置。
+                const currentIndex = node.widgets?.indexOf(domWidget) ?? -1;
+                if (currentIndex >= 0) {
+                    node.widgets.splice(currentIndex, 1);
+                    const aspectIndex = node.widgets.indexOf(aspectWidget);
+                    node.widgets.splice(aspectIndex >= 0 ? aspectIndex + 1 : node.widgets.length, 0, domWidget);
+                    node._widgetSlotsDirty = true;
+                    refreshVueNodeWidgets(node);
+                }
+            }
+        }
+        for (const name of ["resolution", "aspect_ratio", "vram_tier"]) {
+            const widget = getWidget(node, name);
+            if (!widget || widget.__h3SequenceSizeBound) continue;
+            widget.__h3SequenceSizeBound = true;
+            const originalCallback = widget.callback;
+            widget.callback = function onSequenceCanvasChanged() {
+                const result = originalCallback?.apply(this, arguments);
+                syncSequenceCanvasSize(node);
+                node.setDirtyCanvas?.(true, true);
+                return result;
+            };
+        }
+        syncSequenceCanvasSize(node);
+    };
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3SequenceGlobal() {
+        const result = originalCreated?.apply(this, arguments);
+        setup(this);
+        return result;
+    };
+    const originalAdded = nodeType.prototype.onAdded;
+    nodeType.prototype.onAdded = function onAddedH3SequenceGlobal(graph) {
+        const result = originalAdded?.apply(this, arguments);
+        setup(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3SequenceGlobal(info) {
+        dropLegacySequenceCanvasValues(info);
+        const result = originalConfigure?.apply(this, arguments);
+        setup(this);
+        return result;
+    };
 }
 
 function installNode(nodeType, nodeData) {
@@ -9346,14 +9893,14 @@ function install() {
     const style = document.createElement("style");
     style.textContent = `
       .h3-prompt-editor-wrap {
-        position: relative; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%;
+        position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%;
         box-sizing: border-box; padding: 0; border-radius: var(--h3-native-widget-radius, 0); overflow: hidden; contain: size layout paint;
       }
       .h3-prompt-editor {
         --h3-prompt-text-size: var(--h3-native-widget-text-size, var(--comfy-textarea-font-size, 12px));
-        display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%; box-sizing: border-box;
+        display: block; flex: 1 1 auto; width: 100%; height: auto; min-width: 0; min-height: 0; max-height: 100%; box-sizing: border-box;
         padding: var(--h3-native-widget-padding, 2px);
-        padding-bottom: calc(var(--h3-native-widget-padding, 2px) + 30px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+        overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
         white-space: pre-wrap; overflow-wrap: anywhere; border: 0; border-radius: var(--h3-native-widget-radius, 0); outline: none;
         resize: none; background-color: var(--h3-native-widget-bg, var(--comfy-input-bg, #222));
         color: var(--h3-native-widget-text, var(--input-text, #ddd)); caret-color: var(--h3-native-widget-text, var(--input-text, #ddd));
@@ -9373,8 +9920,12 @@ function install() {
       .h3-prompt-editor-wrap.is-external .h3-prompt-editor:focus { box-shadow: none; }
       .h3-prompt-editor-wrap.is-loading .h3-prompt-editor { cursor: wait; opacity: .72; }
       .h3-prompt-editor:empty::before { content: attr(data-placeholder); color: var(--h3-native-widget-muted, rgba(255,255,255,.38)); pointer-events: none; }
+      .h3-prompt-editor-footer {
+        flex: 0 0 auto; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 22px; box-sizing: border-box;
+        padding: 1px 4px 2px;
+      }
       .h3-prompt-editor-status {
-        position: absolute; left: 12px; bottom: 4px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 120px);
+        display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%;
         overflow: hidden; color: var(--h3-native-widget-text, rgba(255,255,255,.78)); pointer-events: auto; user-select: none;
         font: 600 9px/18px Consolas, "Courier New", monospace; letter-spacing: 0; white-space: nowrap; text-overflow: ellipsis;
       }
@@ -9394,7 +9945,7 @@ function install() {
       }
       @keyframes h3-prompt-status-spin { to { transform: rotate(360deg); } }
       .h3-prompt-editor-tools {
-        position: absolute; right: 12px; bottom: 4px; z-index: 3; display: flex; align-items: center; gap: 4px; pointer-events: auto;
+        display: flex; align-items: center; gap: 4px; margin-left: auto; pointer-events: auto;
       }
       .h3-prompt-editor-tool {
         appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; padding: 0;
@@ -9772,8 +10323,13 @@ function drawRenderProgress(node, ctx) {
     if (state.done) {
         detail = `${TEXT.renderProgressDone} · ${TEXT.renderProgressElapsed} ${formatRenderClock(state.totalElapsed)}`;
     } else {
-        const head = state.stage === "decode"
-            ? TEXT.renderProgressDecode
+        const stageLabels = {
+            decode: TEXT.renderProgressDecode,
+            upscale: TEXT.renderProgressUpscale,
+            sample2: TEXT.renderProgressSampleSecond,
+        };
+        const head = stageLabels[state.stage]
+            ? stageLabels[state.stage]
             : state.max > 0
                 ? `${TEXT.renderProgressSample} ${Math.round(state.value)}/${Math.round(state.max)}`
                 : TEXT.renderProgressSample;
@@ -9786,12 +10342,34 @@ function drawRenderProgress(node, ctx) {
     ctx.restore();
 }
 function installRenderNode(nodeType, nodeData) {
-    if (h3ClassName(nodeData?.name) !== RENDER_CLASS) return;
-    if (nodeType.prototype.__h3RenderNodeInstalled) return;
-    nodeType.prototype.__h3RenderNodeInstalled = true;
-    const setup = (node) => {
+    const className = h3ClassName(nodeData?.name);
+    const isPass1 = className === RENDER_PASS1_CLASS;
+    const isPass2 = className === RENDER_PASS2_CLASS;
+    if (!isPass1 && !isPass2 && className !== RENDER_CLASS) return;
+    const installedMarker = isPass1
+        ? "__h3RenderPass1NodeInstalled"
+        : isPass2
+            ? "__h3RenderPass2NodeInstalled"
+            : "__h3RenderNodeInstalled";
+    if (nodeType.prototype[installedMarker]) return;
+    nodeType.prototype[installedMarker] = true;
+    const setup = (node, adjustHeight = true) => {
         if (!node) return;
         localizeNodeInstance(node);
+        if (!isPass1 && !isPass2) return;
+        const syncedWidgets = isPass1 ? ["sample_preview"] : ["tiled_sampling", "sample_preview"];
+        for (const name of syncedWidgets) {
+            const widget = getWidget(node, name);
+            if (!widget || widget.__h3PassSyncBound) continue;
+            widget.__h3PassSyncBound = true;
+            const originalCallback = widget.callback;
+            widget.callback = (value) => {
+                originalCallback?.call(widget, value);
+                syncRenderPassWidgets(node);
+                node.setDirtyCanvas?.(true, true);
+            };
+        }
+        syncRenderPassWidgets(node, { adjustHeight });
     };
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Render() {
@@ -9802,7 +10380,7 @@ function installRenderNode(nodeType, nodeData) {
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3Render(info) {
         const result = originalConfigure?.apply(this, arguments);
-        setup(this);
+        setup(this, false);
         return result;
     };
     // 底部永久留出进度条的位置，免得它压住最后一个参数控件。
@@ -9854,7 +10432,10 @@ app.registerExtension({
         installSegmentStepNode(nodeType, nodeData);
         installSegmentCollectNode(nodeType, nodeData);
         installRenderNode(nodeType, nodeData);
+        installSequenceSegmentNode(nodeType, nodeData);
+        installSequenceGlobalNode(nodeType, nodeData);
         installNode(nodeType, nodeData);
+        installWidgetValueReconcileNode(nodeType, nodeData);
     },
 });
 
@@ -9866,18 +10447,53 @@ app.registerExtension({
 function aicg3dPromptTargets(loader) {
     const id = Number(loader?.id);
     if (!Number.isFinite(id)) return [];
-    return (app.graph?._nodes || []).filter((node) => {
+    const direct = (app.graph?._nodes || []).filter((node) => {
         if (!canUseMediaMentions(node)) return false;
         // 素材加载器直接连到 media 输入时走原生 bundle，不产生虚拟连线，
         // 这里必须一并识别，否则点选素材找不到可写入 @ 引用的主节点。
         if (Number(getNativeMediaBridgeLink(node)?.source_id) === id) return true;
         return normalizeLinks(node).some((link) => Number(link.source_id) === id);
     });
+    // 素材库现在只接第 1 段，后面的段落顺着 previous_segment 继承同一份素材库，
+    // 它们同样能写 @ 引用，所以要把链上后面的段落一起算进来。
+    const targets = [...direct];
+    for (const node of direct) {
+        for (const next of aicg3dSegmentChainTargets(node)) {
+            if (canUseMediaMentions(next) && !targets.includes(next)) targets.push(next);
+        }
+    }
+    return targets;
+}
+
+/* 顺着「上一段 segment → 下一段 previous_segment」把段落链后面的节点找出来。
+   直接按输出上的 link id 反查下游输入，不去猜 link 对象里字段名怎么写。 */
+function aicg3dSegmentChainTargets(node, seen = new Set()) {
+    if (!isSequenceSegmentNode(node) || seen.has(node)) return [];
+    seen.add(node);
+    const linkIds = new Set();
+    for (const link of (node.outputs || [])[0]?.links || []) linkIds.add(String(link));
+    if (!linkIds.size) return [];
+    const graph = node.graph || app.graph;
+    const graphNodes = graph?._nodes || app.graph?._nodes || [];
+    const downstream = [];
+    for (const candidate of graphNodes) {
+        if (candidate === node || seen.has(candidate)) continue;
+        const connected = (candidate.inputs || []).some(
+            (input) => input?.link != null && linkIds.has(String(input.link)),
+        );
+        if (!connected) continue;
+        downstream.push(candidate, ...aicg3dSegmentChainTargets(candidate, seen));
+    }
+    return downstream;
 }
 
 function aicg3dPreferredTarget(targets) {
+    // 「点哪儿插哪儿」优先：光标最后停在哪个段落，素材就写进哪个段落。
+    // 画布选中态只做兜底，否则点完素材库（编辑器已失焦）就会插到别的段落去。
+    const remembered = activePromptNode && targets.includes(activePromptNode) ? activePromptNode : null;
+    if (remembered) return remembered;
     const selected = app.canvas?.selected_nodes || {};
-    return targets.find((node) => selected[node.id]) || targets[0] || null;
+    return targets.find((node) => selected[node.id] || selected[String(node.id)]) || targets[0] || null;
 }
 
 function aicg3dLinkedLoader(node) {
@@ -9914,7 +10530,10 @@ function aicg3dInsertLoaderMention(loader, type, index) {
     const target = aicg3dPreferredTarget(targets);
     const option = mediaLoaderMentionOptions(loader, target)
         .find((item) => item.type === type && Number(item.ordinal) === ordinal);
-    if (!option || !insertMentionOption(target, option)) return false;
+    if (!option) return false;
+    // 用记录下来的光标位置插入：编辑器已经失焦，取实时 selection 只会落到编辑器末尾。
+    const range = target === activePromptNode ? activePromptRange : null;
+    if (!insertMentionOption(target, option, range)) return false;
     target.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
     return true;

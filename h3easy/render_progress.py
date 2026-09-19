@@ -12,9 +12,10 @@
 「已经跑了多久、还要多久」。这里把阶段进度通过 WebSocket 的
 ``aicg3d_render_progress`` 消息推给前端，前端在节点底部画一条百分比进度条。
 
-节点上不显示采样预览图，只显示上面那条百分比进度条（含已用时间与剩余估计）。
-采样预览的整套通道仍然保留（``RenderPreviewEncoder`` + ``preview_native_tuple`` +
-``SAMPLE_PREVIEW_ENABLED``），需要时把开关改成 True 就能恢复。
+节点上的「采样预览」开关（默认关）决定要不要画实时采样预览图；关着就只显示上面那条
+百分比进度条（含已用时间与剩余估计）。``SAMPLE_PREVIEW_ENABLED`` 是模块级总开关，
+改成 True 会把所有渲染节点强制打开预览。整套通道是 ``RenderPreviewEncoder`` +
+``preview_native_tuple``：解出来的图交给 ComfyUI 原生进度钩子，节点正文里就会实时刷新。
 
 上报失败一律静默：进度只是观感，绝不能影响出图。
 """
@@ -28,6 +29,8 @@ SAMPLE_SHARE = 0.9
 
 STAGE_IDLE = ""
 STAGE_SAMPLE = "sample"
+STAGE_SAMPLE_SECOND = "sample2"
+STAGE_UPSCALE = "upscale"
 STAGE_DECODE = "decode"
 
 #: 两次上报之间的最小间隔（秒），避免高频 WebSocket 消息拖慢采样。
@@ -80,6 +83,9 @@ class RenderProgressReporter:
         self.stage = STAGE_IDLE
         self.stage_value = 0
         self.stage_total = 0
+        #: 当前阶段在整体进度里的区间，多阶段节点（一采 / 放大 / 二采）靠它分段。
+        self.stage_begin = 0.0
+        self.stage_end = SAMPLE_SHARE
         self.overall = 0.0
         self.finished = False
         self.ok = True
@@ -132,21 +138,34 @@ class RenderProgressReporter:
     # -------------------------------------------------------------- 对外接口
     def begin_sample(self, total_steps: int) -> None:
         """采样开始：先占位，让前端立刻看到进度条（第一步往往最慢）。"""
-        self.stage = STAGE_SAMPLE
-        self.stage_total = max(1, int(total_steps or 1))
+        self.begin_stage(STAGE_SAMPLE, 0.0, SAMPLE_SHARE, max(1, int(total_steps or 1)))
+
+    def begin_stage(self, stage: str, begin: float, end: float, total: int = 0) -> None:
+        """开始一个阶段，并把它摆到整体进度的 ``[begin, end]`` 区间上。
+
+        一个节点里塞了多段流程（一采 / 放大 / 二采 / 解码）时，用它给每段划好
+        位置，前端那条百分比进度条才会连续往前走，而不是每段都从 0% 重来。
+        """
+        self.stage = str(stage or STAGE_IDLE)
+        self.stage_begin = min(1.0, max(0.0, float(begin)))
+        self.stage_end = min(1.0, max(self.stage_begin, float(end)))
+        self.stage_total = max(0, int(total or 0))
         self.stage_value = 0
-        self.overall = 0.0
+        self.overall = self.stage_begin
         self._send(force=True)
+
+    def update_stage(self, value: int, total: int = 0) -> None:
+        """阶段内进度：有步数就按步数走，没有步数就停在阶段起点。"""
+        if total:
+            self.stage_total = max(1, int(total))
+        self.stage_value = max(0, int(value))
+        ratio = min(1.0, self.stage_value / self.stage_total) if self.stage_total else 0.0
+        self.overall = self.stage_begin + (self.stage_end - self.stage_begin) * ratio
+        self._send(force=self.stage_total > 0 and self.stage_value >= self.stage_total)
 
     def update_sample(self, done: int, total: int = 0) -> None:
         """采样每一步的回调。"""
-        if total:
-            self.stage_total = max(1, int(total))
-        self.stage = STAGE_SAMPLE
-        self.stage_value = max(0, int(done))
-        ratio = min(1.0, self.stage_value / self.stage_total) if self.stage_total else 0.0
-        self.overall = SAMPLE_SHARE * ratio
-        self._send(force=self.stage_total > 0 and self.stage_value >= self.stage_total)
+        self.update_stage(done, total)
 
     def update_preview(self, image: Any) -> Optional[Any]:
         """收到一张新预览图：交给采样器走 ComfyUI 原生预览通道上报。
@@ -159,11 +178,7 @@ class RenderProgressReporter:
 
     def begin_decode(self) -> None:
         """解码 / 合成阶段：没有可拆分的步数，只报阶段名。"""
-        self.stage = STAGE_DECODE
-        self.stage_value = 0
-        self.stage_total = 0
-        self.overall = SAMPLE_SHARE
-        self._send(force=True)
+        self.begin_stage(STAGE_DECODE, SAMPLE_SHARE, 1.0)
 
     def finish(self, ok: bool = True) -> None:
         """收尾：成功画到 100%，失败让前端立刻收起进度条。"""
@@ -191,15 +206,24 @@ class RenderPreviewEncoder:
     任何一步失败都直接返回 None，绝不影响出图。
     """
 
-    def __init__(self, model: Any, max_side: Optional[int] = None):
+    def __init__(self, model: Any, max_side: Optional[int] = None, prefer_rgb: bool = False):
         self.max_side = max(64, int(max_side or _PREVIEW_MAX_SIDE))
         self._previewer = None
         try:
             import latent_preview
 
-            self.max_side = max(64, int(getattr(latent_preview, "MAX_PREVIEW_RESOLUTION", 0) or self.max_side))
+            global_side = int(getattr(latent_preview, "MAX_PREVIEW_RESOLUTION", 0) or 0)
+            if max_side:
+                # 节点（显存档位）自己压了预览分辨率：取更小的那个，别被全局值顶回去。
+                self.max_side = max(64, min(global_side, self.max_side) if global_side else self.max_side)
+            else:
+                self.max_side = max(64, global_side or self.max_side)
             latent_format = model.model.latent_format
-            self._previewer = latent_preview.get_previewer(model.load_device, latent_format)
+            if prefer_rgb:
+                # 省显存档位：预览直接用 latent RGB 因子投影，不再跑一次 VAE / TAESD 解码。
+                self._previewer = self._rgb_previewer(latent_format)
+            if self._previewer is None:
+                self._previewer = latent_preview.get_previewer(model.load_device, latent_format)
             if self._previewer is None:
                 # 用户把全局预览关了（NoPreviews），或者选了 TAESD 但权重没下：
                 # 这个节点是显式要预览的，直接用 latent RGB 因子兜底。

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import random
 
+import torch
+
 import comfy.model_management
 import comfy.sample
 import comfy.samplers
@@ -82,6 +84,26 @@ class AICG3DSamplerAdvanced:
         keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise")
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
+    @classmethod
+    def calculate_sigmas(cls, model, scheduler, steps, denoise):
+        """按 denoise 截断 sigma 调度表（和 ComfyUI 自带 BasicScheduler 一致）。
+
+        denoise < 1 时先把整条调度表按 ``int(steps / denoise)`` 铺满，再取末尾
+        ``steps + 1`` 个 sigma 当作本次要走的区间：起点落在调度表中段，实际步数仍
+        是 steps。以前这里没有截断，denoise 控件等于摆设（永远按 1.0 跑）。
+        """
+        steps = max(1, int(steps))
+        denoise = min(1.0, max(0.0, float(denoise)))
+        model_sampling = model.get_model_object("model_sampling")
+        if denoise >= 1.0:
+            return comfy.samplers.calculate_sigmas(model_sampling, scheduler, steps)
+        if denoise <= 0.0:
+            # 空 sigma：guider.sample 会原样返回输入 latent，等于不采样。
+            return torch.FloatTensor([])
+        total_steps = max(steps, int(steps / denoise))
+        sigmas = comfy.samplers.calculate_sigmas(model_sampling, scheduler, total_steps)
+        return sigmas[-(steps + 1):]
+
     def sample(
         self,
         model,
@@ -95,6 +117,8 @@ class AICG3DSamplerAdvanced:
         on_step=None,
         on_preview=None,
     ):
+        """一次完整采样：等价于 RandomNoise + BasicScheduler + KSamplerSelect + BasicGuider + SamplerCustomAdvanced。"""
+        sigmas = self.calculate_sigmas(model, scheduler, steps, denoise)
         # 上一个节点（渲染器）的 seed 是 64 位控件，可能大于 32 位；这里统一落到
         # 64 位无符号区间，0 表示随机，避免大 seed / 负 seed 传进采样器时出问题。
         noise_seed = int(noise_seed) & 0xFFFFFFFFFFFFFFFF
@@ -103,7 +127,6 @@ class AICG3DSamplerAdvanced:
 
         noise = comfy.sample.prepare_noise(latent["samples"], noise_seed)
         sampler = comfy.samplers.sampler_object(sampler_name)
-        sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, steps)
         # 新版 ComfyUI 把 BasicGuider 迁成了 V3 节点（io.ComfyNode），直接 new 会抛
         # “__init__() takes 1 positional argument but 2 were given”，这里改用底层 Guider_Basic。
         guider = nodes_custom_sampler.Guider_Basic(model)

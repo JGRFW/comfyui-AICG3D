@@ -100,6 +100,9 @@ NONE_MODEL_ALIASES = {value.lower() for value in NONE_MODEL_DISPLAY_VALUES}
 NON_H3_POLICY_FALLBACK = "自动回落"
 NON_H3_POLICY_STRICT = "按所选加载"
 NON_H3_POLICY_CHOICES = (NON_H3_POLICY_FALLBACK, NON_H3_POLICY_STRICT)
+# AICG3D：两个 VAE 槽位优先选中的文件。本机没有这两条时，按 vae 文件夹内容顺延。
+DEFAULT_VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
+DEFAULT_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 RESOLUTION_360 = "360P"
 RESOLUTION_416 = "416P"
 RESOLUTION_480 = "480P"
@@ -2757,8 +2760,20 @@ def _clip_choices() -> list[str]:
     )
 
 
-def _vae_choices(needles: tuple[str, ...], fallback: str) -> list[str]:
-    return _all_weight_choices(("vae",), fallback)
+def _vae_choices(role: str, fallback: str) -> list[str]:
+    """列出全部 VAE，并把符合角色（视频 / 音频）的那几条排在最前。
+
+    社区和托管环境经常给 H3 权重改名或挪目录，所以这里仍然原样列出 vae 文件夹的
+    全部文件，选错时由加载阶段的角色校验兜底；但列表第一项同时是新节点的默认值，
+    必须让角色匹配的 H3 VAE 排在前面，否则新节点会默认选中无关 VAE（例如 FLUX 的
+    ae.safetensors），直到加载时才报「这个槽位不是 H3 视频 VAE」。
+    """
+    names = _all_weight_choices(("vae",), fallback)
+    matched = [name for name in names if _has_role(name, role)]
+    if not matched:
+        return names
+    matched_set = set(matched)
+    return [*matched, *(name for name in names if name not in matched_set)]
 
 
 def _is_h3_video_vae(vae: Any) -> bool:
@@ -2808,12 +2823,14 @@ def _validate_h3_vae_roles(video_vae: Any, audio_vae: Any, video_name: str, audi
     if not _is_h3_video_vae(video_vae):
         raise ValueError(
             "MiniMax H3 Loader video VAE slot must contain a video VAE "
-            f"(latent_dim=3 or an H3-compatible accelerated wrapper), but {video_name!r} is not a video VAE."
+            f"(latent_dim=3 or an H3-compatible accelerated wrapper), but {video_name!r} is not a video VAE. "
+            "Pick an H3 video VAE such as 'minimax_h3_video_vae_fp16.safetensors'."
         )
     if audio_dim != 2:
         raise ValueError(
             "MiniMax H3 Loader audio VAE slot must contain an audio VAE "
-            f"(latent_dim=2), but {audio_name!r} is not an audio VAE."
+            f"(latent_dim=2), but {audio_name!r} is not an audio VAE. "
+            "Pick 'minimax_h3_audio_vae_fp32.safetensors'."
         )
 
 
@@ -3193,6 +3210,10 @@ class MiniMaxH3SegmentSample:
     # can rebuild the final plan, including an optional external prompt override.
     prompt: str | None = None
     media: tuple[Any, ...] | None = None
+    # 「视频段落」用：本段可用的全部素材（没有被提示词里的标签裁剪过）。
+    # 段落链的下一段靠它继承素材库，所以这里必须留全集，否则第 1 段只 @ 了一张图，
+    # 后面几段能用的素材会被一起裁掉。
+    source_media: tuple[Any, ...] | None = None
     # Motion Context keeps a phase-aligned slice of the sampled latent tail so
     # the next segment can continue it without a lossy VAE round trip.
     motion_context_tail_latent: torch.Tensor | None = None
@@ -3690,6 +3711,8 @@ class MiniMaxH3EasyLoader:
     def INPUT_TYPES(cls):
         # AICG3D：ref2va_model 保留在列表末尾之外的位置以兼容旧工作流的 widget 顺序。
         # LoRA 槽位分两段追加（见下面的常量说明），保证旧工作流的位置映射不变。
+        video_vae_choices = _vae_choices("video_vae", DEFAULT_VIDEO_VAE)
+        audio_vae_choices = _vae_choices("audio_vae", DEFAULT_AUDIO_VAE)
         required = {
             "fl2va_model": (
                 _model_choices(),
@@ -3710,8 +3733,26 @@ class MiniMaxH3EasyLoader:
                 },
             ),
             "text_encoder": (_clip_choices(),),
-            "video_vae": (_vae_choices(("minimax_h3_video_vae",), "minimax_h3_video_vae_fp16.safetensors"),),
-            "audio_vae": (_vae_choices(("minimax_h3_audio_vae",), "minimax_h3_audio_vae_fp32.safetensors"),),
+            "video_vae": (
+                video_vae_choices,
+                {
+                    "default": video_vae_choices[0],
+                    "tooltip": (
+                        "视频 VAE（latent_dim=3），要选 H3 专用的 minimax_h3_video_vae_*；"
+                        "选成 ae.safetensors 这类普通图像 VAE 会在加载时直接报错。"
+                    ),
+                },
+            ),
+            "audio_vae": (
+                audio_vae_choices,
+                {
+                    "default": audio_vae_choices[0],
+                    "tooltip": (
+                        "音频 VAE（latent_dim=2），对应 minimax_h3_audio_vae_fp32.safetensors；"
+                        "两个 VAE 槽位不能填同一条非 H3 VAE。"
+                    ),
+                },
+            ),
         }
         loras = _lora_choices()
         for index in range(1, LORA_SLOT_COUNT_LEGACY + 1):
@@ -6346,6 +6387,24 @@ class MiniMaxH3EasyRenderAdvanced:
             audio = nodes_audio.vae_decode_audio(h3_context.audio_vae, sampled)
         return frames, audio
 
+    @staticmethod
+    def _compose_video(h3_context: MiniMaxH3Context, frames: Any, audio: Any):
+        """解码出来的帧 + 音轨 -> VIDEO（数字人 / 锁定参考音频时换成驱动音轨）。"""
+        if not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.shape[0] == 0:
+            raise RuntimeError("MiniMax H3 渲染器：解码后没有得到可用的视频帧")
+        frames = frames[..., :3].detach().to(device="cpu", dtype=torch.float32).contiguous()
+        if h3_context.source_audio is not None:
+            driver = _segment_trim_audio(h3_context.source_audio, 0, int(frames.shape[0]))
+            if driver is not None:
+                audio = driver
+        return InputImpl.VideoFromComponents(
+            Types.VideoComponents(
+                images=frames,
+                audio=audio,
+                frame_rate=Fraction(str(float(h3_context.fps or h3.FPS))),
+            )
+        )
+
     def render(
         self,
         h3_context,
@@ -6413,6 +6472,731 @@ class MiniMaxH3EasyRenderAdvanced:
             reporter.finish(done)
             # 采样与解码的大张量到这里已经交出去了，收尾时释放显存与内存，
             # 让长视频渲染结束后不再一直占着显卡。
+            _release_render_resources(cleanup_after_run)
+
+
+#: 二采放大节点的阶段落点：一采已经在上一个节点里跑完，这里从放大开始排，
+#: 放大 12% / 二采 78%，剩下的留给解码与合成（SAMPLE_SHARE = 90% 是二采的终点）。
+PASS2_UPSCALE_BEGIN = 0.0
+PASS2_UPSCALE_END = 0.12
+
+#: 一采节点的阶段落点：采样 90%，剩下 10% 留给解码与合成。
+PASS1_SAMPLE_END = 0.90
+
+#: 一采节点交给「二采放大」节点的那一条线里装的东西：
+#: ``{"latent": 一采 AV latent, "context": H3 上下文}``。
+PASS1_PAYLOAD_TYPE = "AICG3D_H3_PASS1"
+
+#: 放大倍数低于它就当没开（1.0 = 不放大，直接按原分辨率跑二采）。
+PASS2_UPSCALE_THRESHOLD = 1.0 + 1e-6
+
+#: 「顺便出一份一采成片」的开关取值。
+PASS2_FIRST_PASS_OFF = "关"
+PASS2_FIRST_PASS_ON = "开"
+PASS2_FIRST_PASS_CHOICES = (PASS2_FIRST_PASS_OFF, PASS2_FIRST_PASS_ON)
+
+#: 「二采分块采样」开关：显存吃紧时把二采按空间切块逐块跑，采完再拼回整幅。
+PASS2_TILED_OFF = "关"
+PASS2_TILED_ON = "开"
+PASS2_TILED_CHOICES = (PASS2_TILED_OFF, PASS2_TILED_ON)
+
+#: 二采分块的默认参数（沿用「分段二采」里 tiled_low_vram 那套取值）。
+PASS2_TILE_WIDTH = 512
+PASS2_TILE_HEIGHT = 512
+PASS2_TILE_OVERLAP = 128
+PASS2_TILE_FADE = 32
+
+#: 「采样预览」开关：开着的话每一步都把中间结果推给 ComfyUI 原生预览通道。
+#: 一采节点与二采放大节点共用这套取值。
+RENDER_PREVIEW_OFF = "关"
+RENDER_PREVIEW_ON = "开"
+RENDER_PREVIEW_CHOICES = (RENDER_PREVIEW_OFF, RENDER_PREVIEW_ON)
+
+#: 采样预览的默认间隔（步）：1 = 每步都推一张，越大越省。
+RENDER_PREVIEW_INTERVAL = 1
+
+
+def _preview_step_filter(interval: Any):
+    """按「预览间隔」筛采样步：返回 ``should_push(step, total) -> bool``。
+
+    ``interval <= 1`` 时每步都推；否则按绝对步号隔几步推一张。第一步和整段采样的
+    最后一步始终放行：开局就有画面，间隔比总步数还大时也能看到成图。
+    """
+    interval = max(1, int(interval or 1))
+    state = {"last": None}
+
+    def should_push(step: Any, total: Any) -> bool:
+        if interval <= 1:
+            return True
+        done = int(step or 0)
+        at_end = bool(total) and done >= int(total)
+        if not at_end and state["last"] is not None and done - state["last"] < interval:
+            return False
+        state["last"] = done
+        return True
+
+    return should_push
+
+
+def _unpack_pass1(pass1: Any) -> tuple[Any, Any]:
+    """「二采放大」节点收到的一采数据 -> ``(AV latent, H3 上下文)``。
+
+    一采节点把这两样打包成一条 ``AICG3D_H3_PASS1`` 线；这里只做拆包与校验，
+    拿不到就给出能看懂的报错，而不是让二采在后面用 None 报一串无关的错。
+    """
+    if isinstance(pass1, Mapping):
+        latent = pass1.get("latent")
+        context = pass1.get("context")
+        if latent is not None and context is not None:
+            return latent, context
+    raise ValueError(
+        "请把 AICG-渲染器（一采）的「一采数据」输出接到这个节点的 pass1 输入"
+    )
+
+
+class _StageAbsoluteProgress:
+    """把分块采样的进度回调同时接到「原生进度条」和「渲染器阶段进度条」上。
+
+    分块采样用的是 ``MiniMaxH3EasySegmentRender._sample_one``，它只认
+    ``update_absolute(done, total, preview)``：这里既转发给 ComfyUI 原生
+    ``ProgressBar``（节点上的实时采样预览图就是靠它推给前端的），又转成
+    ``update_stage`` 推动渲染器自己那条整体进度条。
+    """
+
+    def __init__(self, reporter: Any) -> None:
+        self._reporter = reporter
+        self._bar = comfy.utils.ProgressBar(1)
+
+    def update_absolute(self, value: Any, total: Any = 0, preview: Any = None) -> None:
+        try:
+            self._bar.update_absolute(int(value), int(total or 0), preview)
+        except Exception:
+            pass
+        if self._reporter is None:
+            return
+        try:
+            self._reporter.update_stage(int(value), int(total or 0))
+        except Exception:
+            pass
+
+
+class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
+    """AICG-渲染器（一采）
+
+    二采放大拆出去以后，这里是「只跑一采」的那一半 —— 采样 + 解码 + 合成：
+
+        一采采样        RandomNoise + BasicScheduler + KSamplerSelect + BasicGuider + SamplerCustomAdvanced
+        解码 + 合成     VAEDecode + VAEDecodeAudio + CreateVideo
+
+    接上游 MiniMax H3 Aicg 的一条 h3_context，输出两条：
+
+        video   一采成片，直接接 SaveVideo 就能出片
+        pass1   一采数据（AV latent + H3 上下文），接 AICG-渲染器（二采放大）继续放大精修
+
+    两个节点各自独立：只想要一采就把 video 接出去；想接着放大精修，再把 pass1
+    串到二采放大节点，画布上始终是一条线。
+    """
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "render"
+    RETURN_TYPES = ("VIDEO", PASS1_PAYLOAD_TYPE)
+    RETURN_NAMES = ("video", "pass1")
+    DESCRIPTION = (
+        "一采一条龙：采样 -> 解码 + 合成，输出成片 VIDEO 和一条「一采数据」。"
+        "接 MiniMax H3 Aicg 的 h3_context，成片直接连 SaveVideo；"
+        "「一采数据」接到 AICG-渲染器（二采放大）就能继续放大精修。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "h3_context": ("MINIMAX_H3_CONTEXT",),
+                "noise_seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 0xFFFFFFFFFFFFFFFF,
+                        "control_after_generate": True,
+                        "tooltip": "一采噪声种子；0 = 每次随机。",
+                    },
+                ),
+                "sampler_name": (comfy.samplers.SAMPLER_NAMES,),
+                "scheduler": (comfy.samplers.SCHEDULER_NAMES,),
+                "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
+                "denoise": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "一采降噪：1.0 = 从整条 sigma 调度表开头跑。",
+                    },
+                ),
+                "sample_preview": (
+                    list(RENDER_PREVIEW_CHOICES),
+                    {
+                        "default": RENDER_PREVIEW_OFF,
+                        "tooltip": (
+                            "开：一采每一步都把中间结果走 ComfyUI 原生预览通道推给前端，"
+                            "实时采样画面直接显示在这个节点上（右侧图片流面板同样能看到），"
+                            "代价是每步多一次预览解码；关：只留底部那条百分比进度条。"
+                        ),
+                    },
+                ),
+                "preview_interval": (
+                    "INT",
+                    {
+                        "default": RENDER_PREVIEW_INTERVAL,
+                        "min": 1,
+                        "max": 1000,
+                        "step": 1,
+                        "tooltip": (
+                            "每隔多少步推一张预览图（1 = 每步都推）。"
+                            "调大能省掉预览解码与前端刷新的开销，采样更快、画面刷新更慢；"
+                            "第一步与整段采样的最后一步始终会推一张，方便看开局与成图。"
+                        ),
+                    },
+                ),
+                "cleanup_after_run": (
+                    list(RENDER_CLEANUP_CHOICES),
+                    {
+                        "default": RENDER_CLEANUP_UNLOAD,
+                        "tooltip": (
+                            "跑完这个节点后怎么收尾："
+                            "卸载模型 = 连模型一起卸出显存并回收内存，占用最低，但下次运行要重新加载；"
+                            "释放缓存 = 只把 PyTorch 缓存的显存还给驱动并回收内存，模型留在显存里，下次跑得快；"
+                            "不处理 = 保持 ComfyUI 默认行为。"
+                        ),
+                    },
+                ),
+            },
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise",
+                "sample_preview", "preview_interval")
+        return "|".join(str(kwargs.get(key, "")) for key in keys)
+
+    def render(
+        self,
+        h3_context,
+        noise_seed,
+        sampler_name,
+        scheduler,
+        steps,
+        denoise,
+        sample_preview=RENDER_PREVIEW_OFF,
+        preview_interval=RENDER_PREVIEW_INTERVAL,
+        cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+    ):
+        if not isinstance(h3_context, MiniMaxH3Context):
+            raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
+        if h3_context.conditioning is None or h3_context.latent is None:
+            raise ValueError(
+                "AICG-渲染器（一采）只处理单段生成：请把上游 MiniMax H3 Aicg "
+                "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
+            )
+
+        model = _resolve_h3_model(h3_context)
+        from .aicg3d_sampler import AICG3DSamplerAdvanced
+        from .render_progress import (
+            SAMPLE_PREVIEW_ENABLED,
+            STAGE_SAMPLE,
+            RenderPreviewEncoder,
+            RenderProgressReporter,
+        )
+
+        reporter = RenderProgressReporter()
+        # 采样预览看节点上的开关；模块级 SAMPLE_PREVIEW_ENABLED 仍然能把所有渲染节点强制打开。
+        want_preview = SAMPLE_PREVIEW_ENABLED or str(sample_preview or "").strip() == RENDER_PREVIEW_ON
+        preview = RenderPreviewEncoder(model) if want_preview else None
+        on_preview = None
+        if preview is not None:
+            should_push = _preview_step_filter(preview_interval)
+
+            def on_preview(x0, step=None, total=None, *_info):
+                if not should_push(step, total):
+                    return None
+                return reporter.update_preview(preview.decode(x0))
+
+        done = False
+        try:
+            # ---- 一采：和 AICG-渲染器（高级）完全同一套采样 ----
+            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, steps)
+            (first_latent,) = AICG3DSamplerAdvanced().sample(
+                model,
+                h3_context.conditioning,
+                h3_context.latent,
+                noise_seed,
+                sampler_name,
+                scheduler,
+                steps,
+                denoise,
+                on_step=reporter.update_stage,
+                on_preview=on_preview,
+            )
+
+            # ---- 解码 + 合成：出片，顺手把 latent 与上下文打包给下游的二采放大 ----
+            reporter.begin_decode()
+            frames, audio = self._decode_av(h3_context, first_latent)
+            video = self._compose_video(h3_context, frames, audio)
+            done = True
+            return (video, {"latent": first_latent, "context": h3_context})
+        finally:
+            reporter.finish(done)
+            _release_render_resources(cleanup_after_run)
+
+
+class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
+    """AICG-渲染器（二采放大）
+
+    接着「AICG-渲染器（一采）」跑后半程，把以前要摊在画布上的步骤收成一个：
+
+        拆 AV latent    LTXVSeparateAVLatent
+        Latent 3D 放大  AICG 3D Latent 放大（24 通道视频 latent，时间轴不变）
+        拼回 AV latent  LTXVConcatAVLatent
+        二采条件        MiniMax H3 Aicg 二采条件
+        二采采样        同一套五合一（denoise 由 second_pass_denoise 控制）
+        解码 + 合成     VAEDecode + VAEDecodeAudio + CreateVideo
+
+    输入是上游一采节点的一条「一采数据」，输出一条 VIDEO 直接接 SaveVideo：
+    音频那一路不放大，原样带进二采，二采再把音画一起精修一遍。
+    """
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "render"
+    RETURN_TYPES = ("VIDEO", "VIDEO")
+    RETURN_NAMES = ("video", "first_pass_video")
+    DESCRIPTION = (
+        "二采放大一条龙：拆 AV latent -> Latent 3D 放大 -> 拼回 AV latent -> "
+        "二采条件 -> 二采采样 -> 解码 + 合成，只输出一条 VIDEO。"
+        "接 AICG-渲染器（一采）的「一采数据」，输出直接连 SaveVideo；"
+        "二采重画力度看 second_pass_denoise（0.4~0.6 最稳）。"
+    )
+
+    @staticmethod
+    def _upscale_model_choices() -> list[str]:
+        """latent 放大器模型列表（模型文件夹为空时给个占位项，面板不至于开不出来）。"""
+        try:
+            choices = list(scan_latent_upscaler_models() or [])
+        except Exception:
+            choices = []
+        return choices or ["(没有找到 Latent 放大器模型)"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "pass1": (PASS1_PAYLOAD_TYPE,),
+                "sampler_name": (comfy.samplers.SAMPLER_NAMES,),
+                "scheduler": (comfy.samplers.SCHEDULER_NAMES,),
+                "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
+                "second_pass_seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 0xFFFFFFFFFFFFFFFF,
+                        "control_after_generate": True,
+                        "tooltip": "二采噪声种子；0 = 每次随机。",
+                    },
+                ),
+                "second_pass_denoise": (
+                    "FLOAT",
+                    {
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": (
+                            "二采重画力度：0.4~0.6 最稳，越大改得越多"
+                            "（放大出来的细节也越容易被改掉）。"
+                        ),
+                    },
+                ),
+                "tiled_sampling": (
+                    list(PASS2_TILED_CHOICES),
+                    {
+                        "default": PASS2_TILED_OFF,
+                        "tooltip": (
+                            "开：二采按空间分块逐块采样再拼回整幅，显存占用只跟单块有关，"
+                            "长片 / 放大后不容易爆显存（比整幅慢一点）；"
+                            "关：整幅一次跑完，最快。"
+                        ),
+                    },
+                ),
+                "tile_width": (
+                    "INT",
+                    {
+                        "default": PASS2_TILE_WIDTH,
+                        "min": 32,
+                        "max": nodes.MAX_RESOLUTION,
+                        "step": 32,
+                        "tooltip": "二采分块宽度（像素，32 的倍数）：越大越快、越吃显存。",
+                    },
+                ),
+                "tile_height": (
+                    "INT",
+                    {
+                        "default": PASS2_TILE_HEIGHT,
+                        "min": 32,
+                        "max": nodes.MAX_RESOLUTION,
+                        "step": 32,
+                        "tooltip": "二采分块高度（像素，32 的倍数）。",
+                    },
+                ),
+                "tile_overlap": (
+                    "INT",
+                    {
+                        "default": PASS2_TILE_OVERLAP,
+                        "min": 32,
+                        "max": nodes.MAX_RESOLUTION,
+                        "step": 32,
+                        "tooltip": "相邻分块的重叠（像素）：越大接缝越淡，必须小于分块宽高。",
+                    },
+                ),
+                "tile_fade": (
+                    "INT",
+                    {
+                        "default": PASS2_TILE_FADE,
+                        "min": 0,
+                        "max": nodes.MAX_RESOLUTION,
+                        "step": 32,
+                        "tooltip": "重叠区里真正做过渡的长度：0 = 硬拼，不能大于重叠。",
+                    },
+                ),
+                "sample_preview": (
+                    list(RENDER_PREVIEW_CHOICES),
+                    {
+                        "default": RENDER_PREVIEW_OFF,
+                        "tooltip": (
+                            "开：二采每一步都把中间结果走 ComfyUI 原生预览通道推给前端，"
+                            "实时采样画面直接显示在这个节点上（右侧图片流面板同样能看到），"
+                            "代价是每步多一次预览解码；关：只留底部那条百分比进度条。"
+                        ),
+                    },
+                ),
+                "preview_interval": (
+                    "INT",
+                    {
+                        "default": RENDER_PREVIEW_INTERVAL,
+                        "min": 1,
+                        "max": 1000,
+                        "step": 1,
+                        "tooltip": (
+                            "每隔多少步推一张预览图（1 = 每步都推）。"
+                            "调大能省掉预览解码与前端刷新的开销，采样更快、画面刷新更慢；"
+                            "第一步与整段采样的最后一步始终会推一张，方便看开局与成图。"
+                        ),
+                    },
+                ),
+                "latent_upscale_model": (cls._upscale_model_choices(),),
+                "upscale_scale": (
+                    "FLOAT",
+                    {
+                        "default": 1.2,
+                        "min": 1.0,
+                        "max": 4.0,
+                        "step": 0.05,
+                        "tooltip": "latent 放大倍数：1.0 = 不放大，只按原分辨率跑二采。",
+                    },
+                ),
+                "upscale_device": (["cuda", "cpu"], {"default": "cuda"}),
+                "upscale_precision": (["fp16", "fp32", "bf16"], {"default": "fp16"}),
+                "upscale_chunking": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "长片按时间分块放大并做重叠融合，显存更省；短片可以关掉。",
+                    },
+                ),
+                "output_first_pass": (
+                    list(PASS2_FIRST_PASS_CHOICES),
+                    {
+                        "default": PASS2_FIRST_PASS_OFF,
+                        "tooltip": (
+                            "开：额外解码一采 latent，从 first_pass_video 输出一份对照成片"
+                            "（更慢、更占显存），方便和二采直接对比。"
+                        ),
+                    },
+                ),
+                "cleanup_after_run": (
+                    list(RENDER_CLEANUP_CHOICES),
+                    {
+                        "default": RENDER_CLEANUP_UNLOAD,
+                        "tooltip": (
+                            "跑完这个节点后怎么收尾："
+                            "卸载模型 = 连模型一起卸出显存并回收内存，占用最低，但下次运行要重新加载；"
+                            "释放缓存 = 只把 PyTorch 缓存的显存还给驱动并回收内存，模型留在显存里，下次跑得快；"
+                            "不处理 = 保持 ComfyUI 默认行为。"
+                        ),
+                    },
+                ),
+            },
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        keys = (
+            "sampler_name", "scheduler", "steps",
+            "second_pass_seed", "second_pass_denoise", "latent_upscale_model",
+            "upscale_scale", "upscale_device", "upscale_precision", "upscale_chunking",
+            "output_first_pass", "tiled_sampling", "tile_width", "tile_height",
+            "tile_overlap", "tile_fade", "sample_preview", "preview_interval",
+        )
+        return "|".join(str(kwargs.get(key, "")) for key in keys)
+
+    @staticmethod
+    def _upscale_video_latent(
+        first_latent: Any,
+        model_name: Any,
+        scale: Any,
+        device: Any,
+        precision: Any,
+        chunking: Any,
+        sampling_model: Any,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """一采 AV latent -> (放大后的视频 latent, 原样带过去的音频 latent)。"""
+        video, audio = _segment_latent_streams(first_latent)
+        scale = float(scale)
+        if scale <= PASS2_UPSCALE_THRESHOLD:
+            # 不放大也照样跑二采：等于用同一套流程做一次「原分辨率精修」。
+            return video, audio
+        if not isinstance(model_name, str) or not model_name or model_name.startswith("("):
+            raise ValueError("请先在 latent_upscale_model 里选一个 Latent 放大器模型")
+        if str(device).lower() in {"cuda", "rocm"} and sampling_model is not None:
+            # 放大阶段用不到 H3 主干：先把它请出显存，免得大模型和放大器互相挤显存。
+            try:
+                comfy.model_management.unload_model_and_clones(
+                    sampling_model,
+                    unload_additional_models=False,
+                )
+                comfy.model_management.soft_empty_cache()
+            except Exception:
+                pass
+        result = MiniMaxH3EasyLatentUpscaler3D.execute(
+            {"samples": video},
+            str(model_name),
+            {"mode": "scale by multiplier", "scale": scale},
+            32,
+            bool(chunking),
+            str(device),
+            str(precision),
+        )[0]
+        upscaled = result.get("samples") if isinstance(result, Mapping) else None
+        if not isinstance(upscaled, torch.Tensor) or upscaled.ndim != 5:
+            raise RuntimeError("Latent 3D 放大没有返回可用的视频 latent（应为 5D [B, C, T, H, W]）")
+        print(
+            f"[MiniMax H3 Aicg] 二采放大 {scale:g}x："
+            f"{tuple(video.shape)} -> {tuple(upscaled.shape)}"
+        )
+        return upscaled, audio
+
+    @staticmethod
+    def _tiled_second_pass(
+        model,
+        conditioning,
+        latent,
+        video_latent,
+        sampler_name,
+        scheduler,
+        steps,
+        denoise,
+        seed,
+        tile_width,
+        tile_height,
+        tile_overlap,
+        tile_fade,
+        progress,
+        on_preview=None,
+    ):
+        """二采分块采样：把放大后的 latent 按空间切块逐块采，显存只跟单块有关。
+
+        分块这套直接复用「分段二采」里已经跑熟的 ``tiled_low_vram``：整幅先出
+        一张噪声再按坐标切给每一块（块间噪声连续）、接缝按 overlap 淡入淡出、
+        每块跑完跟已拼好的邻块对齐一次通道基线；音频不参与重采样，原样带过去。
+        """
+        for name, value, minimum in (
+            ("tile_width", tile_width, 32),
+            ("tile_height", tile_height, 32),
+            ("tile_overlap", tile_overlap, 32),
+            ("tile_fade", tile_fade, 0),
+        ):
+            if int(value) < minimum or int(value) % 32:
+                raise ValueError(
+                    f"二采分块的 {name} 必须是 32 的倍数，且不小于 {minimum}"
+                )
+        if int(tile_overlap) >= int(tile_width) or int(tile_overlap) >= int(tile_height):
+            raise ValueError("二采分块的重叠必须小于分块宽高")
+        if int(tile_fade) > int(tile_overlap):
+            raise ValueError("二采分块的过渡长度不能大于重叠")
+
+        from .aicg3d_sampler import AICG3DSamplerAdvanced, _roll_inference_seed
+
+        # 和整幅二采同一套 sigma 截断：denoise 同样作用在分块路径上。
+        sigmas = AICG3DSamplerAdvanced.calculate_sigmas(model, scheduler, steps, denoise)
+        step_count = max(1, int(sigmas.shape[-1]) - 1)
+        passes = MiniMaxH3EasySegmentRefine._tiled_pass_count(
+            int(video_latent.shape[-1]) * 16,
+            int(video_latent.shape[-2]) * 16,
+            int(tile_width),
+            int(tile_height),
+            int(tile_overlap),
+        )
+        # 0 = 随机：和整幅二采一样先摇一次固定下来，免得每块各随机一次。
+        seed_value = int(seed) & 0xFFFFFFFFFFFFFFFF
+        if seed_value == 0:
+            seed_value = _roll_inference_seed()
+        return MiniMaxH3EasySegmentRefine._tiled_sample(
+            model,
+            conditioning,
+            latent,
+            comfy.samplers.sampler_object(str(sampler_name)),
+            sigmas,
+            seed_value,
+            progress,
+            0,
+            max(1, passes * step_count),
+            int(tile_width),
+            int(tile_height),
+            int(tile_overlap),
+            int(tile_fade),
+            on_preview=on_preview,
+        )
+
+    def render(
+        self,
+        pass1,
+        sampler_name,
+        scheduler,
+        steps,
+        second_pass_seed,
+        second_pass_denoise,
+        latent_upscale_model,
+        upscale_scale,
+        upscale_device="cuda",
+        upscale_precision="fp16",
+        upscale_chunking=True,
+        tiled_sampling=PASS2_TILED_OFF,
+        tile_width=PASS2_TILE_WIDTH,
+        tile_height=PASS2_TILE_HEIGHT,
+        tile_overlap=PASS2_TILE_OVERLAP,
+        tile_fade=PASS2_TILE_FADE,
+        sample_preview=RENDER_PREVIEW_OFF,
+        preview_interval=RENDER_PREVIEW_INTERVAL,
+        output_first_pass=PASS2_FIRST_PASS_OFF,
+        cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+    ):
+        # 一采在上游节点里已经跑完，这里只从它递过来的「一采数据」里取 AV latent 与上下文。
+        first_latent, h3_context = _unpack_pass1(pass1)
+        if not isinstance(h3_context, MiniMaxH3Context):
+            raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
+        if h3_context.conditioning is None or h3_context.latent is None:
+            raise ValueError(
+                "AICG-渲染器（二采放大）只处理单段生成：请把上游 MiniMax H3 Aicg "
+                "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
+            )
+        if MiniMaxH3EasyLatentUpscaler3D is None:
+            raise ValueError("Latent 3D 放大模块不可用：检查 h3easy/h3_latent_upscaler.py")
+
+        model = _resolve_h3_model(h3_context)
+        from .aicg3d_sampler import AICG3DSamplerAdvanced
+        from .render_progress import (
+            SAMPLE_PREVIEW_ENABLED,
+            SAMPLE_SHARE,
+            STAGE_SAMPLE_SECOND,
+            STAGE_UPSCALE,
+            RenderPreviewEncoder,
+            RenderProgressReporter,
+        )
+
+        sampler = AICG3DSamplerAdvanced()
+        # 进度条把后半程摊成一条：放大 12% -> 二采 78% -> 解码合成 10%。
+        reporter = RenderProgressReporter()
+        # 采样预览看节点上的开关；模块级 SAMPLE_PREVIEW_ENABLED 仍然能把所有渲染节点强制打开。
+        want_preview = SAMPLE_PREVIEW_ENABLED or str(sample_preview or "").strip() == RENDER_PREVIEW_ON
+        preview = RenderPreviewEncoder(model) if want_preview else None
+        on_preview = None
+        if preview is not None:
+            should_push = _preview_step_filter(preview_interval)
+
+            def on_preview(x0, step=None, total=None, *_info):
+                if not should_push(step, total):
+                    return None
+                return reporter.update_preview(preview.decode(x0))
+        want_first_pass = str(output_first_pass or "").strip() == PASS2_FIRST_PASS_ON
+        done = False
+        try:
+            # ---- 拆 AV latent + Latent 3D 放大（音频那一路原样带过去）----
+            reporter.begin_stage(STAGE_UPSCALE, PASS2_UPSCALE_BEGIN, PASS2_UPSCALE_END)
+            video_latent, audio_latent = self._upscale_video_latent(
+                first_latent,
+                latent_upscale_model,
+                upscale_scale,
+                upscale_device,
+                upscale_precision,
+                upscale_chunking,
+                model,
+            )
+
+            # ---- 二采条件：首帧 / 首尾帧要按新分辨率重新编码关键帧 ----
+            (second_conditioning,) = MiniMaxH3EasySecondPassConditioning().rebuild(
+                h3_context,
+                {"samples": video_latent},
+            )
+
+            # ---- 二采：吃「放大后的视频 + 原音频」拼回来的 AV latent ----
+            second_input = _segment_pack_latent(video_latent, audio_latent)
+            reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS2_UPSCALE_END, SAMPLE_SHARE, steps)
+            if str(tiled_sampling or "").strip() == PASS2_TILED_ON:
+                # 分块二采：显存占用只跟单块有关，长片 / 放大后不容易爆显存。
+                second_latent = self._tiled_second_pass(
+                    model,
+                    second_conditioning,
+                    second_input,
+                    video_latent,
+                    sampler_name,
+                    scheduler,
+                    steps,
+                    second_pass_denoise,
+                    second_pass_seed,
+                    tile_width,
+                    tile_height,
+                    tile_overlap,
+                    tile_fade,
+                    _StageAbsoluteProgress(reporter),
+                    on_preview,
+                )
+            else:
+                (second_latent,) = sampler.sample(
+                    model,
+                    second_conditioning,
+                    second_input,
+                    second_pass_seed,
+                    sampler_name,
+                    scheduler,
+                    steps,
+                    second_pass_denoise,
+                    on_step=reporter.update_stage,
+                    on_preview=on_preview,
+                )
+
+            reporter.begin_decode()
+            frames, audio = self._decode_av(h3_context, second_latent)
+            video = self._compose_video(h3_context, frames, audio)
+            first_pass_video = None
+            if want_first_pass:
+                first_frames, first_audio = self._decode_av(h3_context, first_latent)
+                first_pass_video = self._compose_video(h3_context, first_frames, first_audio)
+            done = True
+            return (video, first_pass_video)
+        finally:
+            reporter.finish(done)
+            # 采样与解码的大张量到这里已经交出去了，收尾时释放显存与内存。
             _release_render_resources(cleanup_after_run)
 
 
@@ -6618,12 +7402,22 @@ class MiniMaxH3EasySegmentRender:
         noise=None,
         sampling_plan=None,
         video_vae=None,
+        on_preview=None,
     ):
         step_count = max(1, int(sigmas.shape[-1]) - 1)
 
-        def callback(step, _x0, _x, _total_steps):
+        def callback(step, x0, _x, _total_steps):
             comfy.model_management.throw_exception_if_processing_interrupted()
-            progress.update_absolute(start_step + min(step + 1, step_count), total_steps)
+            done_step = start_step + min(step + 1, step_count)
+            # 预览图由调用方的回调解成 (格式, 图, 最大边) 后交给原生进度钩子，
+            # 带 preview 的 ProgressBar 会立刻把它作为二进制预览消息推给前端。
+            preview = None
+            if on_preview is not None:
+                try:
+                    preview = on_preview(x0, done_step, total_steps)
+                except Exception:
+                    preview = None
+            progress.update_absolute(done_step, total_steps, preview)
 
         if sampling_plan is not None:
             if noise is not None:
@@ -7733,6 +8527,7 @@ class MiniMaxH3EasySegmentRefine:
         tile_height: int,
         tile_overlap: int,
         tile_fade: int,
+        on_preview=None,
     ) -> dict[str, Any]:
         """Second-pass one context segment in spatial tiles without repeating noise.
 
@@ -7852,6 +8647,7 @@ class MiniMaxH3EasySegmentRefine:
                     start_step + tile_index * step_count,
                     total_steps,
                     noise=tile_noise,
+                    on_preview=on_preview,
                 )
                 sampled_video, _sampled_audio = _segment_latent_streams(sampled)
                 sampled_video = sampled_video.detach().to("cpu").contiguous()
@@ -8285,6 +9081,10 @@ class MiniMaxH3EasySegmentDecode:
             max(5, int((shots[index].get("output_frames") if index < len(shots) else None) or sample.delivery_frames))
             for index, sample in enumerate(segments.samples)
         )
+        # 显存档位：合成本来就是逐段解码，先把主干卸出显存，峰值就只剩 VAE 那一份。
+        vram_profile = segments.plan.get("vram") if isinstance(segments.plan, Mapping) else None
+        if isinstance(vram_profile, MiniMaxH3VramProfile) and vram_profile.unload_before_decode:
+            _release_bundle_models(bundle, "最终合成解码", vram_profile)
 
         def start_video(frame: torch.Tensor):
             height, width = int(frame.shape[0]), int(frame.shape[1])
@@ -8765,6 +9565,1018 @@ except Exception:
     pass
 
 
+# ===========================================================================
+# AICG3D 无限段落顺序生成
+#
+#   全局设置（分辨率 / 宽高比 / 帧率 / 显存 / 衔接帧数 + 采样参数）
+#       -> 视频段落（每段一个节点，用一条线往下接，可无限增减）
+#       -> 最终合成视频（顺序拼成一条完整视频并保存）
+#
+# 段落衔接复用本插件已验证的两套上下文机制：
+#   尾帧续写（latent）：把上一段尾部的 latent 当作下一段的时间上下文，无损、最快（默认）；
+#   尾帧画面（RGB）  ：把上一段尾部的画面重新编码成 Guide，像素级对齐。
+# 衔接帧数可填 1~20，H3 原生时间栅格只有 5 / 22 两档：1~5 取 5 帧，6~20 取 22 帧。
+# ===========================================================================
+
+SEQUENCE_CONFIG_TYPE = "MINIMAX_H3_SEQUENCE_CONFIG"
+SEQUENCE_SEGMENT_TYPE = "MINIMAX_H3_SEQUENCE_SEGMENT"
+
+SEQUENCE_HANDOFF_LATENT = "尾帧续写（latent）"
+SEQUENCE_HANDOFF_RGB = "尾帧画面（RGB）"
+SEQUENCE_HANDOFF_CHOICES = (SEQUENCE_HANDOFF_LATENT, SEQUENCE_HANDOFF_RGB)
+
+# 音频模式：生成音频 = 每段自己出声音；数字人（锁定音频）= 素材库里那条音频当驱动音轨，
+# 按整条时间轴切片后锁进每段的 AV latent，最终成片也用这条音轨（与主节点、
+# 上下文分段的「音频模式」同一套行为，只是这里按段落逐段推进）。
+SEQUENCE_AUDIO_GENERATED = "生成音频"
+SEQUENCE_AUDIO_DIGITAL_HUMAN = "数字人（锁定音频）"
+SEQUENCE_AUDIO_CHOICES = (SEQUENCE_AUDIO_GENERATED, SEQUENCE_AUDIO_DIGITAL_HUMAN)
+
+SEQUENCE_HANDOFF_MIN_FRAMES = 1
+SEQUENCE_HANDOFF_MAX_FRAMES = 20
+SEQUENCE_HANDOFF_DEFAULT_FRAMES = 5
+SEQUENCE_HANDOFF_GRID_HINT = " / ".join(str(item) for item in SEGMENT_CONTEXT_GUIDE_FRAME_GRID)
+
+SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
+
+
+def _sequence_handoff_context_frames(frames: Any) -> int:
+    """把「衔接帧数」吸附到 H3 原生上下文时间栅格（5 / 22 帧两档）。"""
+    try:
+        value = int(frames)
+    except (TypeError, ValueError):
+        value = SEQUENCE_HANDOFF_DEFAULT_FRAMES
+    value = max(SEQUENCE_HANDOFF_MIN_FRAMES, min(SEQUENCE_HANDOFF_MAX_FRAMES, value))
+    for grid in SEGMENT_CONTEXT_GUIDE_FRAME_GRID:
+        if value <= int(grid):
+            return int(grid)
+    return int(SEGMENT_CONTEXT_GUIDE_FRAME_GRID[-1])
+
+
+#: 显存档位：全局设置上的一个下拉。档位不是装饰，它决定画布上限、什么时候把
+#: 文本编码器 / 主干卸出显存、以及采样预览愿意花多少显存 —— 8G 的卡也能照常跑完。
+VRAM_TIER_AUTO = "自动（按显卡）"
+VRAM_TIER_16 = "16G"
+VRAM_TIER_12 = "12G"
+VRAM_TIER_8 = "8G"
+VRAM_TIER_CHOICES = (VRAM_TIER_AUTO, VRAM_TIER_16, VRAM_TIER_12, VRAM_TIER_8)
+
+#: 自动档判定门槛（GB）。显卡报出来的总量会比标称小一点，所以门槛略低。
+VRAM_TIER_16_GB = 15.0
+VRAM_TIER_12_GB = 11.0
+
+
+@dataclass(frozen=True)
+class MiniMaxH3VramProfile:
+    """一个显存档位实际做的事。
+
+    这里只放「不改画面内容、只改显存占用与时机」的开关：画布分辨率上限、
+    文本编码器 / 主干什么时候卸出显存、采样预览的开销上限。
+    """
+
+    #: 面板上显示的名字（自动档会把检测结果写进来）。
+    label: str
+    #: 生效档位本体（自动档解析后的那一档）。
+    tier: str
+    #: 画布分辨率上限档（None = 不限）。超出的分辨率会自动降到这一档。
+    max_resolution: Optional[str] = None
+    #: 条件算完、进采样之前先卸掉文本编码器：Qwen3VL 32B 是大头，采样期间不该占着显存。
+    unload_encoder_after_conditioning: bool = False
+    #: 解码大张量之前（RGB 尾帧、最终合成）先卸掉主干，给 VAE 腾地方。
+    unload_before_decode: bool = False
+    #: 采样预览的最小间隔（1 = 不额外节流）。
+    preview_interval_min: int = 1
+    #: 采样预览的最长边（0 = 沿用 ComfyUI 的全局预览分辨率）。
+    preview_max_side: int = 0
+    #: 预览只走 latent RGB 因子（几乎不花显存），不再跑一次 VAE / TAESD 解码。
+    preview_rgb_only: bool = False
+    #: 允许「尾帧画面（RGB）」衔接：那一档每段都要整段解码一次，显存紧张的档位直接按 latent 跑。
+    allow_rgb_handoff: bool = True
+
+    def summary(self) -> str:
+        """这个档位做了什么，构建配置时打进日志。"""
+        parts = [f"画布上限 {self.max_resolution}" if self.max_resolution else "画布不限"]
+        if self.unload_encoder_after_conditioning:
+            parts.append("采样前卸编码器")
+        if self.unload_before_decode:
+            parts.append("解码前卸主干")
+        if self.preview_interval_min > 1:
+            parts.append(f"预览间隔 ≥{self.preview_interval_min}")
+        if self.preview_rgb_only:
+            parts.append("预览走 RGB 因子")
+        if not self.allow_rgb_handoff:
+            parts.append("衔接强制 latent")
+        return "、".join(parts)
+
+
+#: 各档位的实际策略。16G 档维持原来的行为（不做额外限制），12G / 8G 逐级更保守。
+VRAM_PROFILES: dict[str, MiniMaxH3VramProfile] = {
+    VRAM_TIER_16: MiniMaxH3VramProfile(label="16G 档", tier=VRAM_TIER_16),
+    VRAM_TIER_12: MiniMaxH3VramProfile(
+        label="12G 档",
+        tier=VRAM_TIER_12,
+        max_resolution=RESOLUTION_720,
+        unload_encoder_after_conditioning=True,
+        unload_before_decode=True,
+        preview_interval_min=2,
+        preview_max_side=384,
+    ),
+    VRAM_TIER_8: MiniMaxH3VramProfile(
+        label="8G 档",
+        tier=VRAM_TIER_8,
+        max_resolution=RESOLUTION_480,
+        unload_encoder_after_conditioning=True,
+        unload_before_decode=True,
+        preview_interval_min=4,
+        preview_max_side=256,
+        preview_rgb_only=True,
+        allow_rgb_handoff=False,
+    ),
+}
+
+
+def _vram_tier_from_device() -> str:
+    """自动档：按显卡总显存取一档；取不到（没显卡 / CPU 跑）就按 16G 档，不做额外限制。"""
+    try:
+        if torch.cuda.is_available():
+            total_gb = float(torch.cuda.get_device_properties(0).total_memory) / (1024 ** 3)
+            if total_gb >= VRAM_TIER_16_GB:
+                return VRAM_TIER_16
+            if total_gb >= VRAM_TIER_12_GB:
+                return VRAM_TIER_12
+            return VRAM_TIER_8
+    except Exception as exc:
+        print(f"[MiniMax H3 Aicg] 显存档位自动判定失败（按 16G 档跑）：{exc}")
+    return VRAM_TIER_16
+
+
+def _resolve_vram_profile(tier: Any) -> MiniMaxH3VramProfile:
+    """把面板上选的档位解析成实际策略；自动档会读一次显卡显存。"""
+    requested = str(tier or VRAM_TIER_AUTO)
+    if requested not in VRAM_TIER_CHOICES:
+        requested = VRAM_TIER_AUTO
+    resolved = _vram_tier_from_device() if requested == VRAM_TIER_AUTO else requested
+    profile = VRAM_PROFILES.get(resolved, VRAM_PROFILES[VRAM_TIER_16])
+    if requested == VRAM_TIER_AUTO:
+        # 自动档给自己加限制时要把原因写在名字里，免得用户以为是自己的设置被吃了。
+        profile = replace(profile, label=f"自动（{profile.label}）")
+    return profile
+
+
+def _clamp_resolution_to_profile(resolution: Any, profile: MiniMaxH3VramProfile) -> str:
+    """8G / 12G 档：画布分辨率超过这一档的上限就降到上限档，并在日志里说清楚。"""
+    current = str(resolution)
+    cap = profile.max_resolution
+    if not cap:
+        return current
+    megapixels = RESOLUTION_MEGAPIXELS.get(current)
+    cap_megapixels = RESOLUTION_MEGAPIXELS.get(cap)
+    if megapixels is None or cap_megapixels is None or megapixels <= cap_megapixels:
+        return current
+    allowed = [name for name, value in RESOLUTION_MEGAPIXELS.items() if value <= cap_megapixels]
+    clamped = max(allowed, key=lambda name: RESOLUTION_MEGAPIXELS[name]) if allowed else cap
+    print(
+        f"[MiniMax H3 Aicg] 显存档位「{profile.label}」把画布分辨率从 {current} 降到 {clamped}"
+        f"（这一档上限 {cap}）：显存不够时先保跑得完，想跑更大就把档位调高。"
+    )
+    return clamped
+
+
+def _sequence_vram_profile(config: Any) -> MiniMaxH3VramProfile:
+    """取配置里的显存档位；老配置没有这一项时按 16G 档（不做额外限制）。"""
+    profile = getattr(config, "vram", None)
+    if isinstance(profile, MiniMaxH3VramProfile):
+        return profile
+    return VRAM_PROFILES[VRAM_TIER_16]
+
+
+def _release_text_encoder(bundle: Any, profile: MiniMaxH3VramProfile) -> None:
+    """把文本编码器（Qwen3VL 32B）从显存里放掉，采样期间不跟主干抢显存。"""
+    patcher = getattr(getattr(bundle, "clip", None), "patcher", None)
+    if patcher is None:
+        return
+    try:
+        comfy.model_management.unload_model_and_clones(patcher)
+        comfy.model_management.soft_empty_cache(force=True)
+        print(f"[MiniMax H3 Aicg] 显存档位「{profile.label}」：采样前已把文本编码器放回内存，"
+              f"下一段用到时再自动加载。")
+    except Exception as exc:
+        print(f"[MiniMax H3 Aicg] 释放文本编码器失败（已忽略）：{exc}")
+
+
+def _release_bundle_models(bundle: Any, reason: str, profile: MiniMaxH3VramProfile) -> None:
+    """解码 / 合成前把主干卸出显存，给 VAE 腾地方（下一段自己会重新加载）。"""
+    released = False
+    for attr in ("ref2va_model_obj", "fl2va_model_obj"):
+        patcher = getattr(bundle, attr, None)
+        if patcher is None:
+            continue
+        try:
+            comfy.model_management.unload_model_and_clones(patcher)
+            released = True
+        except Exception as exc:
+            print(f"[MiniMax H3 Aicg] 卸载主干模型失败（已忽略）：{exc}")
+    if released:
+        comfy.model_management.soft_empty_cache(force=True)
+        print(f"[MiniMax H3 Aicg] 显存档位「{profile.label}」：{reason}前已把主干卸出显存。")
+
+
+@dataclass(frozen=True)
+class MiniMaxH3SequenceConfig:
+    """无限段落顺序生成的全局设置（分辨率 / 宽高比 / 帧率 / 显存 / 衔接帧数）。"""
+
+    bundle: MiniMaxH3Bundle
+    resolution: str
+    aspect_ratio: str
+    width: int
+    height: int
+    fps: float
+    handoff_frames: int
+    context_frames: int
+    continuity_mode: str
+    ref_image_size: str
+    sampler_name: str
+    scheduler: str
+    steps: int
+    denoise: float
+    cleanup: str
+    sample_preview: str
+    preview_interval: int
+    # 音频模式（内部值仍沿用 CONTEXT_AUDIO_* 常量，和上下文分段节点保持一致）。
+    audio_mode: str = CONTEXT_AUDIO_GENERATED
+    #: 显存档位（见 MiniMaxH3VramProfile）：8G / 12G / 16G 各有一套显存策略。
+    vram: Optional[MiniMaxH3VramProfile] = None
+
+
+@dataclass(frozen=True)
+class MiniMaxH3SequenceSegment:
+    """一段采样完成的视频；``previous`` 把整条段落链串起来。"""
+
+    config: MiniMaxH3SequenceConfig
+    sample: MiniMaxH3SegmentSample
+    index: int
+    previous: "MiniMaxH3SequenceSegment | None" = None
+    # 这一段在整条时间轴上的起始帧（前面所有段落的交付帧数之和），
+    # 数字人模式按它切片驱动音轨；非数字人模式下用不到。
+    timeline_start: int = 0
+    # 数字人模式下随段落链传下去的驱动音轨（原始 waveform），
+    # 合成时直接用它当最终音轨，不再逐段写模型生成的音频。
+    source_audio: Mapping[str, Any] | None = None
+
+
+def _sequence_collect_chain(final_segment: Any) -> list[MiniMaxH3SequenceSegment]:
+    """从最后一段往回走，得到按顺序排好的整条段落链。"""
+    if not isinstance(final_segment, MiniMaxH3SequenceSegment):
+        raise ValueError("请把最后一条「视频段落」的 segment 输出接到这个节点的 segment 输入")
+    chain: list[MiniMaxH3SequenceSegment] = []
+    seen = set()
+    cursor: Any = final_segment
+    while cursor is not None:
+        if not isinstance(cursor, MiniMaxH3SequenceSegment):
+            raise ValueError("「视频段落」链上出现了无效结果")
+        marker = id(cursor)
+        if marker in seen:
+            raise ValueError("「视频段落」链里出现了循环连接")
+        seen.add(marker)
+        chain.append(cursor)
+        cursor = cursor.previous
+    chain.reverse()
+    for expected, item in enumerate(chain, start=1):
+        if int(item.index) != expected:
+            raise ValueError(
+                f"「视频段落」链不连续：第 {expected} 段收到的是第 {item.index} 段"
+            )
+    return chain
+
+
+def _sequence_same_audio(left: Any, right: Any) -> bool:
+    """两条驱动音轨是不是同一条（数字人模式下整条链必须共用一条）。"""
+    a = left.get("waveform") if isinstance(left, Mapping) else None
+    b = right.get("waveform") if isinstance(right, Mapping) else None
+    if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
+        return False
+    if tuple(a.shape) != tuple(b.shape) or _audio_sample_rate(left) != _audio_sample_rate(right):
+        return False
+    return bool(torch.equal(a, b))
+
+
+class MiniMaxH3EasySequenceGlobal:
+    """AICG3D 无限段落顺序生成（全局设置）
+
+    一条线喂给所有「视频段落」：分辨率、宽高比、帧率、显存收尾策略、采样参数，
+    以及段落之间的衔接帧数。段落可以只用一个，也可以无限往下接。
+    """
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "build_config"
+    RETURN_TYPES = (SEQUENCE_CONFIG_TYPE,)
+    RETURN_NAMES = ("sequence_config",)
+    DESCRIPTION = (
+        "顺序生成长视频的全局设置：分辨率 / 宽高比 / 帧率 / 显存收尾 / 采样参数 / 衔接帧数。"
+        "输出一条 sequence_config，喂给所有 MiniMax H3 Aicg 视频段落。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "h3_bundle": ("MINIMAX_H3_BUNDLE",),
+                "resolution": (
+                    list(RESOLUTION_MEGAPIXELS),
+                    {
+                        "default": RESOLUTION_480,
+                        "tooltip": (
+                            "所有段落共用的画布分辨率（没有自定义档）：宽高由分辨率 + 宽高比自动算出，"
+                            "节点上只读显示，不用手填。"
+                        ),
+                    },
+                ),
+                "aspect_ratio": (
+                    list(ASPECT_RATIOS),
+                    {
+                        "default": ASPECT_WIDESCREEN,
+                        "tooltip": "所有段落共用的宽高比，算出来的画布尺寸显示在这两行下面。",
+                    },
+                ),
+                "fps": (
+                    "FLOAT",
+                    {
+                        "default": 24.0,
+                        "min": 24.0,
+                        "max": 24.0,
+                        "step": 1.0,
+                        "tooltip": "MiniMax H3 原生 24fps，锁定不可改（所有段落共用）。",
+                    },
+                ),
+                "handoff_frames": (
+                    "INT",
+                    {
+                        "default": SEQUENCE_HANDOFF_DEFAULT_FRAMES,
+                        "min": SEQUENCE_HANDOFF_MIN_FRAMES,
+                        "max": SEQUENCE_HANDOFF_MAX_FRAMES,
+                        "step": 1,
+                        "tooltip": (
+                            "每段开头要接住上一段结尾多少帧画面："
+                            f"H3 原生时间栅格只有 {SEQUENCE_HANDOFF_GRID_HINT} 这几档，"
+                            "填 1~5 按 5 帧衔接，填 6~20 按 22 帧衔接（越大越稳、越慢）。"
+                        ),
+                    },
+                ),
+                "handoff_mode": (
+                    list(SEQUENCE_HANDOFF_CHOICES),
+                    {
+                        "default": SEQUENCE_HANDOFF_LATENT,
+                        "tooltip": (
+                            "衔接方式：尾帧续写（latent）= 直接把上一段尾部的 latent 当上下文，"
+                            "无损、最快，Motion Context 同款；"
+                            "尾帧画面（RGB）= 把上一段尾部画面重新编码成 Guide，画面更贴但多一次解码。"
+                        ),
+                    },
+                ),
+                "ref_image_size": (
+                    [REF_IMAGE_MATCH, REF_IMAGE_1K, REF_IMAGE_15K, REF_IMAGE_2K, REF_IMAGE_ORIGINAL],
+                    {"default": REF_IMAGE_1K},
+                ),
+                "sampler_name": (comfy.samplers.SAMPLER_NAMES, {"default": "euler"}),
+                "scheduler": (comfy.samplers.SCHEDULER_NAMES, {"default": "normal"}),
+                "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
+                "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "vram_policy": (
+                    list(RENDER_CLEANUP_CHOICES),
+                    {
+                        "default": RENDER_CLEANUP_CACHE,
+                        "tooltip": (
+                            "每个段落跑完的显存收尾："
+                            "释放缓存（推荐）= 把 PyTorch 缓存的显存还给驱动并回收内存，模型留在显存里，下一段接着跑最快；"
+                            "卸载模型 = 占用最低，但每段都要重新加载权重，长片会很慢；"
+                            "不处理 = 保持 ComfyUI 默认行为。"
+                        ),
+                    },
+                ),
+                "sample_preview": (
+                    list(RENDER_PREVIEW_CHOICES),
+                    {
+                        "default": RENDER_PREVIEW_OFF,
+                        "tooltip": (
+                            "开：采样时每一步都把中间结果走 ComfyUI 原生预览通道推给前端，"
+                            "正在采样的那一段节点上能实时看到画面；关：只留底部进度条。"
+                        ),
+                    },
+                ),
+                "preview_interval": (
+                    "INT",
+                    {
+                        "default": RENDER_PREVIEW_INTERVAL,
+                        "min": 1,
+                        "max": 1000,
+                        "step": 1,
+                        "tooltip": "每隔多少步推一张采样预览（1 = 每步都推）。调大能省预览解码开销。",
+                    },
+                ),
+                # 只在前端用的入口：点一行就把「提示词优化设置」面板打开（优化方式 / API 地址 /
+                # API Key / 模型名 / 本地模型都在里面）。段落提示词框里的 ✦ 用的就是这份设置，
+                # 放在这里是因为这套工作流里没有主节点，别处找不到模型配置。
+                "prompt_optimizer_settings": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "点这一行打开「提示词优化设置」：优化方式（API / 本地模型）、API 地址、"
+                            "API Key、模型名、本地模型都在这里配。"
+                        ),
+                    },
+                ),
+                # 放在最后一位：老工作流里全局设置是按位置存值的，插在中间会把
+                # 后面每个控件都读错一行。音频模式只影响音频，放末尾最安全。
+                "audio_mode": (
+                    list(SEQUENCE_AUDIO_CHOICES),
+                    {
+                        "default": SEQUENCE_AUDIO_GENERATED,
+                        "tooltip": (
+                            "生成音频 = 每段自己出声音（默认）；"
+                            "数字人（锁定音频）= 素材库里那一条音频当驱动音轨，"
+                            "按整条时间轴切片后锁进每一段（音频不参与去噪、生成的画面跟着音频走），"
+                            "最终成片也用这条音轨。素材库里没有音频时自动按「生成音频」跑。"
+                        ),
+                    },
+                ),
+                # 放在最后一位：老工作流里全局设置是按位置存值的，插在中间会把后面每个控件读错一行。
+                "vram_tier": (
+                    list(VRAM_TIER_CHOICES),
+                    {
+                        "default": VRAM_TIER_AUTO,
+                        "tooltip": (
+                            "显存档位：按显卡显存选一档，档位会自己把画布上限、显存释放时机、"
+                            "采样预览开销调到这一档跑得完的程度。"
+                            "自动（按显卡）= 读一次显卡总显存自己选；"
+                            "16G = 不做额外限制（原来的行为）；"
+                            "12G = 画布上限 720P、采样前卸编码器、解码前卸主干、预览间隔 ≥2；"
+                            "8G = 画布上限 480P，另外预览走轻量 RGB 因子、衔接强制按 latent 跑。"
+                            "想跑更大分辨率就把档位往上调。"
+                        ),
+                    },
+                ),
+            },
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        keys = (
+            "resolution", "aspect_ratio", "fps",
+            "handoff_frames", "handoff_mode", "ref_image_size",
+            "sampler_name", "scheduler", "steps", "denoise",
+            "vram_policy", "sample_preview", "preview_interval",
+            "audio_mode", "vram_tier",
+        )
+        return "|".join(str(kwargs.get(key, "")) for key in keys)
+
+    @classmethod
+    def build_config(
+        cls,
+        h3_bundle,
+        resolution,
+        aspect_ratio,
+        fps,
+        handoff_frames,
+        handoff_mode,
+        ref_image_size,
+        sampler_name,
+        scheduler,
+        steps,
+        denoise,
+        vram_policy,
+        sample_preview,
+        preview_interval,
+        prompt_optimizer_settings=False,
+        audio_mode=SEQUENCE_AUDIO_GENERATED,
+        vram_tier=VRAM_TIER_AUTO,
+    ):
+        if not isinstance(h3_bundle, MiniMaxH3Bundle):
+            raise ValueError("请把 MiniMax H3 Aicg 加载器的「模型组合」接到 h3_bundle")
+        # 显存档位先解析：画布分辨率要按档位上限收一下，后面每一项策略都跟着它走。
+        vram_profile = _resolve_vram_profile(vram_tier)
+        resolution = _clamp_resolution_to_profile(resolution, vram_profile)
+        # 宽高由分辨率 + 宽高比算出（跟主节点预设画布同一套算法），前端只读显示同一个结果。
+        width, height = _canvas_dimensions(resolution, aspect_ratio, 0, 0)
+        mode = str(handoff_mode or SEQUENCE_HANDOFF_LATENT)
+        continuity_mode = (
+            CONTEXT_CONTINUITY_GUIDE if mode == SEQUENCE_HANDOFF_RGB else CONTEXT_CONTINUITY_LATENT
+        )
+        # 面板上是中文标签，内部统一收敛成 CONTEXT_AUDIO_* 常量。
+        resolved_audio_mode = (
+            CONTEXT_AUDIO_DIGITAL_HUMAN
+            if str(audio_mode or SEQUENCE_AUDIO_GENERATED) == SEQUENCE_AUDIO_DIGITAL_HUMAN
+            else CONTEXT_AUDIO_GENERATED
+        )
+        resolved_handoff = max(
+            SEQUENCE_HANDOFF_MIN_FRAMES,
+            min(SEQUENCE_HANDOFF_MAX_FRAMES, int(handoff_frames or SEQUENCE_HANDOFF_DEFAULT_FRAMES)),
+        )
+        config = MiniMaxH3SequenceConfig(
+            bundle=h3_bundle,
+            resolution=str(resolution),
+            aspect_ratio=str(aspect_ratio),
+            width=int(width),
+            height=int(height),
+            fps=float(fps or h3.FPS),
+            handoff_frames=resolved_handoff,
+            context_frames=_sequence_handoff_context_frames(resolved_handoff),
+            continuity_mode=continuity_mode,
+            ref_image_size=str(ref_image_size or REF_IMAGE_1K),
+            sampler_name=str(sampler_name or "euler"),
+            scheduler=str(scheduler or "normal"),
+            steps=max(1, int(steps or 1)),
+            denoise=min(1.0, max(0.0, float(denoise))),
+            cleanup=str(vram_policy or RENDER_CLEANUP_CACHE),
+            sample_preview=str(sample_preview or RENDER_PREVIEW_OFF),
+            preview_interval=max(1, int(preview_interval or RENDER_PREVIEW_INTERVAL)),
+            audio_mode=resolved_audio_mode,
+            vram=vram_profile,
+        )
+        print(
+            f"[MiniMax H3 Aicg] 顺序生成全局设置：{config.width}x{config.height}"
+            f" @{config.fps:g}fps，衔接 {config.handoff_frames} 帧"
+            f"（原生栅格 {config.context_frames} 帧 / {mode}），每段收尾「{config.cleanup}」，"
+            f"音频「{SEQUENCE_AUDIO_DIGITAL_HUMAN if resolved_audio_mode == CONTEXT_AUDIO_DIGITAL_HUMAN else SEQUENCE_AUDIO_GENERATED}」，"
+            f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
+        )
+        return (config,)
+
+
+class MiniMaxH3EasySequenceSegment:
+    """AICG3D 视频段落（可无限增减）
+
+    每一段一个节点：填提示词、秒数、种子，需要参考图/参考视频就从资源库接 ``media``。
+    把上一段的 ``segment`` 接到本节点的 ``previous_segment``，就自动接住它的结尾帧继续往下拍。
+    采样完这一段就把显存收尾一次，再交给下一段；只接一段也算完整流程。
+    """
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "sample_segment"
+    RETURN_TYPES = (SEQUENCE_SEGMENT_TYPE,)
+    RETURN_NAMES = ("segment",)
+    DESCRIPTION = (
+        "顺序生成的一段视频。接上一条「视频段落」的 segment 即可无限往下接；"
+        "第一段不接 previous_segment。段落之间自动衔接上一段的结尾帧（帧数在全局设置里调）。"
+        "全局设置与资源库只在第 1 段接一次，后面的段落顺着 previous_segment 继承，"
+        "想给某一段换素材或换配置，再单独把线接到这一段即可。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        optional = {
+            # 全局设置只在第 1 段接一次，后面的段落顺着 previous_segment 继承同一份配置：
+            # 画布上就只剩「段落 → 段落」一条线，段数再多也不会织成蜘蛛网。
+            "sequence_config": (SEQUENCE_CONFIG_TYPE,),
+            "previous_segment": (SEQUENCE_SEGMENT_TYPE,),
+            "media": ("*",),
+        }
+        for index in range(1, SEGMENT_MAX_MEDIA + 1):
+            optional[f"media_{index}"] = ("*", {"hidden": True})
+            optional[f"media_type_{index}"] = ("STRING", {"default": "", "hidden": True})
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": ""}),
+                "seconds": (
+                    "FLOAT",
+                    {"default": 5.0, "min": MIN_SECONDS, "max": MAX_SECONDS, "step": 0.1},
+                ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 4294967295,
+                        "control_after_generate": True,
+                        "tooltip": "这一段自己的噪声种子；0 = 每次随机。",
+                    },
+                ),
+            },
+            "optional": optional,
+        }
+
+    @classmethod
+    def _previous_state(cls, config: MiniMaxH3SequenceConfig, previous: Any, index: int):
+        """取出上一段需要的东西：Motion Context 尾帧 latent / RGB 尾帧；两者都是 CPU 张量。"""
+        state = {
+            "motion_tail_latent": None,
+            "tail_frames": None,
+            "audio_reference": None,
+        }
+        if previous is None:
+            return state
+        sample = previous.sample
+        state["motion_tail_latent"] = sample.motion_context_tail_latent
+        full_latent = _segment_pack_latent(sample.video_latent, sample.audio_latent)
+        try:
+            full_video, _full_audio = _segment_latent_streams(full_latent)
+            if config.continuity_mode == CONTEXT_CONTINUITY_GUIDE:
+                profile = _sequence_vram_profile(config)
+                if profile.unload_before_decode:
+                    # 整段解码是显存峰值之一：先把主干放回去，解完下一段再自动加载。
+                    _release_bundle_models(config.bundle, "RGB 尾帧解码", profile)
+                images = nodes.VAEDecode().decode(config.bundle.video_vae, full_latent)[0]
+                output_frames = max(5, int(sample.output_frames or sample.delivery_frames))
+                delivered = images[
+                    int(sample.head_frames):int(sample.head_frames) + output_frames
+                ].detach().to("cpu").contiguous()
+                keep = min(int(config.context_frames), int(delivered.shape[0]))
+                state["tail_frames"] = delivered[-keep:].contiguous()
+                del images, delivered
+            elif state["motion_tail_latent"] is None:
+                state["motion_tail_latent"] = _segment_motion_context_tail_from_latent(
+                    full_video, config.context_frames
+                )
+            state["audio_reference"] = _segment_context_audio_reference(
+                full_latent,
+                int(sample.head_frames + sample.delivery_frames),
+                config.context_frames,
+            )
+        finally:
+            del full_latent
+        print(
+            f"[MiniMax H3 Aicg] 视频段落 {index}：已接住第 {previous.index} 段的结尾"
+            f"（{config.context_frames} 帧 / {config.continuity_mode}）"
+        )
+        return state
+
+    @classmethod
+    def sample_segment(
+        cls, sequence_config=None, prompt="", seconds=5.0, seed=0, previous_segment=None, **kwargs
+    ):
+        if previous_segment is not None and not isinstance(previous_segment, MiniMaxH3SequenceSegment):
+            raise ValueError("previous_segment 只能接本插件「视频段落」节点的 segment 输出")
+        # 全局设置只在第 1 段接：后面的段落顺着 previous_segment 用同一份配置。
+        config = sequence_config
+        if config is None and previous_segment is not None:
+            config = previous_segment.config
+        if not isinstance(config, MiniMaxH3SequenceConfig):
+            raise ValueError(
+                "请把「无限段落顺序生成（全局设置）」的 sequence_config 接到第 1 段的这个节点"
+            )
+
+        bundle = config.bundle
+        if not isinstance(bundle, MiniMaxH3Bundle):
+            raise ValueError("全局设置里没有可用的 MiniMax H3 模型组合")
+        index = 1 if previous_segment is None else int(previous_segment.index) + 1
+        position = index - 1
+        # 这一段在整条时间轴上的起点：前面每一段交付的帧数之和。
+        timeline_start = 0 if previous_segment is None else (
+            int(previous_segment.timeline_start) + int(previous_segment.sample.delivery_frames)
+        )
+        digital_human = str(config.audio_mode or CONTEXT_AUDIO_GENERATED) == CONTEXT_AUDIO_DIGITAL_HUMAN
+        width = int(config.width)
+        height = int(config.height)
+        fps = float(config.fps or h3.FPS)
+        continuity_mode = str(config.continuity_mode or CONTEXT_CONTINUITY_LATENT)
+        vram = _sequence_vram_profile(config)
+        if not vram.allow_rgb_handoff and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
+            # 显存紧张的档位不跑 RGB 尾帧：那一档每段都要先整段解码一次，按 latent 续写更稳。
+            continuity_mode = CONTEXT_CONTINUITY_LATENT
+            print(
+                f"[MiniMax H3 Aicg] 视频段落 {index}：显存档位「{vram.label}」把衔接方式从"
+                "「尾帧画面（RGB）」降成「尾帧续写（latent）」；想用 RGB 就把档位调高。"
+            )
+        context_length = _segment_context_frame_count_for_mode(config.context_frames, continuity_mode)
+
+        # 第一段从时间轴原点开始，用原生 17k+5 长度；后续段用 17k，加上衔接头正好又是一条原生长度。
+        if continuity_mode == CONTEXT_CONTINUITY_LATENT:
+            delivery_frames = _motion_context_output_frame_length(seconds, fps, position)
+        else:
+            delivery_frames = _frame_length(seconds, fps)
+        delivery_frames = max(5, int(delivery_frames))
+        head_frames = context_length if position else 0
+        sample_length = _segment_target_length(delivery_frames, head_frames)
+
+        items = MiniMaxH3Easy._collect_media(kwargs, SEGMENT_MAX_MEDIA)
+        # 素材同理：资源库只在第 1 段（或要换素材的那一段）接一次，后面的段落默认沿用
+        # 上一段的素材库，画布上就少了 N 条线；提示词里没写标签时两边拿到的素材完全一致。
+        if not items and previous_segment is not None:
+            previous_sample = previous_segment.sample
+            items = list(previous_sample.source_media or previous_sample.media or ())
+        # 往下传的是「本段可用的全部素材」，本段真正用的那几个是提示词标签裁剪之后的结果。
+        available_items = list(items)
+        prompt_text = str(prompt or "")
+
+        # 数字人（锁定音频）：素材库里那一条音频不当参考，改当「驱动音轨」——
+        # 它按整条时间轴切片后锁进每一段的 AV latent（音频那一半不参与去噪），
+        # 所以素材库里只有音频也能跑：没有画面参考就退回纯文字出片。
+        source_audio = None
+        if digital_human:
+            if any(item.media_type == "audio" for item in items):
+                _visual_items, source_audio = _extract_digital_human_audio(items, f"视频段落 {index}")
+                items = list(_visual_items)
+                # 驱动音频不进参考条件，提示词里的 <Audio N> 也要一起去掉，
+                # 否则模型会收到一条没有对应参考的音频标签。
+                prompt_text = re.sub(r"<Audio\s+\d+>", "", prompt_text, flags=re.IGNORECASE)
+                print(
+                    f"[MiniMax H3 Aicg] 视频段落 {index}：数字人（锁定音频）模式，"
+                    f"驱动音轨 {float(source_audio['waveform'].shape[-1]) / float(source_audio['sample_rate']):.2f}s。"
+                )
+            else:
+                # 没接音频就没有可锁的音轨，直接按普通流程跑，不报错。
+                digital_human = False
+
+        if items:
+            items, prompt_text = bind_reference_media(prompt_text, items)
+            _sync_reference_video_cache_scope(items)
+            _validate_reference_media(items, f"视频段落 {index}")
+            model = bundle.model_for("ref2va")
+            conditioning, latent = _reference_conditioning(
+                bundle, prompt_text, width, height, sample_length, config.ref_image_size, items,
+                include_audio=not digital_human,
+            )
+        else:
+            model = bundle.model_for("fl2va")
+            conditioning, latent, _sources = _empty_image_conditioning(
+                bundle, prompt_text, width, height, sample_length,
+            )
+
+        state = cls._previous_state(config, previous_segment, index)
+        motion_tail_latent = state["motion_tail_latent"]
+        tail_frames = state["tail_frames"]
+        # 数字人模式的音频由驱动音轨整段锁定，不再叠加「上一段尾音」的上下文条件。
+        audio_context_reference = None if digital_human else state["audio_reference"]
+        if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
+            # RGB Guide 只带画面；带音频会在同一个衔接点上再压一层条件。
+            audio_context_reference = None
+
+        guides: list[dict[str, Any]] = []
+        if motion_tail_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
+            guide_latent = motion_tail_latent
+            if _segment_has_visual_reference(items):
+                guide_latent = _segment_apply_context_noise(guide_latent, context_length, int(seed) or 0)
+            guides, _covered = _segment_context_keyframes_from_latent(guide_latent, context_length)
+        elif tail_frames is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
+            guides, _covered = _segment_context_keyframes(
+                bundle, tail_frames, width, height, context_length,
+            )
+        conditioning = _segment_add_context_conditioning(
+            conditioning,
+            guides,
+            h3.temporal_shape(sample_length)[0],
+            audio_context_reference,
+            _segment_motion_context_audio_index(audio_context_reference, context_length)
+            if continuity_mode == CONTEXT_CONTINUITY_LATENT
+            else 0,
+        )
+
+        # 数字人：把这一段对应的驱动音频切片锁进 AV latent（音频流 noise_mask=0，
+        # 采样不会去噪它），生成的画面就跟着这条音轨走。
+        if source_audio is not None:
+            source_audio_reference = _segment_source_audio_reference(
+                bundle,
+                source_audio,
+                max(0, timeline_start - head_frames),
+                head_frames + delivery_frames,
+            )
+            if source_audio_reference is None:
+                raise ValueError(f"视频段落 {index} 的驱动音频无法编码（素材库里那条音频无效）")
+            latent = _lock_audio_latent(latent, source_audio_reference["audio_latent"])
+
+        # 显存档位：条件已经算完，进采样之前把文本编码器放回内存，采样期间显存只剩主干。
+        if vram.unload_encoder_after_conditioning:
+            _release_text_encoder(bundle, vram)
+
+        from .aicg3d_sampler import AICG3DSamplerAdvanced
+        from .render_progress import (
+            SAMPLE_PREVIEW_ENABLED,
+            STAGE_SAMPLE,
+            RenderPreviewEncoder,
+            RenderProgressReporter,
+        )
+
+        reporter = RenderProgressReporter()
+        want_preview = SAMPLE_PREVIEW_ENABLED or str(config.sample_preview or "").strip() == RENDER_PREVIEW_ON
+        # 显存档位控制预览开销：小档位压低预览分辨率 / 改用 RGB 因子，别让预览把显存吃回去。
+        preview = (
+            RenderPreviewEncoder(
+                model,
+                max_side=vram.preview_max_side or None,
+                prefer_rgb=vram.preview_rgb_only,
+            )
+            if want_preview else None
+        )
+        on_preview = None
+        if preview is not None:
+            should_push = _preview_step_filter(
+                max(int(config.preview_interval or 1), int(vram.preview_interval_min))
+            )
+
+            def on_preview(x0, step=None, total=None, *_info):
+                if not should_push(step, total):
+                    return None
+                return reporter.update_preview(preview.decode(x0))
+
+        done = False
+        try:
+            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, max(1, int(config.steps)))
+            (sampled,) = AICG3DSamplerAdvanced().sample(
+                model,
+                conditioning,
+                latent,
+                int(seed) & 0xFFFFFFFFFFFFFFFF,
+                config.sampler_name,
+                config.scheduler,
+                config.steps,
+                config.denoise,
+                on_step=reporter.update_stage,
+                on_preview=on_preview,
+            )
+            video_stream, audio_stream = _segment_latent_streams(sampled)
+            motion_context_tail_latent = None
+            if continuity_mode == CONTEXT_CONTINUITY_LATENT:
+                # 下一段要用的尾帧 latent 先切好（CPU，几 MB），段落之间就不用再来回搬运画面。
+                motion_context_tail_latent = _segment_motion_context_tail_from_latent(
+                    video_stream, context_length,
+                )
+            sample = MiniMaxH3SegmentSample(
+                video_latent=video_stream.detach().to("cpu").contiguous(),
+                audio_latent=audio_stream.detach().to("cpu").contiguous(),
+                head_frames=head_frames,
+                delivery_frames=delivery_frames,
+                output_frames=delivery_frames,
+                prompt=prompt_text,
+                media=tuple(items),
+                source_media=tuple(available_items),
+                motion_context_tail_latent=motion_context_tail_latent,
+            )
+            del sampled, video_stream, audio_stream
+            done = True
+            print(
+                f"[MiniMax H3 Aicg] 视频段落 {index} 完成：{float(seconds):g}s -> {delivery_frames} 帧"
+                f"（衔接头 {head_frames} 帧，共采样 {sample_length} 帧）。"
+            )
+            return (MiniMaxH3SequenceSegment(
+                config=config,
+                sample=sample,
+                index=index,
+                previous=previous_segment,
+                timeline_start=timeline_start,
+                source_audio=source_audio,
+            ),)
+        finally:
+            reporter.finish(done)
+            # 每段跑完清理一次显存：下一段接着跑，缓存不会越堆越高。
+            _release_render_resources(config.cleanup)
+
+
+class MiniMaxH3EasySequenceCombine:
+    """AICG3D 最终合成视频
+
+    只接最后一段的 ``segment``，它自己会顺着链找回前面每一段，按顺序把画面与音频拼成
+    一条完整视频，并保存到 ``output`` 目录（节点上也直接给预览）。
+    """
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "combine"
+    OUTPUT_NODE = True
+    RETURN_TYPES = ("VIDEO", "STRING")
+    RETURN_NAMES = ("video", "saved_file")
+    DESCRIPTION = (
+        "把整条「视频段落」链按顺序拼成一条完整视频：逐段解码、逐段写进同一个编码器，"
+        "音画一起拼，内存只跟单段有关。保存到 output 目录，同时输出 VIDEO 方便再接别的节点。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "final_segment": (SEQUENCE_SEGMENT_TYPE,),
+                "filename_prefix": (
+                    "STRING",
+                    {
+                        "default": SEQUENCE_DEFAULT_FILENAME_PREFIX,
+                        "tooltip": "保存到 output 目录的前缀，例如 video/我的长片。",
+                    },
+                ),
+            },
+        }
+
+    @classmethod
+    def _save_video(cls, video: Any, filename_prefix: str) -> tuple[str, str]:
+        """把拼好的视频原样复制到 output 目录（同一条 mp4，不再重编码）。"""
+        source = None
+        try:
+            source = video.get_stream_source()
+        except Exception:
+            source = None
+        if not isinstance(source, str) or not os.path.isfile(source):
+            raise RuntimeError("合成结果没有可用的视频文件")
+        width, height = video.get_dimensions()
+        full_output_folder, name, counter, subfolder, _prefix = folder_paths.get_save_image_path(
+            str(filename_prefix or SEQUENCE_DEFAULT_FILENAME_PREFIX),
+            folder_paths.get_output_directory(),
+            width,
+            height,
+        )
+        os.makedirs(full_output_folder, exist_ok=True)
+        file = f"{name}_{counter:05}_.mp4"
+        target = os.path.join(full_output_folder, file)
+        if os.path.abspath(target) != os.path.abspath(source):
+            shutil.copyfile(source, target)
+        return file, subfolder
+
+    @classmethod
+    def combine(cls, final_segment, filename_prefix=SEQUENCE_DEFAULT_FILENAME_PREFIX):
+        chain = _sequence_collect_chain(final_segment)
+        config = chain[0].config
+        bundle = config.bundle
+        if not isinstance(bundle, MiniMaxH3Bundle):
+            raise ValueError("「视频段落」链里没有可用的 MiniMax H3 模型组合")
+
+        shots = []
+        samples = []
+        for item in chain:
+            sample = item.sample
+            shots.append({
+                "prompt": str(sample.prompt or ""),
+                "delivery_frames": int(sample.delivery_frames),
+                "output_frames": int(sample.output_frames or sample.delivery_frames),
+                "media": list(sample.media or ()),
+            })
+            samples.append(sample)
+
+        # 数字人（锁定音频）：整条链共用素材库里那一条驱动音轨，
+        # 成片直接用它（与每段锁进 latent 的是同一条），逐段解码时就不写各段生成的音频。
+        source_audio = None
+        if str(config.audio_mode or CONTEXT_AUDIO_GENERATED) == CONTEXT_AUDIO_DIGITAL_HUMAN:
+            for item in chain:
+                candidate = item.source_audio
+                if not (isinstance(candidate, Mapping) and isinstance(candidate.get("waveform"), torch.Tensor)):
+                    continue
+                if source_audio is None:
+                    source_audio = candidate
+                    continue
+                # 每段的画面都是按自己那一条音轨切片锁定采样的，整条链混用两条音频
+                # 会让后半段的画面和最终音轨对不上，这里直接拦住。
+                if not _sequence_same_audio(source_audio, candidate):
+                    raise ValueError(
+                        "数字人（锁定音频）模式下整条段落链必须共用同一条驱动音频，"
+                        "现在链上出现了两条不同的音频。请把这些段落接到同一个素材库，"
+                        "或把音频模式切回「生成音频」。"
+                    )
+            if source_audio is None:
+                print("[MiniMax H3 Aicg] 数字人模式没有找到驱动音轨，拼接时沿用各段生成的音频。")
+
+        plan = {
+            "bundle": bundle,
+            "width": int(config.width),
+            "height": int(config.height),
+            "fps": float(config.fps or h3.FPS),
+            "context_length": int(config.context_frames),
+            "continuity_mode": str(config.continuity_mode),
+            "audio_mode": str(config.audio_mode or CONTEXT_AUDIO_GENERATED),
+            "source_audio": source_audio,
+            "shots": shots,
+            # 显存档位跟着计划传进解码器：合成前要不要先卸主干由它决定。
+            "vram": _sequence_vram_profile(config),
+        }
+        segments = MiniMaxH3SegmentResult(plan=plan, samples=tuple(samples))
+
+        progress = comfy.utils.ProgressBar(max(1, len(samples)))
+        terminal_progress = _H3TerminalProgress("Sequence Combine", len(samples))
+        try:
+            (stream_video,) = MiniMaxH3EasySegmentDecode._decode_streaming(
+                segments, bundle, source_audio, progress, terminal_progress,
+            )
+        finally:
+            terminal_progress.finish()
+
+        saved_file = ""
+        saved_subfolder = ""
+        video = stream_video
+        try:
+            saved_file, saved_subfolder = cls._save_video(stream_video, filename_prefix)
+            video = InputImpl.VideoFromFile(
+                os.path.join(folder_paths.get_output_directory(), saved_subfolder, saved_file)
+            )
+            print(
+                f"[MiniMax H3 Aicg] 顺序合成完成：{len(samples)} 段 -> "
+                f"output/{saved_subfolder + '/' if saved_subfolder else ''}{saved_file}"
+            )
+        except Exception as exc:
+            print(f"[MiniMax H3 Aicg] 顺序合成结果保存失败（已忽略，视频仍在本条线上）：{exc}")
+
+        ui = {}
+        if saved_file:
+            ui = {
+                "images": [{
+                    "filename": saved_file,
+                    "subfolder": saved_subfolder,
+                    "type": "output",
+                }],
+                "animated": (True,),
+            }
+        return {
+            "ui": ui,
+            "result": (
+                video,
+                os.path.join(saved_subfolder, saved_file) if saved_file else "",
+            ),
+        }
+
+
 NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasyLoader": MiniMaxH3EasyLoader,
     "MiniMaxH3EasyModelAdapter": MiniMaxH3EasyModelAdapter,
@@ -8786,6 +10598,11 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasyAspectRatio": MiniMaxH3EasyAspectRatio,
     "MiniMaxH3EasySecondPassConditioning": MiniMaxH3EasySecondPassConditioning,
     "MiniMaxH3EasyRenderAdvanced": MiniMaxH3EasyRenderAdvanced,
+    "MiniMaxH3EasyRenderPass1": MiniMaxH3EasyRenderPass1,
+    "MiniMaxH3EasyRenderPass2": MiniMaxH3EasyRenderPass2,
+    "MiniMaxH3EasySequenceGlobal": MiniMaxH3EasySequenceGlobal,
+    "MiniMaxH3EasySequenceSegment": MiniMaxH3EasySequenceSegment,
+    "MiniMaxH3EasySequenceCombine": MiniMaxH3EasySequenceCombine,
 }
 
 if MiniMaxH3EasyLatentUpscaler3D is not None:
@@ -8810,6 +10627,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasyAspectRatio": "MiniMax H3 Aicg 宽高比",
     "MiniMaxH3EasySecondPassConditioning": "MiniMax H3 Aicg 二采条件",
     "MiniMaxH3EasyRenderAdvanced": "AICG-渲染器（高级）",
+    "MiniMaxH3EasyRenderPass1": "AICG-渲染器（一采）",
+    "MiniMaxH3EasyRenderPass2": "AICG-渲染器（二采放大）",
+    "MiniMaxH3EasySequenceGlobal": "MiniMax H3 Aicg 无限段落顺序生成（全局设置）",
+    "MiniMaxH3EasySequenceSegment": "MiniMax H3 Aicg 视频段落",
+    "MiniMaxH3EasySequenceCombine": "MiniMax H3 Aicg 最终合成视频",
 }
 
 if MiniMaxH3EasyLatentUpscaler3D is not None:

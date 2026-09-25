@@ -1,3 +1,6 @@
+<img width="1426" height="609" alt="image" src="https://github.com/user-attachments/assets/5c7f72e5-3839-4a06-afe1-2482c4002515" />
+<img width="1532" height="626" alt="image" src="https://github.com/user-attachments/assets/83787eb7-761e-4ddc-b70f-5bf6cd36c4ef" />
+<img width="1395" height="666" alt="image" src="https://github.com/user-attachments/assets/fcc53765-8818-470f-bacf-ceaf5a93fec3" />
 # ComfyUI-AICG3D-Integrated 🚀
 ### 极致稳定的 MiniMax H3 AI 视频创作全链路解决方案
 

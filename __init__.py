@@ -18,7 +18,11 @@ try:
     NODE_DISPLAY_NAME_MAPPINGS = res[1]
     WEB_DIRECTORY = "./web"
     print("\n" + "!"*60)
-    print(f"[AICG3D] SUCCESS: Loaded {len(NODE_CLASS_MAPPINGS)} nodes!")
+print("\n" + "="*50 + "\n")
+print("🚀 [AICG3D-Integrated] System Initialized")
+print("🛡️  Namespace: AICG3D_H3_ (Conflict-Free Mode)")
+print(f"📦 Loaded {len(NODE_CLASS_MAPPINGS)} production-ready nodes")
+print("="*50 + "\n")
     print("!"*60 + "\n")
 except Exception as e:
     print("\n" + "="*60)

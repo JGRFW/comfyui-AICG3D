@@ -41,7 +41,27 @@ from fractions import Fraction
 from typing import Any, Optional
 
 import torch
-import torchaudio
+
+
+# --- AICG3D Mock for missing sampling_strategies.py ---
+SAMPLING_PLAN_TYPE = "default"
+SELFLIFT_KIND = "none"
+class MiniMaxH3SamplingPlan:
+    def __init__(self, *args, **kwargs): pass
+def sample_with_sampling_plan(*args, **kwargs):
+    return None
+# ------------------------------------------------------
+import torch
+
+
+# --- AICG3D Mock for missing sampling_strategies.py ---
+SAMPLING_PLAN_TYPE = "default"
+SELFLIFT_KIND = "none"
+class MiniMaxH3SamplingPlan:
+    def __init__(self, *args, **kwargs): pass
+def sample_with_sampling_plan(*args, **kwargs):
+    return None
+# ------------------------------------------------------audio
 import requests
 import psutil
 
@@ -54,6 +74,14 @@ except Exception:  # Pillow is optional for the host, but normally bundled with 
 import comfy.sample
 import comfy.samplers
 import comfy.utils
+
+# Mock for missing sampling_strategies.py
+SAMPLING_PLAN_TYPE = "default"
+SELFLIFT_KIND = "none"
+class MiniMaxH3SamplingPlan:
+    def __init__(self, *args, **kwargs): pass
+def sample_with_sampling_plan(*args, **kwargs):
+    return None
 import comfy.model_management
 import comfy.latent_formats
 import folder_paths
@@ -64,17 +92,12 @@ from comfy_execution.graph_utils import ExecutionBlocker
 from comfy_extras import nodes_audio, nodes_custom_sampler
 from comfy_extras import nodes_minimax_h3 as h3
 try:
-    from .h3_latent_upscaler import MiniMaxH3EasyLatentUpscaler3D, scan_models as scan_latent_upscaler_models
+    from h3easy.h3_latent_upscaler import MiniMaxH3EasyLatentUpscaler3D, scan_models as scan_latent_upscaler_models
 except ImportError:
     MiniMaxH3EasyLatentUpscaler3D = None
     scan_latent_upscaler_models = None
-from ..aicg3d import prompt_guides as prompt_guide_lib
-from .sampling_strategies import (
-    SAMPLING_PLAN_TYPE,
-    SELFLIFT_KIND,
-    MiniMaxH3SamplingPlan,
-    sample_with_plan as sample_with_sampling_plan,
-)
+from aicg3d import prompt_guides as prompt_guide_lib
+
 
 
 MODE_IMAGE = "image"
@@ -1443,7 +1466,7 @@ def _optimizer_local_media(
                     # 原图直传会让单张参考图膨胀到上千个视觉 token，本地 GGUF 引擎
                     # 会因此报 “Media evaluation failed with error code 1”。
                     try:
-                        from ..h3goohai import prompt_optimizer as goohai_optimizer
+                        from h3goohai import prompt_optimizer as goohai_optimizer
                         images.append(goohai_optimizer.image_file_data_url(path))
                     except ImportError:
                         pass
@@ -1462,7 +1485,7 @@ def _optimizer_local_generate(
 ) -> str:
     """Run one request on the local vision engine owned by the Goohai module."""
     try:
-        from ..h3goohai import prompt_optimizer as goohai_optimizer
+        from h3goohai import prompt_optimizer as goohai_optimizer
 
         local_model = str(settings.get("local_model") or "").strip()
     except ImportError:
@@ -2487,7 +2510,7 @@ def _register_prompt_optimizer_route() -> bool:
     async def _prompt_optimizer_local_models_get(request):
         """列出 models/llm 下可用的本地视觉模型，供设置面板选择。"""
         try:
-            from ..h3goohai import prompt_optimizer as goohai_optimizer
+            from h3goohai import prompt_optimizer as goohai_optimizer
 
             return web.json_response({
                 "ok": True,
@@ -6375,7 +6398,7 @@ class MiniMaxH3EasyRenderAdvanced:
         frames = None
         audio = None
         try:
-            from ..h3goohai.audio_ops import decode_av_latent
+            from h3goohai.audio_ops import decode_av_latent
 
             frames, audio, _video_latent, _audio_latent = decode_av_latent(
                 sampled, h3_context.video_vae, h3_context.audio_vae
@@ -6423,8 +6446,8 @@ class MiniMaxH3EasyRenderAdvanced:
                 "MiniMax H3 Aicg 渲染器（高级）只处理单段生成：请把上游 MiniMax H3 Aicg "
                 "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
             )
-        from .aicg3d_sampler import AICG3DSamplerAdvanced
-        from .render_progress import SAMPLE_PREVIEW_ENABLED, RenderPreviewEncoder, RenderProgressReporter
+        from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+        from h3easy.render_progress import SAMPLE_PREVIEW_ENABLED, RenderPreviewEncoder, RenderProgressReporter
 
         # 前端会在节点底部按这些进度画一条百分比进度条（带已用时间与剩余估计），
         # 采样占 90%，解码与合成占剩下 10%。节点上不显示采样预览图；需要时把
@@ -6702,8 +6725,8 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
             )
 
         model = _resolve_h3_model(h3_context)
-        from .aicg3d_sampler import AICG3DSamplerAdvanced
-        from .render_progress import (
+        from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+        from h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             STAGE_SAMPLE,
             RenderPreviewEncoder,
@@ -7035,7 +7058,7 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         if int(tile_fade) > int(tile_overlap):
             raise ValueError("二采分块的过渡长度不能大于重叠")
 
-        from .aicg3d_sampler import AICG3DSamplerAdvanced, _roll_inference_seed
+        from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced, _roll_inference_seed
 
         # 和整幅二采同一套 sigma 截断：denoise 同样作用在分块路径上。
         sigmas = AICG3DSamplerAdvanced.calculate_sigmas(model, scheduler, steps, denoise)
@@ -7104,8 +7127,8 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
             raise ValueError("Latent 3D 放大模块不可用：检查 h3easy/h3_latent_upscaler.py")
 
         model = _resolve_h3_model(h3_context)
-        from .aicg3d_sampler import AICG3DSamplerAdvanced
-        from .render_progress import (
+        from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+        from h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             SAMPLE_SHARE,
             STAGE_SAMPLE_SECOND,
@@ -10338,8 +10361,8 @@ class MiniMaxH3EasySequenceSegment:
         if vram.unload_encoder_after_conditioning:
             _release_text_encoder(bundle, vram)
 
-        from .aicg3d_sampler import AICG3DSamplerAdvanced
-        from .render_progress import (
+        from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+        from h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             STAGE_SAMPLE,
             RenderPreviewEncoder,
@@ -10636,3 +10659,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 if MiniMaxH3EasyLatentUpscaler3D is not None:
     NODE_DISPLAY_NAME_MAPPINGS["MiniMaxH3EasyLatentUpscaler3D"] = "MiniMax H3 Aicg 3D Latent 放大"
+
+
+

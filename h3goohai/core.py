@@ -205,3 +205,4 @@ def replace_audio_latent(av_latent: dict, encoded_audio: torch.Tensor, denoise_s
     output["samples"] = comfy.nested_tensor.NestedTensor((video, fitted))
     output["noise_mask"] = comfy.nested_tensor.NestedTensor((video_mask, audio_mask))
     return output
+

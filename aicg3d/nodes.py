@@ -6,7 +6,7 @@
 """AICG3D 自有节点：统一的技能调用入口。"""
 from __future__ import annotations
 
-from . import branding, skills
+import aicg3d.branding as branding, aicg3d.skills as skills
 
 AUTO = skills.AUTO_SKILL
 
@@ -129,3 +129,4 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AICG3D_SkillLoader": "AICG3D 技能加载器",
     "AICG3D_PromptPreset": "AICG3D 提示词模板",
 }
+

@@ -17,7 +17,7 @@ import comfy.utils
 from comfy.ldm.minimax import model as minimax_model
 from comfy.k_diffusion.sampling import to_d
 
-from .core import nested_av_parts
+from h3goohai.core import nested_av_parts
 
 
 DEFAULT_SAMPLER_NAME = "dual_clock_euler"
@@ -371,3 +371,4 @@ def setup_dual_clock_sampling_gh(
 
     sigmas = _scheduler_sigmas(model_sampling, scheduler, steps, shift_video)
     return patched_model, sampler, sigmas
+

@@ -17,7 +17,7 @@ import node_helpers
 from comfy.ldm.minimax.model import PackedLayout
 from comfy.model_base import MiniMaxH3 as MiniMaxH3BaseModel
 
-from .core import (
+from h3goohai.core import (
     CANVAS_MULTIPLE,
     FPS,
     adapt_canvas,
@@ -31,7 +31,7 @@ from .core import (
     sorted_autogrow_items,
     sorted_autogrow_values,
 )
-from .prompt_tags import media_map_json, prepare_prompt
+from h3goohai.prompt_tags import media_map_json, prepare_prompt
 
 
 HYBRID_KEYFRAME_SENTINEL = "t8_keyframe_latent"
@@ -446,3 +446,4 @@ def build_conditioning(
     report_lines.extend(f"warning: {warning}" for warning in prompt_warnings)
     output_audio = final_audio if final_audio is not None else drive_audio
     return conditioning, latent, output_audio, conditioned_prompt, media_map, "\n".join(report_lines)
+

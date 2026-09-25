@@ -764,3 +764,53 @@
     background: rgba(47, 143, 127, .16);
     color: #7fd6c4;
 }
+
+/* ---------- 多段提示词 · 粘贴分发 ---------- */
+.a3-paste-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 7px;
+    min-height: 0;
+    padding: 10px 12px 12px;
+}
+
+.a3-paste-area {
+    flex: 1 1 auto;
+    min-height: 240px;
+    width: 100%;
+    padding: 8px 9px;
+    border: 1px solid var(--a3-line);
+    border-radius: var(--a3-radius-sm);
+    background: var(--a3-bg);
+    color: var(--a3-text);
+    font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    resize: vertical;
+    white-space: pre;
+    overflow: auto;
+}
+
+.a3-paste-area:focus { outline: none; border-color: var(--a3-accent); }
+.a3-paste-area::placeholder { color: var(--a3-text-faint); }
+
+.a3-paste-list {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.a3-paste-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--a3-text-dim);
+    font-size: 10.5px;
+}
+
+.a3-paste-row.is-over { color: var(--a3-warn); }
+.a3-paste-index { flex: 0 0 auto; color: var(--a3-text-faint); font-variant-numeric: tabular-nums; }
+.a3-paste-target { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a3-paste-toggle { display: flex; align-items: center; gap: 6px; }

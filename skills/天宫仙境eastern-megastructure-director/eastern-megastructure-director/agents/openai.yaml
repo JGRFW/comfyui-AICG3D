@@ -1,0 +1,13 @@
+interface:
+  display_name: 东方巨构导演
+  short_description: 东方巨构造景、MJ修正与稳定图生视频
+  default_prompt: 使用 $eastern-megastructure-director 设计或修正东方巨构画面，也可以根据完成图片生成约5秒的稳定图生视频提示词。
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

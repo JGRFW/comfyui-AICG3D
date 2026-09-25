@@ -88,6 +88,7 @@ function hookNoteType(nodeType) {
         const result = original?.apply(this, args);
         try {
             paintNote(this);
+            installNotePasteButton(this);
         } catch (error) {
             console.error("[AICG3D]", error);
         }
@@ -110,6 +111,7 @@ function installNoteColor() {
         const node = factory.call(this, type, title, options);
         try {
             paintNote(node);
+            installNotePasteButton(node);
         } catch (error) {
             console.error("[AICG3D]", error);
         }
@@ -417,6 +419,441 @@ function installPaletteNode(nodeType, nodeData) {
     chain("onConfigure");
 }
 
+/* ==========================================================================
+    多段提示词 · 一次粘贴，按段落链顺序分发
+   --------------------------------------------------------------------------
+    段落链本身就是生成顺序：第 1 段的 previous_segment 是空的，顺着 segment
+    输出往下就是第 2 段、第 3 段…… 这里把整块模板文本切成 N 段，按这条链的
+    顺序分别写进每个段落的提示词，省掉逐段复制粘贴。
+   ========================================================================== */
+const SEGMENT_NODE_TYPES = new Set(["MiniMaxH3EasySequenceSegment", "AICG3D_H3SequenceSegment"]);
+const SEGMENT_PREVIOUS_INPUT = "previous_segment";
+const SEGMENT_PROMPT_WIDGET = "prompt";
+const SEGMENT_SECONDS_WIDGET = "seconds";
+const SEGMENT_PROMPT_DOC_PROP = "minimax_h3_prompt_reference_doc";
+const SEGMENT_SECONDS_RANGE = [0.2, 30];
+const PASTE_PREVIEW_LIMIT = 40;
+const FENCE_SOURCE = "```[^\\n]*\\n([\\s\\S]*?)```";
+const SECONDS_RANGE_SOURCE = "(\\d+(?:\\.\\d+)?)\\s*(?:[-\u2013\u2014~\uFF5E]|\u81F3|\u5230)\\s*(\\d+(?:\\.\\d+)?)\\s*\u79D2";
+
+/* 段头：既认工作流里的 【第1段｜秒数=5】，也认模板里的 **第 1 段（5 秒）** / ### 第 1 段。 */
+const CN_ORDINAL = "[0-9\uFF10-\uFF19\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D\u4E03\u516B\u4E5D\u5341\u767E\u96F6\u4E24]{1,4}";
+const SEGMENT_HEAD_BRACKET = new RegExp(`^\u3010\\s*\u7B2C\\s*${CN_ORDINAL}\\s*\u6BB5[^\u3011]*\u3011$`);
+const SEGMENT_HEAD_PLAIN = new RegExp(
+    `^(?:#{1,6}\\s+|>\\s+|[-*+]\\s+)?(?:\\*\\*|__)?\\s*\u7B2C\\s*${CN_ORDINAL}\\s*\u6BB5\\s*`
+    + `(?:[\uFF08(][^\uFF09)]*[\uFF09)])?\\s*(?:\\*\\*|__)?\\s*[:\uFF1A]?$`,
+);
+const SECONDS_ASSIGN = /\u79D2\u6570\s*[=\uFF1D:\uFF1A]?\s*(\d+(?:\.\d+)?)/;
+const SECONDS_WORD = /(\d+(?:\.\d+)?)\s*\u79D2/;
+
+function isSequenceSegment(node) {
+    const name = String(node?.type || node?.comfyClass || "");
+    if (SEGMENT_NODE_TYPES.has(name)) return true;
+    return !!widgetOf(node, SEGMENT_PROMPT_WIDGET)
+        && (node?.inputs || []).some((input) => input?.name === SEGMENT_PREVIOUS_INPUT);
+}
+
+function graphNodes() {
+    const graph = app?.graph;
+    return (graph?._nodes || graph?.nodes || []).filter(Boolean);
+}
+
+function segmentHeadMarker(line) {
+    const text = String(line ?? "").trim();
+    if (!text) return null;
+    if (SEGMENT_HEAD_BRACKET.test(text)) return { label: text, keep: true };
+    if (SEGMENT_HEAD_PLAIN.test(text)) return { label: text, keep: false };
+    return null;
+}
+
+function fenceContents(text) {
+    const pattern = new RegExp(FENCE_SOURCE, "g");
+    const list = [];
+    let match;
+    while ((match = pattern.exec(text)) !== null) list.push(match[1].trim());
+    return list;
+}
+
+function unwrapFence(text) {
+    const first = new RegExp(FENCE_SOURCE).exec(text);
+    if (!first || fenceContents(text).length !== 1) return text;
+    const outside = `${text.slice(0, first.index)}${text.slice(first.index + first[0].length)}`.trim();
+    return outside ? text : first[1].trim();
+}
+
+/** 段头行里的秒数：秒数=8 / （8 秒）。 */
+function secondsFromHeaderLine(line) {
+    const text = String(line ?? "").trim();
+    if (!text || !segmentHeadMarker(text)) return null;
+    const match = text.match(SECONDS_ASSIGN) || text.match(SECONDS_WORD);
+    if (!match) return null;
+    const value = Number.parseFloat(match[1]);
+    return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** 正文时间轴里的秒数：0-2秒 / 2-4秒 / 4-5秒 -> 5。 */
+function secondsFromTimeline(text) {
+    let best = null;
+    const range = new RegExp(SECONDS_RANGE_SOURCE, "g");
+    let match;
+    while ((match = range.exec(text)) !== null) {
+        const value = Number.parseFloat(match[2]);
+        if (Number.isFinite(value) && (best == null || value > best)) best = value;
+    }
+    if (best != null) return best;
+    const single = new RegExp(SECONDS_WORD.source, "g");
+    while ((match = single.exec(text)) !== null) {
+        const value = Number.parseFloat(match[1]);
+        if (Number.isFinite(value) && (best == null || value > best)) best = value;
+    }
+    return best;
+}
+
+function segmentSeconds(label, body) {
+    const firstLine = String(body || "").split("\n")[0] || "";
+    const raw = secondsFromHeaderLine(label) ?? secondsFromHeaderLine(firstLine) ?? secondsFromTimeline(body);
+    if (raw == null) return null;
+    const clamped = Math.min(SEGMENT_SECONDS_RANGE[1], Math.max(SEGMENT_SECONDS_RANGE[0], raw));
+    return Math.round(clamped * 10) / 10;
+}
+
+function finalizeSegment(block) {
+    const body = unwrapFence(String(block?.text ?? ""));
+    const lines = body.split("\n");
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    // 复制时截断留下的孤立围栏：不是提示词内容，直接去掉。
+    while (lines.length && isFenceLine(lines[0])) lines.shift();
+    while (lines.length && isFenceLine(lines[lines.length - 1])) lines.pop();
+    // 粘进来的东西后面还跟着说明文档的小节标题（## 七、…）：那之后不属于这一段。
+    const heading = lines.findIndex((line) => /^#{1,6}\s/.test(line));
+    if (heading > 0) lines.length = heading;
+    const text = lines.join("\n");
+    if (!text.trim()) return null;
+    return { text, seconds: segmentSeconds(block?.label, text) };
+}
+
+function isFenceLine(line) {
+    return /^\s*(?:`{3,}|~{3,})/.test(String(line ?? ""));
+}
+
+function headeredBlocks(text) {
+    const lines = text.split("\n");
+    const marks = [];
+    // 围栏里的「第 N 段」是提示词正文（工作流里每段第一行就是它），不是段落边界。
+    let fenced = false;
+    lines.forEach((line, index) => {
+        if (isFenceLine(line)) {
+            fenced = !fenced;
+            return;
+        }
+        if (fenced) return;
+        const marker = segmentHeadMarker(line);
+        if (marker) marks.push({ ...marker, index });
+    });
+    if (marks.length < 2) return [{ text, label: "" }];
+    return marks.map((marker, order) => {
+        const from = marker.index + (marker.keep ? 0 : 1);
+        const to = order + 1 < marks.length ? marks[order + 1].index : lines.length;
+        return { text: lines.slice(from, to).join("\n"), label: marker.label };
+    });
+}
+
+/** 切分容错顺序：段头 → ``` 围栏 → 空行分块；都不成立就整块当一段。 */
+function splitPromptSegments(raw) {
+    const text = String(raw ?? "").replace(/\r\n?/g, "\n").trim();
+    if (!text) return [];
+    let blocks = headeredBlocks(text);
+    if (blocks.length < 2) {
+        const fenced = fenceContents(text);
+        if (fenced.length >= 2) blocks = fenced.map((item) => ({ text: item, label: "" }));
+    }
+    if (blocks.length === 1) {
+        const fenced = fenceContents(blocks[0].text);
+        if (fenced.length >= 2) blocks = fenced.map((item) => ({ text: item, label: "" }));
+    }
+    if (blocks.length === 1) {
+        const parts = blocks[0].text.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+        const timed = parts.filter((item) => SECONDS_WORD.test(item) || item.includes("环境声")).length;
+        if (parts.length >= 2 && timed >= Math.ceil(parts.length / 2)) {
+            blocks = parts.map((item) => ({ text: item, label: "" }));
+        }
+    }
+    return blocks.map(finalizeSegment).filter(Boolean);
+}
+
+function segmentPreviousLink(node) {
+    const input = (node?.inputs || []).find((item) => item?.name === SEGMENT_PREVIOUS_INPUT);
+    return input?.link ?? null;
+}
+
+function nextSegmentNode(node, pool) {
+    const links = new Set(((node?.outputs || [])[0]?.links || []).map(String));
+    if (!links.size) return null;
+    return pool.find((candidate) => candidate !== node
+        && (candidate.inputs || []).some((input) => input?.name === SEGMENT_PREVIOUS_INPUT
+            && input.link != null && links.has(String(input.link)))) || null;
+}
+
+function canvasOrder(first, second) {
+    const firstY = first?.pos?.[1] ?? 0;
+    const secondY = second?.pos?.[1] ?? 0;
+    if (firstY !== secondY) return firstY - secondY;
+    return (first?.pos?.[0] ?? 0) - (second?.pos?.[0] ?? 0);
+}
+
+/** 从 previous_segment 为空的那一段开始，顺着 segment 输出走成生成顺序。 */
+function segmentChains() {
+    const pool = graphNodes().filter(isSequenceSegment);
+    const chains = [];
+    const seen = new Set();
+    for (const head of pool.filter((node) => segmentPreviousLink(node) == null).sort(canvasOrder)) {
+        const chain = [];
+        let current = head;
+        while (current && !seen.has(current)) {
+            seen.add(current);
+            chain.push(current);
+            current = nextSegmentNode(current, pool);
+        }
+        if (chain.length) chains.push(chain);
+    }
+    for (const node of pool) if (!seen.has(node)) chains.push([node]);
+    return chains;
+}
+
+/** 图里有多条段落链时：先看画布选中，其次取离入口框最近的那条。 */
+function pickSegmentChain(anchor) {
+    const chains = segmentChains();
+    if (chains.length <= 1) return chains[0] || [];
+    const selected = app?.canvas?.selected_nodes || {};
+    const picked = chains.find((chain) => chain.some((node) => selected[node.id] || selected[String(node.id)]));
+    if (picked) return picked;
+    const anchorPos = anchor?.pos || anchor?._pos;
+    if (!anchorPos || !Number.isFinite(anchorPos[0])) return chains[0];
+    let best = chains[0];
+    let bestDistance = Infinity;
+    for (const chain of chains) {
+        const head = chain[0];
+        const distance = Math.hypot((head.pos?.[0] ?? 0) - anchorPos[0], (head.pos?.[1] ?? 0) - anchorPos[1]);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = chain;
+        }
+    }
+    return best;
+}
+
+function segmentLabel(node) {
+    const title = String(node?.title || node?.type || "");
+    return `#${node?.id ?? "?"}${title ? ` 「${title}」` : ""}`;
+}
+
+/** 写整段提示词：优先走 H3 前端桥，结构化编辑器与属性一起刷新。 */
+function applySegmentPrompt(node, text) {
+    const bridge = globalThis.AICG3D_H3;
+    if (typeof bridge?.setPromptText === "function") {
+        return bridge.setPromptText(node, text, { notifyGraphChange: false }) !== false;
+    }
+    const widget = widgetOf(node, SEGMENT_PROMPT_WIDGET);
+    if (!widget) return false;
+    widget.value = text;
+    if (widget._state) widget._state.value = text;
+    node.properties ||= {};
+    node.properties[SEGMENT_PROMPT_DOC_PROP] = { version: 1, text, parts: [{ type: "text", text }] };
+    return true;
+}
+
+function distributeSegments(chain, segments, syncSeconds) {
+    const count = Math.min(chain.length, segments.length);
+    let secondsWritten = 0;
+    for (let index = 0; index < count; index += 1) {
+        const node = chain[index];
+        const segment = segments[index];
+        applySegmentPrompt(node, segment.text);
+        if (syncSeconds && segment.seconds != null
+            && setWidgetValue(node, SEGMENT_SECONDS_WIDGET, segment.seconds)) {
+            secondsWritten += 1;
+        }
+        node.setDirtyCanvas?.(true, true);
+    }
+    app.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+    return { count, secondsWritten };
+}
+
+/* ------------------------------ 粘贴分发面板 ------------------------------ */
+let pastePanelNodes = null;
+
+function closeSegmentPastePanel() {
+    if (!pastePanelNodes) return;
+    pastePanelNodes.scrim.remove();
+    pastePanelNodes.panel.remove();
+    pastePanelNodes = null;
+    document.removeEventListener("keydown", pastePanelKeydown, true);
+}
+
+function pastePanelKeydown(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeSegmentPastePanel();
+}
+
+function openSegmentPastePanel(anchorNode) {
+    closeSegmentPastePanel();
+    ensureTheme();
+
+    const chain = pickSegmentChain(anchorNode);
+    const scrim = el("div", "a3-scrim");
+    const panel = el("div", "a3-palette");
+    panel.style.width = "min(680px, calc(100vw - 32px))";
+    panel.style.left = "50%";
+    panel.style.top = "6vh";
+    panel.style.transform = "translateX(-50%)";
+    panel.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+    const head = el("div", "a3-palette-head");
+    head.append(el("span", "a3-logo", "AI"), el("span", "a3-title", "粘贴多段提示词"));
+    head.append(el("span", "a3-sub", "按段落链顺序分发"));
+    const badge = el("span", "a3-badge", chain.length ? `目标 ${chain.length} 段` : "无段落链");
+    head.append(el("span", "a3-spacer"), badge);
+    const close = el("button", "a3-btn a3-btn--ghost a3-btn--icon", "\u00D7");
+    close.type = "button";
+    close.title = "关闭";
+    close.addEventListener("click", closeSegmentPastePanel);
+    head.append(close);
+
+    const body = el("div", "a3-paste-body");
+    const hint = el("div", "a3-hint");
+    const area = el("textarea", "a3-paste-area");
+    area.spellcheck = false;
+    area.placeholder = [
+        "把模板生成的多段提示词整块粘到这里（5 段、10 段都行）：",
+        "",
+        "**第 1 段（5 秒）**",
+        "【第1段｜秒数=5】",
+        "竖屏9:16……",
+        "0-2秒：……",
+        "环境声：……",
+        "",
+        "**第 2 段（5 秒）**",
+        "……",
+        "",
+        "段头（第 N 段 / 【第N段｜秒数=5】）、``` 围栏、空行 分隔都能识别。",
+    ].join("\n");
+    const list = el("div", "a3-paste-list");
+    body.append(hint, area, list);
+
+    const foot = el("div", "a3-palette-foot");
+    const toggleWrap = el("div", "a3-paste-toggle");
+    const toggle = el("button", "a3-switch is-on", "");
+    toggle.type = "button";
+    toggle.title = "按段头 / 时间轴自动同步 seconds 控件";
+    toggle.addEventListener("click", () => toggle.classList.toggle("is-on"));
+    toggleWrap.append(toggle, el("span", "a3-hint", "同步秒数"));
+    const clear = el("button", "a3-btn", "清空");
+    clear.type = "button";
+    const apply = el("button", "a3-btn a3-btn--accent", "分发");
+    apply.type = "button";
+    foot.append(toggleWrap, el("span", "a3-spacer"), clear, apply);
+
+    panel.append(head, body, foot);
+
+    function currentSegments() {
+        return splitPromptSegments(area.value);
+    }
+
+    function refresh() {
+        const segments = currentSegments();
+        const usable = Math.min(segments.length, chain.length);
+        badge.textContent = segments.length
+            ? `识别 ${segments.length} 段`
+            : (chain.length ? `目标 ${chain.length} 段` : "无段落链");
+        hint.textContent = chain.length
+            ? `目标：第 1 段 ${segmentLabel(chain[0])} → 共 ${chain.length} 段，按生成顺序依次写入。`
+            : "画布上没找到「视频段落」节点，先把段落链摆好。";
+        list.textContent = "";
+        for (let index = 0; index < segments.length && index < PASTE_PREVIEW_LIMIT; index += 1) {
+            const segment = segments[index];
+            const node = chain[index];
+            const row = el("div", `a3-paste-row${node ? "" : " is-over"}`);
+            row.append(el("span", "a3-paste-index", String(index + 1).padStart(2, "0")));
+            row.append(el("span", "a3-tag", segment.seconds != null ? `${segment.seconds} 秒` : "—"));
+            row.append(el("span", "a3-paste-target", segment.text.replace(/\s+/g, " ").slice(0, 42)));
+            row.append(el("span", "a3-dim", node ? `→ ${segmentLabel(node)}` : "超出链长"));
+            list.append(row);
+        }
+        if (segments.length > PASTE_PREVIEW_LIMIT) {
+            list.append(el("div", "a3-dim", `……还有 ${segments.length - PASTE_PREVIEW_LIMIT} 段`));
+        }
+        apply.disabled = !segments.length || !chain.length;
+        apply.textContent = usable ? `分发到 ${usable} 段` : "分发";
+    }
+
+    function run() {
+        const segments = currentSegments();
+        if (!segments.length) {
+            toast("没有识别到提示词段落", "warn");
+            return;
+        }
+        if (!chain.length) {
+            toast("画布上没有「视频段落」节点", "warn");
+            return;
+        }
+        const result = distributeSegments(chain, segments, toggle.classList.contains("is-on"));
+        const parts = [`已分发 ${result.count} 段到段落链`];
+        if (result.secondsWritten) parts.push(`同步了 ${result.secondsWritten} 段秒数`);
+        const over = segments.length - result.count;
+        if (over > 0) parts.push(`多出的 ${over} 段没地方放`);
+        const rest = chain.length - result.count;
+        if (rest > 0) parts.push(`链上还有 ${rest} 段未改动`);
+        toast(parts.join("，"), over > 0 || rest > 0 ? "warn" : "ok");
+        closeSegmentPastePanel();
+    }
+
+    area.addEventListener("input", refresh);
+    area.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            run();
+        }
+    });
+    clear.addEventListener("click", () => {
+        area.value = "";
+        refresh();
+        area.focus();
+    });
+    apply.addEventListener("click", run);
+    scrim.addEventListener("pointerdown", closeSegmentPastePanel);
+    document.addEventListener("keydown", pastePanelKeydown, true);
+
+    document.body.append(scrim, panel);
+    pastePanelNodes = { scrim, panel };
+    refresh();
+    setTimeout(() => area.focus(), 0);
+}
+
+/** Note / MarkdownNote 上的入口按钮：备注节点不走 beforeRegisterNodeDef，只能这样挂。 */
+function installNotePasteButton(node) {
+    if (!node || !NOTE_NODE_TYPES.has(String(node.type || ""))) return;
+    if (node.__a3PasteButton || typeof node.addWidget !== "function") return;
+    node.__a3PasteButton = true;
+    try {
+        const widget = node.addWidget("button", "📋 粘贴多段提示词 · 自动分发", "",
+            () => openSegmentPastePanel(node), { serialize: false });
+        if (widget) widget.serialize = false;
+        refreshVueWidgets(node);
+        node.setDirtyCanvas?.(true, true);
+    } catch (error) {
+        node.__a3PasteButton = false;
+        console.error("[AICG3D]", error);
+    }
+}
+
+function sweepNotePasteButtons() {
+    for (const node of graphNodes()) installNotePasteButton(node);
+}
+
 app.registerExtension({
     name: "AICG3D.Nodes",
     setup() {
@@ -440,8 +877,9 @@ app.registerExtension({
             },
         });
         installNoteColor();
-        setTimeout(installNoteColor, 1500);
-        setTimeout(installNoteColor, 6000);
+        sweepNotePasteButtons();
+        setTimeout(() => { installNoteColor(); sweepNotePasteButtons(); }, 1500);
+        setTimeout(() => { installNoteColor(); sweepNotePasteButtons(); }, 6000);
 
         const cleared = clearTtnDefaultColor();
         const stripped = sweepTtnTints();
@@ -453,9 +891,11 @@ app.registerExtension({
     },
     nodeCreated(node) {
         applyNodeColorPolicy(node);
+        installNotePasteButton(node);
     },
     loadedGraphNode(node) {
         applyNodeColorPolicy(node);
+        installNotePasteButton(node);
     },
     beforeRegisterNodeDef(nodeType, nodeData) {
         paintNodeType(nodeType, nodeData);

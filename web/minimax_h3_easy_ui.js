@@ -10548,6 +10548,13 @@ globalThis.AICG3D_H3 = {
     linkedMediaLoader: aicg3dLinkedLoader,
     insertLoaderMention: aicg3dInsertLoaderMention,
 
+    /** 用整段文本覆盖某一段的提示词：结构化编辑器、prompt 控件、存档属性一起刷新。 */
+    setPromptText(node, text, options = {}) {
+        if (!node) return false;
+        setPromptFromOptimizedText(node, String(text ?? ""), options);
+        return true;
+    },
+
     /** 把技能正文写进提示词（技能库里没有对应 H3 方案时使用）。 */
     async insertSkillText(node, skill) {
         const name = skill?.name || skill?.id || "";

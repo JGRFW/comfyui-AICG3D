@@ -28,7 +28,8 @@ _cache: list[str] | None = None
 def _declares_upstream_nodes(path: str) -> bool:
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            return LOADER_CLASS in handle.read()
+            content = handle.read()
+            return LOADER_CLASS in content or "class MiniMaxH3" in content or "class MiniMax" in content
     except OSError:
         return False
 

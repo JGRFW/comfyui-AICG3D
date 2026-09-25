@@ -18,9 +18,9 @@ from comfy_api.latest import ComfyExtension, io
 from comfy_api.latest._input_impl import VideoFromFile
 from comfy_extras import nodes_audio
 
-from .conditioning import build_conditioning
-from .audio_ops import decode_av_latent
-from .sampling import (
+from h3goohai.conditioning import build_conditioning
+from h3goohai.audio_ops import decode_av_latent
+from h3goohai.sampling import (
     DEFAULT_SAMPLER_NAME,
     DEFAULT_SCHEDULER_NAME,
     SAMPLER_OPTIONS,
@@ -738,3 +738,4 @@ class MiniMaxH3IntegrationExtension(ComfyExtension):
 
 def comfy_entrypoint():
     return MiniMaxH3IntegrationExtension()
+

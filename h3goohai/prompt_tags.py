@@ -65,3 +65,4 @@ def media_map_json(pictures: list[str], videos: list[str], audios: list[str]) ->
         ensure_ascii=False,
         indent=2,
     )
+

@@ -1,0 +1,12 @@
+interface:
+  display_name: phone vlog
+  short_description: 将用户的生活主题、人物资产、道具资产与场景信息，整理成30秒以内、可直接用于AI视频生成模型的真实手机自拍Vlog提示词。强调真实手机拍摄逻辑、自然表演、生活碎片、现场收音、资产一致性与设备不穿帮。
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

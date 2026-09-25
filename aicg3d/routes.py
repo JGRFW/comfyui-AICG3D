@@ -18,7 +18,7 @@ from typing import Any
 import folder_paths
 from aiohttp import web
 
-from . import prompt_guides as guide_lib, skills as skill_lib
+import aicg3d.prompt_guides as guide_lib, aicg3d.skills as skill_lib
 
 VERSION = "1.0.0"
 MEDIA_KINDS = {
@@ -281,4 +281,5 @@ def register_routes() -> bool:
 
     _REGISTERED = True
     return True
+
 

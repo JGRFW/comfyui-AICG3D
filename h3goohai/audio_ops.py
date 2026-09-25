@@ -16,7 +16,7 @@ import torchaudio
 from comfy import model_management
 from comfy_extras.nodes_audio import vae_decode_audio
 
-from .core import encode_audio_once, nested_av_parts, replace_audio_latent, validate_audio
+from h3goohai.core import encode_audio_once, nested_av_parts, replace_audio_latent, validate_audio
 
 
 def clean_generated_audio_start(audio: dict) -> dict:
@@ -230,3 +230,4 @@ def trim_av_output(frames: torch.Tensor, start_seconds: float, duration_seconds:
         indent=2,
     )
     return trimmed_frames, trimmed_audio, report
+

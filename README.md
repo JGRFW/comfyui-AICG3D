@@ -1,27 +1,42 @@
-# ComfyUI-AICG3D-Integrated
+# ComfyUI-AICG3D-Integrated 🚀
+### 极致稳定的 MiniMax H3 AI 视频创作全链路解决方案
 
-这是一个深度整合的 ComfyUI 插件包，旨在提供一套完整且**绝无冲突**的 MiniMax H3 创作工作流。
+ComfyUI-AICG3D-Integrated 是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
 
-## 🚀 核心升级：新方案 (Forced Unique Namespace)
+## 🌟 核心价值 (Core Value)
 
-针对用户反馈的「节点同名导致冲突/失效」问题，本版本舍弃了不稳定的智能检测机制，采用了**强制唯一命名空间**方案：
+### 🛡️ 工业级稳定性：零冲突命名空间
+针对 ComfyUI 生态中常见的节点同名冲突（Node Collision）问题，本插件采用了 **Forced Unique Namespace (强制唯一命名空间)** 架构。
+- **唯一标识**：所有核心节点均采用 AICG3D_H3_ 专属前缀。
+- **独立运行**：无论你的环境中安装了多少个 MiniMax 相关分支，AICG3D 均能独立运行，彻底杜绝节点被覆盖、工作流失效或界面崩溃的情况。
 
-- **绝对唯一 ID**：所有核心节点（包括 Loader, Sampler, Segment 等）在注册时被强制加上 `AICG3D_H3_` 前缀。
-- **零冲突运行**：无论你是否安装了 `ComfyUI-MiniMaxH3-Easy` 或其他社区分支，本插件将独立运行，互不干扰，彻底杜绝「节点被顶掉」或「界面失效」的情况。
-- **统一入口**：整合了 `PromptSplit` 分段解析功能，无需安装多个碎片插件。
+### ⚙️ 全链路功能集成 (Integrated Pipeline)
+无需安装碎片化的插件，一个包即可覆盖从创意到成片的完整流程：
 
-## 📦 功能组件
+- **智能剧本分段 (PromptSplit)**：支持将长剧本/提示词自动拆分为逻辑段落 -> 一键映射至视频时间轴 -> 自动优化随机种子。
+- **高精度渲染采样 (Advanced Sampler)**：集成高度优化的采样策略，确保视频在动态一致性与视觉质量之间达到最佳平衡。
+- **Latent 深度放大 (HD Upscaler)**：内置专为 H3 设计的潜空间放大算法，在提升分辨率的同时，有效保留细节并减少伪影。
+- **SelfLift 策略增强**：支持高级的自提升采样方案，极大增强画面细节的丰富度。
 
-1. **AICG3D 核心节点**：包含高度优化的采样器、Latent 放大及 SelfLift 策略。
-2. **AICG3D 技能/模板加载器**：统一调用 `skills/` 和 `prompt_presets/` 库，实现创作规范化。
-3. **AICG3D 分段提示词解析**：支持剧本自动拆分 $\rightarrow$ 一键填入视频段落 $\rightarrow$ 自动种子随机化。
+## 🛠️ 安装与部署
 
-## 🛠 安装与使用
+1.  **快速安装**：将 ComfyUI-AICG3D-Integrated 文件夹复制到 custom_nodes/ 目录下。
+2.  **启动服务**：重启 ComfyUI。
+3.  **定位节点**：在右键菜单中找到 **AICG3D** 分类即可开始创作。
 
-1. 将 `ComfyUI-AICG3D-Integrated` 文件夹放入 ComfyUI 的 `custom_nodes/` 目录下。
-2. 重启 ComfyUI。
-3. 在节点菜单中找到 **AICG3D** 分类。
-4. **注意**：由于采用了强制前缀，之前保存的旧工作流（使用原版 MiniMaxH3Easy 节点）需要手动替换为 `AICG3D_H3_` 系列节点。
+> **💡 迁移指南**：由于采用了强制前缀，若您迁移旧版工作流，请将原有的 MiniMaxH3Easy 节点手动替换为对应的 AICG3D_H3_ 节点。
 
----
-© 2026 AICG3D - 打造最稳定的 AI 视频创作链路
+## 🤝 核心贡献者与致谢 (Core Contributors & Acknowledgements)
+
+本项目是通过整合社区顶顶成果并进行工程化重构而成的，其稳定性与功能的实现离不开以下核心作者的贡献：
+
+- **主架构师与整合者 (Integration & Maintenance)**: 
+  - **AICG3D** - 负责整体架构设计、强制命名空间重构、稳定性优化以及插件的日常维护。
+- **核心模块贡献者 (Core Engine Developers)**: 
+    - **@goohai** - 提供了 Goohai-MiniMax-H3_Integration 的核心实现，包括强大的提示词优化能力与集成框架。
+    - **@nkxx188** - 提供了 ComfyUI-MiniMaxH3-Easy 的核心节点实现，包括高效的采样策略与渲染流程。
+- **社区支持**: 感谢所有在 MiniMax H3 生态中提供反馈、测试并贡献灵感的 ComfyUI 创作者。
+
+## 📜 开源协议
+
+本项目遵循 GNU GPL v3.0 协议开源。

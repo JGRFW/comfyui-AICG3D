@@ -1,4 +1,4 @@
-<img width="1426" height="609" alt="image" src="https://github.com/user-attachments/assets/5c7f72e5-3839-4a06-afe1-2482c4002515" />
+<img width="1424" height="696" alt="image" src="https://github.com/user-attachments/assets/5a6c88f8-df4e-4091-b06b-ca799349f6c1" />
 <img width="1532" height="626" alt="image" src="https://github.com/user-attachments/assets/83787eb7-761e-4ddc-b70f-5bf6cd36c4ef" />
 <img width="1395" height="666" alt="image" src="https://github.com/user-attachments/assets/fcc53765-8818-470f-bacf-ceaf5a93fec3" />
 # ComfyUI-AICG3D-Integrated 🚀

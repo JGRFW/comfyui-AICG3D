@@ -7,7 +7,7 @@
 这里补上 MiniMax H3 流水线上最常用的两类加速开关：
 
 * 注意力加速：直接复用 ComfyUI 的注意力后端注册表（SageAttention / SageAttention3 /
-  FlashAttention / Comfy 厨房 INT8 / xFormers / PyTorch SDPA / Sub-Quadratic / Split），
+  FlashAttention / Comfy Kitchen INT8 / xFormers / PyTorch SDPA / Sub-Quadratic / Split），
   通过 ``ModelPatcher.set_model_optimized_attention`` 打到模型上，不碰采样器。
 * 运动缓存（MotionCache）：TeaCache 式的跳步复用。按"复用阈值 / 运动强度 / 预热步数 /
   最大连跳 / 起始% / 结束% / 采样间隔"判断某一步能不能直接复用上一步的残差，
@@ -223,7 +223,7 @@ def accel_widget_input_types() -> dict[str, tuple]:
                 "default": ATTENTION_AUTO,
                 "tooltip": (
                     "注意力加速。自动=SageAttention 优先，没装就保持 ComfyUI 当前后端；"
-                    "也可以手动指定 SageAttention3 / FlashAttention / 厨房 INT8 / xFormers 等。"
+                    "也可以手动指定 SageAttention3 / FlashAttention / Kitchen INT8 / xFormers 等。"
                 ),
             },
         ),

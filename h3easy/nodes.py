@@ -97,6 +97,7 @@ except ImportError:
     MiniMaxH3EasyLatentUpscaler3D = None
     scan_latent_upscaler_models = None
 from aicg3d import prompt_guides as prompt_guide_lib
+from h3easy import accel as accel_lib
 
 
 
@@ -3033,6 +3034,8 @@ class MiniMaxH3Bundle:
     loras: tuple[tuple[str, float], ...] = ()
     # AICG3D：槽位里选到非 H3 权重时的处理策略（自动回落 / 按所选加载）。
     non_h3_policy: str = NON_H3_POLICY_FALLBACK
+    # AICG3D：加速设置（注意力后端 + 运动缓存）。加载器内置或独立“加速设置”节点写入。
+    accel: Any = None
 
     def __post_init__(self) -> None:
         self._model = None
@@ -3065,6 +3068,11 @@ class MiniMaxH3Bundle:
         patched = _apply_lora_stack(model, stack)
         self._patched_models = {key: (stack, patched)}
         return patched
+
+    def _finish(self, model: Any) -> Any:
+        """LoRA 之后统一叠加加速补丁（注意力后端 / 运动缓存）。"""
+        model = self._with_loras(model)
+        return accel_lib.apply_acceleration(model, getattr(self, "accel", None))
 
     def _candidate_models(self, kind: str) -> list[tuple[str, str]]:
         """按优先级返回可以尝试的 (槽位, 权重名)：首选槽位，然后另一个槽位。
@@ -3133,7 +3141,7 @@ class MiniMaxH3Bundle:
                 mismatch = _h3_transformer_mismatch(supplied_model)
                 if mismatch is not None:
                     raise _h3_model_kind_error(kind, mismatch)
-                return self._with_loras(supplied_model)
+                return self._finish(supplied_model)
             candidates = self._candidate_models(kind)
             # 只按权重文件名判断是否复用：只有一个 H3 模型时，FL2VA 与
             # REF2VA 会回落到同一个文件，这里必须复用而不是重新加载。
@@ -3141,7 +3149,7 @@ class MiniMaxH3Bundle:
             # REF2VA 模式刚加载的权重会被 FL2VA 模式顺手复用，模型就串了。
             if self._model is not None:
                 if candidates and self._model_name == candidates[0][1]:
-                    return self._with_loras(self._model)
+                    return self._finish(self._model)
                 self._model = None
                 self._model_kind = ""
                 self._model_name = ""
@@ -3174,7 +3182,7 @@ class MiniMaxH3Bundle:
                 self._model_name = candidate_name
                 if candidate_kind != kind:
                     self._report_slot_fallback(kind, candidate_kind, candidate_name)
-                return self._with_loras(self._model)
+                return self._finish(self._model)
 
             raise _h3_missing_model_error(kind, rejected)
 
@@ -3808,6 +3816,8 @@ class MiniMaxH3EasyLoader:
                 "FLOAT",
                 {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重。"},
             )
+        # AICG3D：加速设置统一追加在最后，保证旧工作流的 widget 位置完全不变。
+        required.update(accel_lib.accel_widget_input_types())
         return {"required": required}
 
     @classmethod
@@ -3815,6 +3825,7 @@ class MiniMaxH3EasyLoader:
         keys = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae", "non_h3_policy"]
         for index in range(1, LORA_SLOT_COUNT + 1):
             keys.extend((f"lora_{index}", f"lora_{index}_strength"))
+        keys.extend(accel_lib.ACCEL_WIDGET_NAMES)
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
     def load(self, fl2va_model, ref2va_model, text_encoder, video_vae, audio_vae, **kwargs):
@@ -3828,6 +3839,8 @@ class MiniMaxH3EasyLoader:
             (str(kwargs.get(f"lora_{index}") or NONE_MODEL), float(kwargs.get(f"lora_{index}_strength") or 0.0))
             for index in range(1, LORA_SLOT_COUNT + 1)
         )
+        accel_config = accel_lib.accel_config_from_mapping(kwargs)
+        accel_lib.log_accel_config(accel_config, "加载器")
         return (MiniMaxH3Bundle(
             fl2va_model_name=fl2va_model,
             ref2va_model_name=ref2va_model,
@@ -3839,6 +3852,7 @@ class MiniMaxH3EasyLoader:
             audio_vae=audio_vae_obj,
             loras=loras,
             non_h3_policy=str(kwargs.get("non_h3_policy") or NON_H3_POLICY_FALLBACK),
+            accel=accel_config,
         ),)
 
 
@@ -10602,6 +10616,7 @@ class MiniMaxH3EasySequenceCombine:
 
 NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasyLoader": MiniMaxH3EasyLoader,
+    "MiniMaxH3EasyAccel": accel_lib.MiniMaxH3EasyAccel,
     "MiniMaxH3EasyModelAdapter": MiniMaxH3EasyModelAdapter,
     "MiniMaxH3EasyMediaLoader": MiniMaxH3EasyMediaLoader,
     "MiniMaxH3EasyMediaBridge": MiniMaxH3EasyMediaBridge,
@@ -10633,6 +10648,7 @@ if MiniMaxH3EasyLatentUpscaler3D is not None:
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasyLoader": "MiniMax H3 Aicg Loader",
+    "MiniMaxH3EasyAccel": "MiniMax H3 Aicg 加速设置",
     "MiniMaxH3EasyModelAdapter": "MiniMax H3 Aicg 模型中转",
     "MiniMaxH3EasyMediaLoader": "MiniMax H3 Aicg资源库",
     "MiniMaxH3EasyMediaBridge": "MiniMax H3 Aicg 媒体中转",

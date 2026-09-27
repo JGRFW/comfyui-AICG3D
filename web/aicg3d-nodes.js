@@ -88,7 +88,6 @@ function hookNoteType(nodeType) {
         const result = original?.apply(this, args);
         try {
             paintNote(this);
-            installNotePasteButton(this);
         } catch (error) {
             console.error("[AICG3D]", error);
         }
@@ -111,7 +110,6 @@ function installNoteColor() {
         const node = factory.call(this, type, title, options);
         try {
             paintNote(node);
-            installNotePasteButton(node);
         } catch (error) {
             console.error("[AICG3D]", error);
         }
@@ -833,27 +831,6 @@ function openSegmentPastePanel(anchorNode) {
     setTimeout(() => area.focus(), 0);
 }
 
-/** Note / MarkdownNote 上的入口按钮：备注节点不走 beforeRegisterNodeDef，只能这样挂。 */
-function installNotePasteButton(node) {
-    if (!node || !NOTE_NODE_TYPES.has(String(node.type || ""))) return;
-    if (node.__a3PasteButton || typeof node.addWidget !== "function") return;
-    node.__a3PasteButton = true;
-    try {
-        const widget = node.addWidget("button", "📋 粘贴多段提示词 · 自动分发", "",
-            () => openSegmentPastePanel(node), { serialize: false });
-        if (widget) widget.serialize = false;
-        refreshVueWidgets(node);
-        node.setDirtyCanvas?.(true, true);
-    } catch (error) {
-        node.__a3PasteButton = false;
-        console.error("[AICG3D]", error);
-    }
-}
-
-function sweepNotePasteButtons() {
-    for (const node of graphNodes()) installNotePasteButton(node);
-}
-
 app.registerExtension({
     name: "AICG3D.Nodes",
     setup() {
@@ -877,9 +854,8 @@ app.registerExtension({
             },
         });
         installNoteColor();
-        sweepNotePasteButtons();
-        setTimeout(() => { installNoteColor(); sweepNotePasteButtons(); }, 1500);
-        setTimeout(() => { installNoteColor(); sweepNotePasteButtons(); }, 6000);
+        setTimeout(() => installNoteColor(), 1500);
+        setTimeout(() => installNoteColor(), 6000);
 
         const cleared = clearTtnDefaultColor();
         const stripped = sweepTtnTints();
@@ -891,11 +867,9 @@ app.registerExtension({
     },
     nodeCreated(node) {
         applyNodeColorPolicy(node);
-        installNotePasteButton(node);
     },
     loadedGraphNode(node) {
         applyNodeColorPolicy(node);
-        installNotePasteButton(node);
     },
     beforeRegisterNodeDef(nodeType, nodeData) {
         paintNodeType(nodeType, nodeData);

@@ -43,7 +43,7 @@ _ATTENTION_BACKENDS: tuple[tuple[str, str], ...] = (
     ("sage", "SageAttention"),
     ("sage3", "SageAttention3（Blackwell）"),
     ("flash", "FlashAttention"),
-    ("comfy_kitchen_int8", "Comfy 厨房 INT8"),
+    ("comfy_kitchen_int8", "Comfy Kitchen INT8"),
     ("xformers", "xFormers"),
     ("pytorch", "PyTorch SDPA"),
     ("sub_quad", "Sub-Quadratic"),

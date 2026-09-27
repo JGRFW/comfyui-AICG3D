@@ -67,6 +67,98 @@ function repairLoraFromArchive(node, values) {
     }
 }
 
+/* ---------------- 跨机器体检：别人机器上的文件名自动修正 ----------------
+   工作流会把"作者机器上的模型文件名"一起存进来。本插件的面板把 5 个原生 combo
+   （含 ref2va_model）藏了起来，而隐藏的控件照样会被提交 —— 于是 ComfyUI 在
+   执行前的输入校验阶段就报「无效输入…不可用」，偏偏 ref2va 那一栏面板上根本没有
+   对应的行，用户点都点不到，只能卡死。载入时按三档处理：
+     1) 同名文件换了目录 / 大小写 → 按文件名认回来；
+     2) 认不回来 → 按槽位挑一条本机同类权重（模型挑 H3，参考槽挑自带参考能力的）；
+     3) 实在没有 → 模型槽退回 none；CLIP / VAE 没有"无"这一项，保持不动并提示手选。
+   LoRA 槽位同理（口径与 repairLoraFromArchive 一致：只认本机有的）。 */
+
+const FOREIGN_FIX_PATTERNS = {
+    fl2va_model: [/fl2va/i, /fl2v/i, /minimax/i, /h3/i],
+    ref2va_model: [/ref2va/i, /ref2v/i, /refdelta/i, /hybrid/i, /fused/i, /reference/i],
+    text_encoder: [/minimax/i, /\bh3\b/i, /qwen3vl/i, /qwen/i],
+    video_vae: [/video/i],
+    audio_vae: [/audio/i],
+};
+
+function optionValuesOf(widget) {
+    const values = Array.isArray(widget?.options?.values) ? widget.options.values
+        : Array.isArray(widget?.options) ? widget.options : [];
+    return values.map((item) => String(item));
+}
+
+/** 取文件名（去掉 MiniMax\\ 这类子目录前缀）用于"同一文件换了目录"的识别。 */
+function fileBaseName(value) {
+    const parts = String(value ?? "").trim().split(/[\\/]+/);
+    return (parts[parts.length - 1] || "").toLowerCase();
+}
+
+/** 判断某个隐藏控件的值本机有没有，并给出替代值。to = null 表示需要人工处理。 */
+function planForeignValueFix(widget, patterns) {
+    if (!widget) return null;
+    const value = String(widget?.value ?? "");
+    if (isNone(value)) return null;
+    const options = optionValuesOf(widget);
+    if (!options.length) return null;
+    if (options.some((item) => item === value)) return null;
+
+    const base = fileBaseName(value);
+    const sameFile = options.find((item) => fileBaseName(item) === base);
+    if (sameFile) return { from: value, to: sameFile };
+
+    for (const pattern of patterns || []) {
+        const candidate = options.find((item) => !isNone(item) && pattern.test(item));
+        if (candidate) return { from: value, to: candidate };
+    }
+
+    const noneOption = options.find((item) => isNone(item));
+    return { from: value, to: noneOption || null };
+}
+
+function briefNames(items, limit = 3) {
+    const list = items.map((item) => fileBaseName(item));
+    if (list.length <= limit) return list.join("、");
+    return `${list.slice(0, limit).join("、")} 等 ${list.length} 项`;
+}
+
+/** 把"别人机器上的文件名"换成本机可用的值，返回 {fixed, manual}。 */
+function sanitizeForeignValues(node) {
+    const fixed = [];
+    const manual = [];
+    const targets = MODEL_WIDGETS.map((name) => [name, FOREIGN_FIX_PATTERNS[name] || []]);
+    for (let index = 1; index <= SLOT_COUNT; index += 1) targets.push([`lora_${index}`, []]);
+
+    for (const [name, patterns] of targets) {
+        let plan;
+        try {
+            plan = planForeignValueFix(widgetOf(node, name), patterns);
+        } catch (error) {
+            console.error("[AICG3D]", error);
+            continue;
+        }
+        if (!plan) continue;
+        if (plan.to) {
+            setWidgetValue(node, name, plan.to);
+            fixed.push(`${name} → ${fileBaseName(plan.to)}`);
+        } else {
+            manual.push(name);
+        }
+    }
+
+    if (fixed.length || manual.length) {
+        const parts = [];
+        if (fixed.length) parts.push(`已自动修正 ${fixed.length} 项（${briefNames(fixed)}）`);
+        if (manual.length) parts.push(`请手动选择 ${manual.length} 项：${manual.join("、")}`);
+        toast(`工作流里的文件名不属于本机 —— ${parts.join("；")}`, manual.length ? "warn" : "ok");
+        console.info("[AICG3D] 跨机器文件名体检", { fixed, manual });
+    }
+    return { fixed, manual };
+}
+
 function hideWidget(widget) {
     if (!widget) return;
     widget.__a3Hidden = true;
@@ -472,6 +564,13 @@ function installLoaderNode(nodeType, nodeData) {
     const setup = (node) => {
         if (!node || node.__a3LoaderSetup || typeof node.addDOMWidget !== "function") return;
 
+        // 载入 / 新建时先体检一次，把别人机器上的文件名换成本机可用的值，面板才能显示正确内容。
+        try {
+            sanitizeForeignValues(node);
+        } catch (error) {
+            console.error("[AICG3D]", error);
+        }
+
         /* 节点类被另一个同名插件（ComfyUI-MiniMaxH3-Easy）抢走注册时，节点上没有 LoRA 槽位。
            这时硬堆面板只会做出一个半残界面，而原生控件已经被 autoHideWidgets 藏了，
            结果是节点全空 —— 直接放弃面板，把原生控件放回来。 */
@@ -595,4 +694,4 @@ app.registerExtension({
     },
 });
 
-export { toast };
+export { toast, sanitizeForeignValues };

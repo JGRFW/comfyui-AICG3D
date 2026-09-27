@@ -310,6 +310,12 @@ SELECTED_VIDEO_SEGMENT_MODES = (
     SELECTED_VIDEO_SEGMENT_TIME_CUTS,
     SELECTED_VIDEO_SEGMENT_FRAME_CUTS,
 )
+# AICG3D：分段替换长视频时，「已选视频上下文」要求内部切点落在 17 帧潜空间网格上
+# （合法切点 = 5 + 17k 帧），偏差超过 8 帧会直接抛错要用户自己改。自动切点节点按
+# 这个网格生成，保证一次通过 —— 详见 _auto_segment_cut_frames / _motion_context_selected_video_boundaries。
+SEGMENT_CUT_LATENT_GRID = 17
+SEGMENT_CUT_LATENT_OFFSET = 5
+SEGMENT_CUT_MAX_SHIFT = 8
 # Keep the canonical divider narrow enough to avoid splitting prompt prose, but
 # accept the harmless escaping that chat agents sometimes add while emitting a
 # markdown-like divider (for example ``\---`` or ``---\``).
@@ -6017,6 +6023,168 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
         return result
 
 
+def _auto_segment_cut_frames(
+    total_frames: int,
+    fps: float,
+    segment_seconds: float,
+    snap_to_grid: bool = True,
+    max_segments: int = 120,
+) -> tuple[list[int], int]:
+    """按目标段长算出内部切点（帧号），必要时对齐 17 帧潜空间网格。
+
+    对齐后每个切点都是 ``5 + 17k``，正好落在 Context Segment 认可的合法位置上，
+    所以「已选视频上下文」不会再把切点挪来挪去、也不会报 cuts cannot be aligned。
+    """
+    total = max(5, int(total_frames))
+    rate = float(fps) if float(fps or 0.0) > 0 else float(h3.FPS)
+    target = float(segment_seconds) * rate
+    if not math.isfinite(target) or target <= 0:
+        raise ValueError("每段秒数必须大于 0")
+    if snap_to_grid:
+        step = int(round(target / float(SEGMENT_CUT_LATENT_GRID)))
+        if step < 1:
+            raise ValueError(
+                "每段 %.2f 秒 = %.1f 帧，比 %d 帧潜空间网格还短；latent_guide（默认连续性）下每段至少要 "
+                "%.2f 秒，建议 ≥ 1 秒，或关掉「对齐 17 帧网格」并把连续性改成 guide。"
+                % (segment_seconds, target, SEGMENT_CUT_LATENT_GRID, SEGMENT_CUT_LATENT_GRID / rate)
+            )
+        body = step * SEGMENT_CUT_LATENT_GRID
+        position = SEGMENT_CUT_LATENT_OFFSET + body
+    else:
+        body = max(1, int(round(target)))
+        position = body
+
+    limit = max(1, int(max_segments))
+    cuts: list[int] = []
+    while position < total:
+        if len(cuts) >= limit:
+            raise ValueError(
+                "按 %.2f 秒切会超过 %d 段；请把每段调长，或把「最多段数」调大。"
+                % (segment_seconds, limit)
+            )
+        cuts.append(int(position))
+        position += body
+
+    # 末尾太短（不足目标段长的一半）就并进上一段：宁可最后一段长一点，
+    # 也不要留一个 0.7 秒的碎尾巴去单独跑一次采样。
+    minimum_tail = max(SEGMENT_CUT_LATENT_GRID if snap_to_grid else 1, int(round(body * 0.5)))
+    while cuts and total - cuts[-1] < minimum_tail:
+        cuts.pop()
+    return cuts, body
+
+
+class MiniMaxH3EasySegmentCuts:
+    """分段替换长视频：按秒数自动算出「已选视频上下文」要的切点。"""
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "plan"
+    RETURN_TYPES = ("STRING", "STRING", "INT", "STRING")
+    RETURN_NAMES = ("segment_cuts", "segment_cuts_frames", "segment_count", "plan_summary")
+    DESCRIPTION = (
+        "分段替换长视频用：按「每段几秒」自动算切点，喂给 MiniMax H3 Aicg 已选视频上下文的 segment_cuts"
+        "（segment_mode 选 time_cuts）。切点按需对齐 17 帧潜空间网格，避免 Motion Context 报"
+        "「cuts cannot be aligned」。接法：Load Video → 本节点 → 已选视频上下文 → 分段采样 → 分段解码。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "segment_seconds": (
+                    "FLOAT",
+                    {
+                        "default": 5.0,
+                        "min": 0.2,
+                        "max": 60.0,
+                        "step": 0.1,
+                        "tooltip": "每段多长（秒）。长视频替换就靠它切段；开了网格对齐后实际段长会贴到最近的 17 帧（约 0.71 秒）倍数。",
+                    },
+                ),
+                "snap_to_latent_grid": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "把切点对齐到 Context Segment 的 17 帧网格。连续性用默认的 latent_guide 时必须开着，否则会被拒绝。",
+                    },
+                ),
+                "max_segments": (
+                    "INT",
+                    {
+                        "default": 120,
+                        "min": 1,
+                        "max": 2000,
+                        "step": 1,
+                        "tooltip": "段数上限，防止切得过碎把时间和显存拉爆。",
+                    },
+                ),
+                "fallback_seconds": (
+                    "FLOAT",
+                    {
+                        "default": 120.0,
+                        "min": 1.0,
+                        "max": 3600.0,
+                        "step": 1.0,
+                        "tooltip": "没接 selected_video 时按这个总时长算切点（接了视频就忽略它）。切点统一按 24fps 时间轴换算。",
+                    },
+                ),
+            },
+            "optional": {
+                "selected_video": ("VIDEO", {"tooltip": "待替换的长视频；接上后按它的真实帧数换算切点。"}),
+            },
+        }
+
+    @classmethod
+    def plan(cls, segment_seconds, snap_to_latent_grid, max_segments,
+             fallback_seconds, selected_video=None):
+        # 「已选视频上下文」会把参考视频统一重采样到 h3.FPS，所以切点永远按这个帧率换算。
+        rate = float(h3.FPS)
+        if selected_video is not None:
+            frames, _audio, source_fps = _video_parts(selected_video)
+            frames = _normalize_video_frames(frames)
+            frames = _resample_video_frames(frames, float(source_fps or h3.FPS))
+            total = max(5, int(frames.shape[0]))
+            origin = "参考视频"
+        else:
+            total = max(5, int(round(float(fallback_seconds) * rate)))
+            origin = "手动时长"
+
+        cuts, body = _auto_segment_cut_frames(
+            total, rate, float(segment_seconds), bool(snap_to_latent_grid), int(max_segments)
+        )
+        count = len(cuts) + 1
+        seconds = ",".join("%.6f" % (cut / rate) for cut in cuts)
+        frames_spec = ",".join(str(cut) for cut in cuts)
+
+        if not cuts:
+            summary = (
+                "%s：%d 帧 / %.2f 秒，不足一段 —— 段数=1，segment_cuts 留空即可（等于 whole_video，不切段）。"
+                % (origin, total, total / rate)
+            )
+        else:
+            lengths = [cuts[0]] + [b - a for a, b in zip(cuts, cuts[1:])] + [total - cuts[-1]]
+            target_frames = float(segment_seconds) * rate
+            note = ""
+            if snap_to_latent_grid and abs(body - target_frames) / target_frames > 0.1:
+                note = "｜注意：网格对齐把段长从 %g 秒调成 %.2f 秒" % (
+                    float(segment_seconds), body / rate,
+                )
+            summary = (
+                "%s：%d 段 | 目标每段 %g 秒 | 实际每段 %.2f~%.2f 秒（平均 %.2f，末段 %.2f）| 总 %d 帧 / %.2f 秒 @ %g fps%s%s"
+                % (
+                    origin, count, float(segment_seconds),
+                    min(lengths) / rate, max(lengths) / rate,
+                    (sum(lengths) / len(lengths)) / rate,
+                    lengths[-1] / rate,
+                    total, total / rate, rate,
+                    "｜已对齐 17 帧网格" if snap_to_latent_grid else "｜未对齐网格（连续性请改用 guide）",
+                    note,
+                )
+                + "\n切点(秒) → 填进「已选视频上下文 → segment_cuts」：\n" + seconds
+            )
+        print("[MiniMax H3 Aicg] 自动分段切点：" + summary.replace("\n", " "))
+        return (seconds, frames_spec, count, summary)
+
+
 class MiniMaxH3EasyContextSegments:
     """Build a multi-shot context plan for MiniMaxH3EasySegmentRender."""
 
@@ -10633,6 +10801,7 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasySegmentRefine": MiniMaxH3EasySegmentRefine,
     "MiniMaxH3EasySegmentDecode": MiniMaxH3EasySegmentDecode,
     "MiniMaxH3EasySelectedVideoContext": MiniMaxH3EasySelectedVideoContext,
+    "MiniMaxH3EasySegmentCuts": MiniMaxH3EasySegmentCuts,
     "MiniMaxH3EasyAspectRatio": MiniMaxH3EasyAspectRatio,
     "MiniMaxH3EasySecondPassConditioning": MiniMaxH3EasySecondPassConditioning,
     "MiniMaxH3EasyRenderAdvanced": MiniMaxH3EasyRenderAdvanced,
@@ -10663,6 +10832,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasySegmentRefine": "MiniMax H3 Aicg 分段二采",
     "MiniMaxH3EasySegmentDecode": "MiniMax H3 Aicg 分段解码",
     "MiniMaxH3EasySelectedVideoContext": "MiniMax H3 Aicg 已选视频上下文",
+    "MiniMaxH3EasySegmentCuts": "MiniMax H3 Aicg 自动分段切点",
     "MiniMaxH3EasyAspectRatio": "MiniMax H3 Aicg 宽高比",
     "MiniMaxH3EasySecondPassConditioning": "MiniMax H3 Aicg 二采条件",
     "MiniMaxH3EasyRenderAdvanced": "AICG-渲染器（高级）",

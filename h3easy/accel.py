@@ -214,9 +214,14 @@ ACCEL_WIDGET_NAMES: tuple[str, ...] = (
 )
 
 
-def accel_widget_input_types() -> dict[str, tuple]:
-    """返回可以合并进节点 INPUT_TYPES["required"] 的加速控件定义。"""
-    return {
+def accel_widget_input_types(motion_cache: bool = True) -> dict[str, tuple]:
+    """返回可以合并进节点 INPUT_TYPES["required"] 的加速控件定义。
+
+    ``motion_cache=False`` 只返回「注意力加速」一个控件。加载器节点不再展示
+    运动缓存（MotionCache）的开关与细项；需要调这些参数时，用独立的
+    「MiniMax H3 Aicg 加速设置」节点（``MiniMaxH3EasyAccel``）。
+    """
+    widgets = {
         ACCEL_WIDGET_NAMES[0]: (
             attention_choices(),
             {
@@ -263,6 +268,9 @@ def accel_widget_input_types() -> dict[str, tuple]:
             {"default": 8, "min": 1, "max": 64, "step": 1, "tooltip": "采样间隔：算变化量时的抽样步长，越大越省显存/越快判断。"},
         ),
     }
+    if not motion_cache:
+        return {ACCEL_WIDGET_NAMES[0]: widgets[ACCEL_WIDGET_NAMES[0]]}
+    return widgets
 
 
 def _coerce_float(value: Any, default: float) -> float:

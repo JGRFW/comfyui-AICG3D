@@ -667,12 +667,20 @@ function installLoaderNode(nodeType, nodeData) {
     chain("onConfigure", (node, args) => {
         setup(node);
         const saved = args?.[0]?.widgets_values;
+        // widgets_values 到 onConfigure 才真正写回控件；必须在写回之后再体检一次，
+        // 否则旧工作流里的 ref2va_model 外机文件名会在校验阶段报“不可用”。
+        try {
+            sanitizeForeignValues(node);
+        } catch (error) {
+            console.error("[AICG3D]", error);
+        }
         node.__a3LoaderSync?.();
         // 载入工作流后再补几次：Nodes 2.0 的响应式控件表挂载时可能把值推回默认，
         // 补回存档里的 LoRA 并刷新面板，避免「保存好了、重启后又得重新选」。
         for (const delay of [0, 200, 800]) {
             setTimeout(() => {
                 try {
+                    sanitizeForeignValues(node);
                     repairLoraFromArchive(node, saved);
                     node.__a3LoaderSync?.();
                     resize(node);

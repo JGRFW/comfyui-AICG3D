@@ -122,6 +122,19 @@ const CONTINUITY_HARD_AV = "hard_av";
 const SELECTED_VIDEO_SEGMENT_WHOLE = "whole_video";
 const SELECTED_VIDEO_SEGMENT_TIME_CUTS = "time_cuts";
 const SELECTED_VIDEO_SEGMENT_FRAME_CUTS = "frame_cuts";
+const SIMPLE_SWAP_UI_PROP = "minimax_h3_simple_swap_ui";
+const REPLACEMENT_CUSTOM = "custom";
+const REPLACEMENT_PEOPLE = "replace_people";
+const REPLACEMENT_BACKGROUND = "replace_background";
+const REPLACEMENT_MULTI = "multi_reference";
+const SIMPLE_REPLACEMENT_PROMPTS = Object.freeze({
+    [REPLACEMENT_PEOPLE]: "以 <Video 1> 为基础，将视频中的所有人物全部替换为 <Picture 1> 中的人物；所有人的身份、五官、发型、服装和体型严格参考 <Picture 1>，同时保持原视频的背景、镜头运动、人物动作、走位、构图、光线和时长完全不变。画面干净锐利，无文字水印。",
+    [REPLACEMENT_BACKGROUND]: "将原视频中的背景、环境和场景整体替换为 <Picture 1> 中的背景；保持原视频中的所有人物身份、数量、服装、动作、走位、镜头运动、构图、光线和时长完全不变。画面干净锐利，无文字水印。",
+    [REPLACEMENT_MULTI]: "以 <Video 1> 为基础，结合 <Picture 1> 和 <Picture 2> 的参考内容执行替换；由用户提示词决定替换人物、替换背景或同时替换人物和背景。保持原视频的镜头运动、动作、走位、构图、时长以及未被指定替换的内容一致。画面干净锐利，无文字水印。",
+});
+/* 「已选视频上下文」的输出画布：默认跟着原片走，需要时才指定档位。 */
+const SELECTED_VIDEO_CANVAS_FOLLOW = "\u8ddf\u968f\u539f\u7247";
+const SELECTED_VIDEO_CLEANUP_DEFAULT = "\u5378\u8f7d\u6a21\u578b";
 const GUIDE_CONTEXT_FRAME_GRID = Object.freeze([5, 22, 39, 56, 73]);
 const AV_CONTEXT_FRAME_GRID = Object.freeze([39, 90, 141]);
 const AV_CONTINUITY_MODES = new Set([CONTINUITY_SOFT_AV, CONTINUITY_HARD_AV]);
@@ -305,6 +318,20 @@ const TEXT = {
     selectedVideoTimeCuts: ZH_BROWSER ? "时间切点（秒）" : "Time cut points (seconds)",
     selectedVideoFrameCuts: ZH_BROWSER ? "帧切点（24 FPS）" : "Frame cut points (24 FPS)",
     mediaBundle: "AICG3D",
+    selectedVideoAutoCuts: ZH_BROWSER ? "\u6bcf\u6bb5\u51e0\u79d2 \u2192 \u81ea\u52a8\u5207\u70b9" : "Auto cuts from segment seconds",
+    selectedVideoAutoCutsSnap: ZH_BROWSER ? "\u5207\u70b9\u5bf9\u9f50 17 \u5e27\u6f5c\u7a7a\u95f4\u7f51\u683c" : "Snap cuts to the 17-frame latent grid",
+    selectedVideoAutoCutsMax: ZH_BROWSER ? "\u6700\u5927\u5206\u6bb5\u6570" : "Maximum segments",
+    selectedVideoVideoReference: ZH_BROWSER ? "\u6362\u4eba\u6a21\u5f0f\uff08\u5f00=\u539f\u7247\u5f53\u53c2\u8003\u91cd\u753b\uff1b\u5173=\u539f\u7247\u8d77\u6b65\u4fdd\u52a8\u4f5c\uff09" : "Swap mode (on = source as reference; off = keep source motion)",
+    selectedVideoSourceScale: ZH_BROWSER ? "\u539f\u7247\u53c2\u8003\u5f3a\u5ea6\uff08\u8d8a\u5c0f\u8d8a\u4e0d\u6284\u539f\u7247\uff09" : "Source-clip reference strength",
+    selectedVideoFaceAnchor: ZH_BROWSER ? "\u9501\u8138\uff1a\u628a\u53c2\u8003\u8138\u8d34\u5230\u539f\u7247\u9996\u5e27" : "Face anchor: paste the reference face onto the source first frame",
+    replacementTarget: ZH_BROWSER ? "\u66ff\u6362\u5185\u5bb9" : "Replacement target",
+    replacementPeople: ZH_BROWSER ? "\u66ff\u6362\u4eba\u7269" : "Replace people",
+    replacementBackground: ZH_BROWSER ? "\u66ff\u6362\u80cc\u666f" : "Replace background",
+    replacementCustom: ZH_BROWSER ? "\u81ea\u5b9a\u4e49" : "Custom",
+    replacementMulti: ZH_BROWSER ? "\u591a\u53c2\u8003" : "Multi-reference",
+    simpleSegmentSeconds: ZH_BROWSER ? "\u6bcf\u6bb5\u79d2\u6570\uff08\u81ea\u52a8\u5207\u5206\uff09" : "Seconds per segment (auto split)",
+    replacementTotalSeconds: ZH_BROWSER ? "\u66ff\u6362\u603b\u65f6\u957f\uff08\u79d2\uff0c0=\u5168\u90e8\uff09" : "Total replacement seconds (0 = all)",
+    replacementDescription: ZH_BROWSER ? "\u63d0\u793a\u8bcd" : "Prompt",
     imageCount: ZH_BROWSER ? "\u56fe\u7247\u6570\u91cf" : "Image count",
     videoCount: ZH_BROWSER ? "\u89c6\u9891\u6570\u91cf" : "Video count",
     audioCount: ZH_BROWSER ? "\u97f3\u9891\u6570\u91cf" : "Audio count",
@@ -447,6 +474,12 @@ const OPTION_DEFS = {
         [SELECTED_VIDEO_SEGMENT_WHOLE]: ZH_BROWSER ? "整段视频" : "Whole video",
         [SELECTED_VIDEO_SEGMENT_TIME_CUTS]: ZH_BROWSER ? "按时间切分" : "Split by time",
         [SELECTED_VIDEO_SEGMENT_FRAME_CUTS]: ZH_BROWSER ? "按帧切分" : "Split by frame",
+    },
+    replacement_target: {
+        [REPLACEMENT_CUSTOM]: ZH_BROWSER ? "自定义" : "Custom",
+        [REPLACEMENT_PEOPLE]: ZH_BROWSER ? "替换人物" : "Replace people",
+        [REPLACEMENT_BACKGROUND]: ZH_BROWSER ? "替换背景" : "Replace background",
+        [REPLACEMENT_MULTI]: ZH_BROWSER ? "多参考" : "Multi-reference",
     },
     empty_output_mode: {
         block_missing: ZH_BROWSER ? "默认（跳过缺失输出）" : "Default (Skip Missing Outputs)",
@@ -692,6 +725,108 @@ function isContextSegmentsNode(node) {
 
 function isSelectedVideoContextNode(node) {
     return nodeMatchesClass(node, SELECTED_VIDEO_CONTEXT_CLASS, TEXT.selectedVideoContextTitle, "__h3SelectedVideoContextNodeInstalled");
+}
+
+function isSimpleSwapContextNode(node) {
+    return isSelectedVideoContextNode(node) && node?.properties?.[SIMPLE_SWAP_UI_PROP] === true;
+}
+
+function disableSimpleSwapPromptEditor(node) {
+    if (!node) return;
+    removePromptEditorWidgets(node);
+    node.__h3EditorWrap?.remove?.();
+    node.__h3Editor = null;
+    node.__h3EditorWrap = null;
+    node.__h3PromptEditorTools = null;
+    node.__h3PromptViewButton = null;
+    node.__h3DomWidget = null;
+}
+
+function selectedReplacementTarget(node) {
+    const value = canonicalOption(
+        "replacement_target",
+        getWidgetValue(node, "replacement_target", REPLACEMENT_MULTI),
+    );
+    return [REPLACEMENT_PEOPLE, REPLACEMENT_BACKGROUND, REPLACEMENT_MULTI].includes(value)
+        ? value
+        : REPLACEMENT_MULTI;
+}
+
+function simpleReplacementPrompt(node, target) {
+    const links = Array.isArray(node?.properties?.[LINKS_PROP]) ? node.properties[LINKS_PROP] : [];
+    const imageCount = links.filter((link) => String(link?.media_type || "").toLowerCase() === "image").length;
+    const description = String(getWidgetValue(node, "replacement_description", "") || "").trim();
+    const existingPrompt = String(getWidgetValue(node, "prompt", "") || "").trim();
+    if (target === REPLACEMENT_MULTI && (description || existingPrompt)) {
+        return (description || existingPrompt)
+            .replace(/图像\s*(\d+)/g, "<Picture $1>")
+            .replace(/视频\s*(\d+)/g, "<Video $1>");
+    }
+    const picture = target === REPLACEMENT_BACKGROUND && imageCount >= 2 ? 2 : 1;
+    const base = String(SIMPLE_REPLACEMENT_PROMPTS[target] || SIMPLE_REPLACEMENT_PROMPTS[REPLACEMENT_MULTI])
+        .replace("<Picture 1>", `<Picture ${picture}>`);
+    const prompt = description ? `${base} 补充要求：${description}` : base;
+    return target === REPLACEMENT_PEOPLE
+        ? `${prompt} 必须严格保持 <Picture 1> 中人物的脸部身份、五官比例和发型，不要生成另一个同风格人物。`
+        : prompt;
+}
+
+function syncSimpleSwapSettings(node) {
+    if (!isSimpleSwapContextNode(node)) return false;
+    setConfiguredWidgetValue(node, "replacement_target", REPLACEMENT_MULTI);
+    const target = selectedReplacementTarget(node);
+    const prompt = simpleReplacementPrompt(node, target);
+    setConfiguredWidgetValue(node, "mode", MODE_REFERENCE);
+    setConfiguredWidgetValue(node, "prompt", prompt);
+    setConfiguredWidgetValue(node, "segment_mode", SELECTED_VIDEO_SEGMENT_TIME_CUTS);
+    setConfiguredWidgetValue(node, "segment_cuts", "");
+    setConfiguredWidgetValue(node, "context_length", GUIDE_CONTEXT_FRAME_GRID[0]);
+    setConfiguredWidgetValue(node, "continuity_mode", CONTINUITY_LATENT);
+    setConfiguredWidgetValue(node, "advanced", false);
+    setConfiguredWidgetValue(node, "keyframe_role", KEYFRAME_FIRST);
+    setConfiguredWidgetValue(node, "ref_image_size", (target === REPLACEMENT_PEOPLE || target === REPLACEMENT_MULTI) ? REF_IMAGE_15K : REF_IMAGE_1K);
+    setConfiguredWidgetValue(node, "reference_mention_mode", "index");
+    setConfiguredWidgetValue(node, "prompt_optimizer_scene_guide", "none");
+    setConfiguredWidgetValue(node, "context_prompt_optimizer_mode", "whole_sequence");
+    setConfiguredWidgetValue(node, "context_prompt_optimizer_concurrency", 3);
+    setConfiguredWidgetValue(node, "auto_cuts", true);
+    setConfiguredWidgetValue(node, "snap_to_latent_grid", true);
+    setConfiguredWidgetValue(node, "max_segments", 120);
+    setConfiguredWidgetValue(node, "video_reference", target === REPLACEMENT_PEOPLE);
+    setConfiguredWidgetValue(node, "face_anchor", target === REPLACEMENT_PEOPLE);
+    setConfiguredWidgetValue(node, "source_reference_scale", target === REPLACEMENT_PEOPLE ? 0.15 : 0.34);
+    setConfiguredWidgetValue(node, "cleanup_after_run", SELECTED_VIDEO_CLEANUP_DEFAULT);
+    node.properties ||= {};
+    node.properties[PROMPT_DOC_PROP] = {
+        version: 1,
+        text: prompt,
+        parts: [{ type: "text", text: prompt }],
+    };
+    return true;
+}
+
+function orderSimpleSwapWidgets(node) {
+    if (!isSimpleSwapContextNode(node) || !Array.isArray(node.widgets)) return false;
+    const target = getWidget(node, "replacement_target");
+    const seconds = getWidget(node, "segment_seconds");
+    if (!target || !seconds) return false;
+    const ordered = [
+        target,
+        getWidget(node, "prompt"),
+        node.__h3DomWidget,
+        getWidget(node, "replacement_total_seconds"),
+        seconds,
+        getWidget(node, "output_resolution"),
+        getWidget(node, "output_aspect_ratio"),
+        getWidget(node, "prompt_optimizer_settings"),
+    ].filter(Boolean);
+    const rest = node.widgets.filter((widget) => !ordered.includes(widget));
+    const next = [...ordered, ...rest];
+    if (next.every((widget, index) => node.widgets[index] === widget)) return false;
+    node.widgets.splice(0, node.widgets.length, ...next);
+    if (Array.isArray(node._widgets)) node._widgets.splice(0, node._widgets.length, ...next);
+    node._widgetSlotsDirty = true;
+    return true;
 }
 
 function isSelectedVideoContextSegmented(node) {
@@ -1365,9 +1500,39 @@ function localizeNodeInstance(node) {
             ? TEXT.selectedVideoContextTitle
             : TEXT.mainTitle;
     const labels = { mode: TEXT.mode, prompt: TEXT.prompt, selected_video: TEXT.selectedVideoInput, segment_mode: TEXT.selectedVideoSegmentMode, segment_cuts: TEXT.selectedVideoTimeCuts, audio_mode: TEXT.audioMode, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, context_prompt_optimizer_mode: TEXT.contextPromptOptimizerMode, context_prompt_optimizer_concurrency: TEXT.contextPromptOptimizerConcurrency, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode, segment_seconds: TEXT.segmentSeconds, context_length: TEXT.contextLength, continuity_mode: TEXT.continuityMode };
+    labels.auto_cuts = TEXT.selectedVideoAutoCuts;
+    labels.snap_to_latent_grid = TEXT.selectedVideoAutoCutsSnap;
+    labels.max_segments = TEXT.selectedVideoAutoCutsMax;
+    labels.video_reference = TEXT.selectedVideoVideoReference;
+    // 输出画布（分辨率 / 宽高比 / 宽 / 高）与收尾清理，只挂在「已选视频上下文」上。
+    labels.output_resolution = TEXT.resolution;
+    labels.output_aspect_ratio = TEXT.aspectRatio;
+    labels.cleanup_after_run = TEXT.cleanupLabel;
+    labels.source_reference_scale = TEXT.selectedVideoSourceScale;
+    labels.face_anchor = TEXT.selectedVideoFaceAnchor;
+    labels.replacement_target = TEXT.replacementTarget;
+    labels.replacement_total_seconds = TEXT.replacementTotalSeconds;
+    labels.replacement_description = TEXT.replacementDescription;
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
         localizeComboWidget(widget, node);
+    }
+    if (isSimpleSwapContextNode(node)) {
+        const target = getWidget(node, "replacement_target");
+        if (target) {
+            target.label = TEXT.replacementTarget;
+            target.options ||= {};
+            target.options.values = [TEXT.replacementMulti];
+            target.value = TEXT.replacementMulti;
+        }
+        const seconds = getWidget(node, "segment_seconds");
+        if (seconds) seconds.label = TEXT.simpleSegmentSeconds;
+        const totalSeconds = getWidget(node, "replacement_total_seconds");
+        if (totalSeconds) totalSeconds.label = TEXT.replacementTotalSeconds;
+        const description = getWidget(node, "replacement_description");
+        if (description) description.label = TEXT.replacementDescription;
+        const optimizer = getWidget(node, "prompt_optimizer_settings");
+        if (optimizer) optimizer.label = "提示词优化设置（模型在这里选择）";
     }
     for (const input of node.inputs || []) {
         if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
@@ -3094,9 +3259,10 @@ function patchGraphToPrompt() {
                     Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 5)) || 5)),
                 );
             } else {
-                // The selected-video context derives canvas and duration from
-                // the connected candidate VIDEO; do not inject the legacy
-                // Easy resolution widgets into its prompt payload.
+                // 「已选视频上下文」的输出画布由节点自己的
+                // 「输出分辨率 / 输出宽高比 / 宽·高」三组控件决定（默认跟随原片），
+                // 时长仍取自视频；所以这里只丢掉旧 Easy 的 seconds / fps，
+                // output_* 那几格原样传给后端。
                 delete promptNode.inputs.resolution;
                 delete promptNode.inputs.aspect_ratio;
                 delete promptNode.inputs.width;
@@ -5179,11 +5345,49 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
     );
     const contextNode = isContextSegmentsNode(node);
     const selectedVideoContext = isSelectedVideoContextNode(node);
+    if (selectedVideoContext && isSimpleSwapContextNode(node)) {
+        syncSimpleSwapSettings(node);
+        orderSimpleSwapWidgets(node);
+        const allowed = new Set([
+            "replacement_target",
+            "h3_prompt_mentions",
+            "replacement_total_seconds",
+            "segment_seconds",
+            "output_resolution",
+            "output_aspect_ratio",
+            "prompt_optimizer_settings",
+        ]);
+        const target = getWidget(node, "replacement_target");
+        if (target) {
+            target.options ||= {};
+            target.options.values = [TEXT.replacementMulti];
+            target.value = TEXT.replacementMulti;
+        }
+        const changed = (node.widgets || [])
+            .filter((widget) => widget && typeof widget.name === "string")
+            .map((widget) => setConditionalWidgetVisible(node, widget, allowed.has(widget.name), { adjustHeight }))
+            .some(Boolean);
+        restoreWidgetInputContracts(node);
+        if (changed) {
+            refreshVueNodeWidgets(node);
+            node._widgetSlotsDirty = true;
+            node.setDirtyCanvas?.(true, true);
+            app.graph?.setDirtyCanvas?.(true, true);
+        }
+        return changed;
+    }
     const selectedSegmentMode = canonicalOption(
         "selected_video_segment_mode",
         getWidgetValue(node, "segment_mode", SELECTED_VIDEO_SEGMENT_WHOLE),
     );
     const selectedVideoSegmented = selectedVideoContext && selectedSegmentMode !== SELECTED_VIDEO_SEGMENT_WHOLE;
+    // 「原片参考强度 / 锁脸」只在「换人模式=开」这条（从空潜变量重画）通路上有用。
+    const selectedVideoSwapMode = selectedVideoContext && asBoolean(getWidgetValue(node, "video_reference", true));
+    // Auto cuts: with "seconds per segment" enabled the backend derives every
+    // cut point, so the manual cut row disappears.
+    const selectedVideoAutoCuts = selectedVideoContext
+        && selectedSegmentMode !== SELECTED_VIDEO_SEGMENT_WHOLE
+        && asBoolean(getWidgetValue(node, "auto_cuts", true));
     const segmentContextNode = contextNode || selectedVideoSegmented;
     const changed = [
         syncContextLengthWidget(node),
@@ -5202,11 +5406,19 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), false, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "context_prompt_optimizer_mode"), segmentContextNode && advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "context_prompt_optimizer_concurrency"), segmentContextNode && advanced && contextOptimizerMode === "per_segment", { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "segment_seconds"), isSegmentMode(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "segment_seconds"), isSegmentMode(node) || selectedVideoAutoCuts, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "context_length"), segmentContextNode, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "continuity_mode"), segmentContextNode, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "segment_mode"), selectedVideoContext, { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "segment_cuts"), selectedVideoContext && selectedSegmentMode !== SELECTED_VIDEO_SEGMENT_WHOLE, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "auto_cuts"), selectedVideoContext, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "snap_to_latent_grid"), selectedVideoAutoCuts, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "max_segments"), selectedVideoAutoCuts, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "video_reference"), selectedVideoContext, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "replacement_target"), false, { adjustHeight }),
+        // 换人模式关掉时，这两行不起作用，直接收起来，节点看着就简单。 
+        setConditionalWidgetVisible(node, getWidget(node, "source_reference_scale"), selectedVideoSwapMode, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "face_anchor"), selectedVideoContext, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "segment_cuts"), selectedVideoContext && !selectedVideoAutoCuts && selectedSegmentMode !== SELECTED_VIDEO_SEGMENT_WHOLE, { adjustHeight }),
     ].some(Boolean);
     if (!isSegmentMode(node)) {
         const segmentSeconds = getWidget(node, "segment_seconds");
@@ -7075,6 +7287,10 @@ function insertTextWithMentionChips(node, editor, text) {
 }
 
 function ensurePromptEditor(node) {
+    if (isSimpleSwapContextNode(node) && selectedReplacementTarget(node) !== REPLACEMENT_MULTI) {
+        disableSimpleSwapPromptEditor(node);
+        return;
+    }
     if (node.__h3Editor) {
         preparePromptEditorForUndo(node.__h3Editor);
         return;
@@ -7476,6 +7692,10 @@ function ensurePromptEditor(node) {
 }
 
 function installPromptEditorSoon(node) {
+    if (isSimpleSwapContextNode(node) && selectedReplacementTarget(node) !== REPLACEMENT_MULTI) {
+        disableSimpleSwapPromptEditor(node);
+        return;
+    }
     if (!node || node.__h3PromptInstallPending || node.__h3PromptInstallRetry || node.__h3Editor) return;
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (now < (Number(node.__h3PromptInstallNextAt) || 0)) return;
@@ -7893,6 +8113,9 @@ function repairConfiguredWidgetValues(node, info) {
             continuity_mode: CONTINUITY_LATENT,
             context_prompt_optimizer_mode: "whole_sequence",
             context_prompt_optimizer_concurrency: 3,
+            replacement_target: REPLACEMENT_CUSTOM,
+            replacement_total_seconds: 0,
+            replacement_description: "",
         };
 
         // Current selected-video schema is:
@@ -7994,7 +8217,7 @@ function repairConfiguredWidgetValues(node, info) {
             keyframe_role: optionValue("keyframe_role", "keyframe_role", values[7], selectedDefaults.keyframe_role),
             ref_image_size: optionValue("ref_image_size", "ref_image_size", values[8], selectedDefaults.ref_image_size),
             reference_mention_mode: optionValue("reference_mention_mode", "reference_mention_mode", values[9], selectedDefaults.reference_mention_mode),
-            prompt_optimizer_settings: false,
+            prompt_optimizer_settings: booleanValue("prompt_optimizer_settings", values[10], false),
             prompt_optimizer_scene_guide: canonicalPromptGuide(
                 stringValue("prompt_optimizer_scene_guide", values[11], selectedDefaults.prompt_optimizer_scene_guide),
             ),
@@ -8017,6 +8240,40 @@ function repairConfiguredWidgetValues(node, info) {
                 )),
             ),
             advanced: booleanValue("advanced", values[6], selectedDefaults.advanced),
+            // 后补的控件（自动切点那一组 + 输出画布 + 收尾清理）也要跟着一起摆正，
+            // 否则每次载入都会把它们退回默认值，用户改过的设置等于白改。
+            auto_cuts: booleanValue("auto_cuts", values[14], true),
+            segment_seconds: numberValue("segment_seconds", values[15], 5),
+            snap_to_latent_grid: booleanValue("snap_to_latent_grid", values[16], true),
+            max_segments: numberValue("max_segments", values[17], 120),
+            video_reference: booleanValue("video_reference", values[18], true),
+            output_resolution: stringValue("output_resolution", values[19], SELECTED_VIDEO_CANVAS_FOLLOW),
+            output_aspect_ratio: stringValue("output_aspect_ratio", values[20], SELECTED_VIDEO_CANVAS_FOLLOW),
+            cleanup_after_run: stringValue("cleanup_after_run", values[21], SELECTED_VIDEO_CLEANUP_DEFAULT),
+            source_reference_scale: (() => {
+                // 旧存档（带「宽/高」两格）会位置错一行，这里只在合理区间内采信位置值。
+                const namedScale = Number(namedValue("source_reference_scale"));
+                if (Number.isFinite(namedScale)) return Math.max(0, Math.min(1, namedScale));
+                const positionalScale = Number(values[22]);
+                return Number.isFinite(positionalScale) && positionalScale <= 1 ? Math.max(0, positionalScale) : 0.34;
+            })(),
+            face_anchor: booleanValue("face_anchor", values[23], true),
+            replacement_target: optionValue(
+                "replacement_target",
+                "replacement_target",
+                values[24],
+                selectedDefaults.replacement_target,
+            ),
+            replacement_total_seconds: Math.max(0, numberValue(
+                "replacement_total_seconds",
+                values[25],
+                selectedDefaults.replacement_total_seconds,
+            )),
+            replacement_description: stringValue(
+                "replacement_description",
+                values[26],
+                selectedDefaults.replacement_description,
+            ),
         };
         // A whole-video snapshot can carry the old localized mode label in
         // the cut-point slot. It is not a valid cut list and must not reappear
@@ -8025,7 +8282,7 @@ function repairConfiguredWidgetValues(node, info) {
             || isSelectedSegmentMode(selectedValues.segment_cuts)) {
             selectedValues.segment_cuts = selectedDefaults.segment_cuts;
         }
-        for (const name of Object.keys(selectedDefaults)) setConfiguredWidgetValue(node, name, selectedValues[name]);
+        for (const name of Object.keys(selectedValues)) setConfiguredWidgetValue(node, name, selectedValues[name]);
         info.widgets_values = [
             selectedValues.mode,
             selectedValues.prompt,
@@ -8041,6 +8298,19 @@ function repairConfiguredWidgetValues(node, info) {
             selectedValues.prompt_optimizer_scene_guide,
             selectedValues.context_prompt_optimizer_mode,
             selectedValues.context_prompt_optimizer_concurrency,
+            selectedValues.auto_cuts,
+            selectedValues.segment_seconds,
+            selectedValues.snap_to_latent_grid,
+            selectedValues.max_segments,
+            selectedValues.video_reference,
+            selectedValues.output_resolution,
+            selectedValues.output_aspect_ratio,
+            selectedValues.cleanup_after_run,
+            selectedValues.source_reference_scale,
+            selectedValues.face_anchor,
+            selectedValues.replacement_target,
+            selectedValues.replacement_total_seconds,
+            selectedValues.replacement_description,
         ];
         info.widgets_values_named = {
             ...(info.widgets_values_named && typeof info.widgets_values_named === "object" ? info.widgets_values_named : {}),
@@ -8501,6 +8771,42 @@ function installNode(nodeType, nodeData) {
             };
         }
         const referenceMentionWidget = getWidget(this, "reference_mention_mode");
+        const swapModeWidget = getWidget(this, "video_reference");
+        const replacementTargetWidget = getWidget(this, "replacement_target");
+        if (replacementTargetWidget && !replacementTargetWidget.__h3ConditionalCallbackBound) {
+            replacementTargetWidget.__h3ConditionalCallbackBound = true;
+            const originalCallback = replacementTargetWidget.callback;
+            replacementTargetWidget.callback = (value) => {
+                originalCallback?.call(replacementTargetWidget, value);
+                syncSimpleSwapSettings(this);
+                localizeNodeInstance(this);
+                syncModeWidgets(this);
+                repairNodeLayout(this);
+                this.setDirtyCanvas?.(true, true);
+                app.graph?.change?.();
+            };
+        }
+        const replacementDescriptionWidget = getWidget(this, "replacement_description");
+        if (replacementDescriptionWidget && !replacementDescriptionWidget.__h3ConditionalCallbackBound) {
+            replacementDescriptionWidget.__h3ConditionalCallbackBound = true;
+            const originalCallback = replacementDescriptionWidget.callback;
+            replacementDescriptionWidget.callback = (value) => {
+                originalCallback?.call(replacementDescriptionWidget, value);
+                syncSimpleSwapSettings(this);
+                this.setDirtyCanvas?.(true, true);
+                app.graph?.change?.();
+            };
+        }
+        if (swapModeWidget && !swapModeWidget.__h3ConditionalCallbackBound) {
+            swapModeWidget.__h3ConditionalCallbackBound = true;
+            const originalCallback = swapModeWidget.callback;
+            swapModeWidget.callback = (value) => {
+                originalCallback?.call(swapModeWidget, value);
+                syncModeWidgets(this);
+                repairNodeLayout(this);
+                this.setDirtyCanvas?.(true, true);
+            };
+        }
         if (referenceMentionWidget && !referenceMentionWidget.__h3ConditionalCallbackBound) {
             referenceMentionWidget.__h3ConditionalCallbackBound = true;
             const originalCallback = referenceMentionWidget.callback;
@@ -8572,6 +8878,10 @@ function installNode(nodeType, nodeData) {
             this.properties ||= {};
             this.properties[PROMPT_AUTO_MARKER_PROP] = info.properties[PROMPT_AUTO_MARKER_PROP];
         }
+        if (info?.properties && Object.prototype.hasOwnProperty.call(info.properties, SIMPLE_SWAP_UI_PROP)) {
+            this.properties ||= {};
+            this.properties[SIMPLE_SWAP_UI_PROP] = info.properties[SIMPLE_SWAP_UI_PROP] === true;
+        }
         repairConfiguredWidgetValues(this, info);
         normalizeLinks(this);
         pruneTransportInputsFromNode(this, { force: true });
@@ -8627,6 +8937,10 @@ function installNode(nodeType, nodeData) {
         if (info && this.properties?.[PROMPT_AUTO_MARKER_PROP]) {
             info.properties ||= {};
             info.properties[PROMPT_AUTO_MARKER_PROP] = this.properties[PROMPT_AUTO_MARKER_PROP];
+        }
+        if (info && this.properties?.[SIMPLE_SWAP_UI_PROP] === true) {
+            info.properties ||= {};
+            info.properties[SIMPLE_SWAP_UI_PROP] = true;
         }
         return result;
     };
@@ -9029,7 +9343,12 @@ function mediaLoaderItemPreview(filename, type) {
         audio.src = mediaLoaderEntryUrl(filename, type);
         audio.setAttribute("aria-hidden", "true");
         thumb.__h3MediaLoaderAudio = audio;
-        thumb.append(wave, audio);
+        const duration = document.createElement("span");
+        duration.className = "h3-media-loader-duration";
+        duration.setAttribute("aria-hidden", "true");
+        duration.hidden = true;
+        thumb.__h3MediaLoaderDuration = duration;
+        thumb.append(wave, audio, duration);
         return thumb;
     }
 
@@ -9337,6 +9656,11 @@ function mediaLoaderCreateCard(node, group, filename) {
                 const duration = formatAudioDurationLabel(audio.duration);
                 if (!duration) return;
                 card.__h3MediaLoaderDurationLabel = duration;
+                const durationBadge = card.querySelector(".h3-media-loader-duration");
+                if (durationBadge) {
+                    durationBadge.textContent = duration;
+                    durationBadge.hidden = false;
+                }
                 card.title = mediaLoaderCardTitle(card, card.dataset.filename || filename);
             };
             audio.addEventListener("loadedmetadata", syncAudioDuration, { once: true });
@@ -9624,7 +9948,7 @@ function installMediaLoaderStyles() {
       .h3-media-loader-preview-fallback { color:#777; font-size:10px; }
       .h3-media-loader-card.is-audio::after { content:""; position:absolute; inset:48% 0 0; border-radius:0 0 4px 4px; pointer-events:none; background:linear-gradient(180deg,transparent,rgba(0,0,0,.86)); }
       .h3-media-loader-tag { position:absolute; bottom:4px; left:4px; z-index:2; min-width:12px; padding:2px 4px; border-radius:3px; background:rgba(8,8,8,.7); color:#e7e7e7; font-size:9px; line-height:1.15; text-align:center; font-variant-numeric:tabular-nums; pointer-events:none; }
-      .h3-media-loader-duration { position:absolute; right:4px; bottom:4px; z-index:2; padding:2px 4px; border-radius:3px; background:rgba(8,8,8,.35); color:#f1f1f1; font-size:9px; line-height:1.15; font-variant-numeric:tabular-nums; text-shadow:0 1px 2px rgba(0,0,0,.45); pointer-events:none; }
+      .h3-media-loader-duration { position:absolute; top:4px; right:4px; z-index:3; padding:2px 4px; border-radius:3px; background:rgba(8,8,8,.72); color:#f1f1f1; font-size:9px; line-height:1.15; font-variant-numeric:tabular-nums; text-shadow:0 1px 2px rgba(0,0,0,.45); pointer-events:none; }
       .h3-media-loader-label { position:absolute; right:4px; bottom:4px; left:25px; z-index:1; overflow:hidden; color:#eee; font-size:9px; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; }
       .h3-media-loader-card.is-image .h3-media-loader-label, .h3-media-loader-card.is-video .h3-media-loader-label { display:none; }
       .h3-media-loader-play { position:absolute; right:4px; bottom:4px; z-index:4; width:17px; height:17px; padding:0; border:2px solid #222; border-radius:50%; background:#3b434a; color:#f1f1f1; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:Arial,sans-serif; font-size:10px; font-weight:700; line-height:1; opacity:0; visibility:hidden; transform:scale(.82); transition:opacity .15s ease, visibility .15s ease, transform .15s ease, background .15s ease; }

@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import hashlib
 import base64
 import asyncio
@@ -310,6 +311,43 @@ SELECTED_VIDEO_SEGMENT_MODES = (
     SELECTED_VIDEO_SEGMENT_TIME_CUTS,
     SELECTED_VIDEO_SEGMENT_FRAME_CUTS,
 )
+SELECTED_VIDEO_REPLACEMENT_CUSTOM = "custom"
+SELECTED_VIDEO_REPLACEMENT_PEOPLE = "replace_people"
+SELECTED_VIDEO_REPLACEMENT_BACKGROUND = "replace_background"
+SELECTED_VIDEO_REPLACEMENT_MULTI = "multi_reference"
+SELECTED_VIDEO_REPLACEMENT_TARGETS = (
+    SELECTED_VIDEO_REPLACEMENT_CUSTOM,
+    SELECTED_VIDEO_REPLACEMENT_PEOPLE,
+    SELECTED_VIDEO_REPLACEMENT_BACKGROUND,
+    SELECTED_VIDEO_REPLACEMENT_MULTI,
+)
+SELECTED_VIDEO_MULTI_REFERENCE_PROMPT = (
+    "以 <Video 1> 为基础，结合 <Picture 1> 和 <Picture 2> 的参考内容执行替换；"
+    "由用户提示词决定替换人物、替换背景或同时替换人物和背景。"
+    "保持原视频的镜头运动、动作、走位、构图、时长以及未被指定替换的内容一致。"
+    "画面干净锐利，无文字水印。"
+)
+SELECTED_VIDEO_SIMPLE_REPLACEMENT_PROMPTS = {
+    SELECTED_VIDEO_REPLACEMENT_PEOPLE: (
+        "以 <Video 1> 为基础，将视频中的所有人物全部替换为 <Picture 1> 中的人物；"
+        "所有人的身份、五官、发型、服装和体型严格参考 <Picture 1>，"
+        "同时保持原视频的背景、镜头运动、人物动作、走位、构图、光线和时长完全不变。"
+        "画面干净锐利，无文字水印。"
+    ),
+    SELECTED_VIDEO_REPLACEMENT_BACKGROUND: (
+        "将原视频中的背景、环境和场景整体替换为 <Picture 1> 中的背景；"
+        "保持原视频中的所有人物身份、数量、服装、动作、走位、镜头运动、构图、光线和时长完全不变。"
+        "画面干净锐利，无文字水印。"
+    ),
+}
+
+# AICG3D：「已选视频上下文」的输出画布。默认整条跟着原片走（老行为）；要固定输出
+# 档位时再指定分辨率 / 宽高比，或把宽高填进「自定义像素」。
+CANVAS_FOLLOW_SOURCE = "跟随原片"
+SELECTED_VIDEO_CANVAS_RESOLUTIONS = (CANVAS_FOLLOW_SOURCE, *RESOLUTIONS)
+# 节点上不再暴露「宽 / 高」两格，所以下拉里也不再列 custom（custom 仍能被 API 直接传入）。
+SELECTED_VIDEO_CANVAS_BUCKETS = (CANVAS_FOLLOW_SOURCE, *RESOLUTION_MEGAPIXELS)
+SELECTED_VIDEO_CANVAS_ASPECTS = (CANVAS_FOLLOW_SOURCE, *ASPECT_RATIOS)
 # AICG3D：分段替换长视频时，「已选视频上下文」要求内部切点落在 17 帧潜空间网格上
 # （合法切点 = 5 + 17k 帧），偏差超过 8 帧会直接抛错要用户自己改。自动切点节点按
 # 这个网格生成，保证一次通过 —— 详见 _auto_segment_cut_frames / _motion_context_selected_video_boundaries。
@@ -3024,6 +3062,36 @@ def _h3_model_kind_error(kind: str, mismatch: str, model_name: str = "") -> Valu
     )
 
 
+class _LazyH3Model:
+    """Resolve an H3 bundle's MODEL only when a downstream node uses it."""
+
+    def __init__(self, bundle: "MiniMaxH3Bundle", kind: str = "ref2va"):
+        object.__setattr__(self, "_bundle", bundle)
+        object.__setattr__(self, "_kind", "ref2va" if kind == "ref2va" else "fl2va")
+        object.__setattr__(self, "_resolved", None)
+
+    def _resolve(self):
+        resolved = object.__getattribute__(self, "_resolved")
+        if resolved is None:
+            bundle = object.__getattribute__(self, "_bundle")
+            kind = object.__getattribute__(self, "_kind")
+            resolved = bundle.model_for(kind)
+            object.__setattr__(self, "_resolved", resolved)
+        return resolved
+
+    def __getattr__(self, name):
+        return getattr(self._resolve(), name)
+
+    def __setattr__(self, name, value):
+        if name in {"_bundle", "_kind", "_resolved"}:
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._resolve(), name, value)
+
+    def __repr__(self):
+        return f"<LazyH3Model kind={object.__getattribute__(self, '_kind')}>"
+
+
 @dataclass
 class MiniMaxH3Bundle:
     fl2va_model_name: str
@@ -3740,8 +3808,8 @@ class MiniMaxH3EasyMediaSplitter:
 class MiniMaxH3EasyLoader:
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "load"
-    RETURN_TYPES = ("MINIMAX_H3_BUNDLE",)
-    RETURN_NAMES = ("h3_bundle",)
+    RETURN_TYPES = ("MINIMAX_H3_BUNDLE", "MODEL")
+    RETURN_NAMES = ("h3_bundle", "model")
     DESCRIPTION = "Load either or both MiniMax H3 transformers, plus the text encoder and both AV VAEs."
 
     @classmethod
@@ -3822,8 +3890,10 @@ class MiniMaxH3EasyLoader:
                 "FLOAT",
                 {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重。"},
             )
-        # AICG3D：加速设置统一追加在最后，保证旧工作流的 widget 位置完全不变。
-        required.update(accel_lib.accel_widget_input_types())
+        # AICG3D：加载器现在只留「注意力加速」一个加速控件，前面 24 格 widget
+        # 的位置完全不变；运动缓存（MotionCache）的开关与细项已从加载器移除，
+        # 需要调这些参数就用独立的「MiniMax H3 Aicg 加速设置」节点。
+        required.update(accel_lib.accel_widget_input_types(motion_cache=False))
         return {"required": required}
 
     @classmethod
@@ -3831,7 +3901,7 @@ class MiniMaxH3EasyLoader:
         keys = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae", "non_h3_policy"]
         for index in range(1, LORA_SLOT_COUNT + 1):
             keys.extend((f"lora_{index}", f"lora_{index}_strength"))
-        keys.extend(accel_lib.ACCEL_WIDGET_NAMES)
+        keys.append(accel_lib.ACCEL_WIDGET_NAMES[0])
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
     def load(self, fl2va_model, ref2va_model, text_encoder, video_vae, audio_vae, **kwargs):
@@ -3847,7 +3917,7 @@ class MiniMaxH3EasyLoader:
         )
         accel_config = accel_lib.accel_config_from_mapping(kwargs)
         accel_lib.log_accel_config(accel_config, "加载器")
-        return (MiniMaxH3Bundle(
+        bundle = MiniMaxH3Bundle(
             fl2va_model_name=fl2va_model,
             ref2va_model_name=ref2va_model,
             clip_name=text_encoder,
@@ -3859,7 +3929,8 @@ class MiniMaxH3EasyLoader:
             loras=loras,
             non_h3_policy=str(kwargs.get("non_h3_policy") or NON_H3_POLICY_FALLBACK),
             accel=accel_config,
-        ),)
+        )
+        return bundle, _LazyH3Model(bundle, "ref2va")
 
 
 class MiniMaxH3EasyModelAdapter:
@@ -4096,6 +4167,25 @@ def _sync_reference_video_cache_scope(items: list[_MediaInput]) -> None:
         print("[MiniMax H3 Aicg] Reference video decode cache scope changed")
 
 
+def _is_video_payload(value: Any) -> bool:
+    """这个值能不能当 VIDEO 素材用。
+
+    三种形态都算：ComfyUI 的 VIDEO 对象（有 ``get_components``）、AICG3D
+    资源库里的视频包（``{"images": tensor, "fps": ...}``）、以及直接给的
+    ``[frames, h, w, c]`` 帧张量。
+    """
+    if value is None:
+        return False
+    if hasattr(value, "get_components"):
+        return True
+    if isinstance(value, Mapping):
+        frames = value.get("images")
+        if frames is None:
+            frames = value.get("frames")
+        return isinstance(frames, torch.Tensor) and frames.ndim == 4
+    return isinstance(value, torch.Tensor) and value.ndim == 4
+
+
 def _video_parts(value: Any) -> tuple[torch.Tensor, dict | None, float]:
     if hasattr(value, "get_components"):
         key = _reference_video_cache_key(value) if REFERENCE_VIDEO_CACHE_ENABLED else None
@@ -4173,6 +4263,47 @@ def _selected_video_delivery_frames(output_frames: int) -> int:
     while count % 17 != 5:
         count += 1
     return count
+
+
+# 源视频参考（一体化人物替换）用的固定输入下标与正则。
+# 下标故意取一个素材库永远不会用到的值，避免和 <Picture N> 的 @ 引用编号冲突。
+SOURCE_VIDEO_REFERENCE_INDEX = 900
+# 换人模式下原片参考的缩放比：越小越不会抄原片人脸，构图/动作也会越松。
+SOURCE_VIDEO_REFERENCE_SCALE = 0.34
+SEGMENT_VIDEO_TAG_PATTERN = re.compile(r"<Video\s+[0-9]{1,2}\s*>", re.IGNORECASE)
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    """容错读取布尔控件：旧工作流里的空值/字符串不该让整条流程报错。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    return bool(default)
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    """容错读取数值控件，非有限值一律回落到默认值。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return number if math.isfinite(number) else float(default)
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    """容错读取整数控件（字符串、浮点、空值都能安全落地）。"""
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return int(default)
+    return number if number else int(default)
 
 
 def _selected_video_segment_boundaries(
@@ -4317,12 +4448,85 @@ def _selected_video_prompt_parts(prompt: str, segment_count: int) -> list[str]:
     return parts
 
 
+try:  # torchaudio is optional on some hosts; never leave this name undefined.
+    import torchaudio
+except Exception:  # pragma: no cover - depends on the host environment
+    torchaudio = None
+
+
+def _h3_resample_audio(waveform, source_rate, target_rate):
+    """Resample ``waveform`` onto ``target_rate`` without a hard torchaudio need.
+
+    torchaudio is optional on some ComfyUI hosts.  When it is unavailable the
+    reference-audio encode path still works: scipy's polyphase resampler is used
+    first, and a pure-torch windowed-sinc low-pass plus linear interpolation is
+    the last resort.
+    """
+    source_rate = int(source_rate)
+    target_rate = int(target_rate)
+    if not isinstance(waveform, torch.Tensor) or waveform.numel() == 0:
+        return waveform
+    if source_rate <= 0 or target_rate <= 0 or source_rate == target_rate:
+        return waveform
+
+    if torchaudio is not None:
+        try:
+            return torchaudio.functional.resample(waveform, source_rate, target_rate)
+        except Exception:
+            pass
+
+    original_shape = tuple(waveform.shape)
+    original_dtype = waveform.dtype
+    original_device = waveform.device
+    frames = int(original_shape[-1])
+    # Collapse batch/channel dims into one axis so (T,), (C, T) and (B, C, T)
+    # all share a single code path.
+    work = waveform.reshape(1, -1, frames).to(device="cpu", dtype=torch.float32)
+    channels = int(work.shape[1])
+
+    divisor = math.gcd(source_rate, target_rate)
+    up = target_rate // divisor
+    down = source_rate // divisor
+
+    resampled = None
+    try:
+        import numpy as np
+        from scipy.signal import resample_poly
+
+        resampled = torch.from_numpy(
+            np.ascontiguousarray(resample_poly(work.numpy(), up, down, axis=-1))
+        )
+    except Exception:
+        resampled = None
+
+    if resampled is None:
+        target_frames = max(1, int(round(frames * float(target_rate) / float(source_rate))))
+        filtered = work
+        if target_rate < source_rate:
+            # Anti-alias before interpolating when we are downsampling.
+            half = 16
+            cutoff = 0.95 * (float(target_rate) / float(source_rate))
+            offsets = torch.arange(-half, half + 1, dtype=torch.float64)
+            window = torch.hann_window(2 * half + 1, periodic=False, dtype=torch.float64)
+            kernel = (cutoff * torch.sinc(cutoff * offsets)) * window
+            kernel = (kernel / kernel.sum()).to(torch.float32)
+            kernel = kernel.reshape(1, 1, -1).expand(channels, 1, kernel.numel()).contiguous()
+            padded = torch.nn.functional.pad(work, (half, half), mode="replicate")
+            filtered = torch.nn.functional.conv1d(padded, kernel, groups=channels)
+        resampled = torch.nn.functional.interpolate(
+            filtered, size=target_frames, mode="linear", align_corners=False
+        )
+
+    resampled = resampled.reshape(original_shape[:-1] + (int(resampled.shape[-1]),))
+    return resampled.to(dtype=original_dtype, device=original_device)
+
+
 def _encode_reference_audio(audio_vae, audio: Mapping):
     waveform = audio["waveform"]
     sample_rate = _audio_sample_rate(audio)
     vae_sample_rate = int(getattr(audio_vae, "audio_sample_rate", 32000))
     if sample_rate != vae_sample_rate:
-        waveform = torchaudio.functional.resample(waveform, sample_rate, vae_sample_rate)
+        waveform = _h3_resample_audio(waveform, sample_rate, vae_sample_rate)
     latent = audio_vae.encode(waveform[:1].movedim(1, -1))
     return latent, latent.shape[-1]
 
@@ -5454,10 +5658,12 @@ def _empty_image_conditioning(bundle, prompt, width, height, length, first_frame
     return conditioning, latent, tuple(keyframe_sources)
 
 
-def _reference_conditioning(
-    bundle, prompt, width, height, length, ref_image_size,
+def _reference_prepare(
+    bundle, width, height, length, ref_image_size,
     items: list[_MediaInput], *, include_audio: bool = True,
+    source_reference_scale: float = SOURCE_VIDEO_REFERENCE_SCALE,
 ):
+    """VAE 侧：把一段参考里的图像 / 视频 / 音频全部编码成 H3 参考块（不碰文本编码器）。"""
     latent, frame_count = h3._empty_av_latent(width, height, length)
     ref_items = []
     ref_blocks = []
@@ -5522,6 +5728,22 @@ def _reference_conditioning(
             canvas_w = max(h3.CANVAS_MULTIPLE, round(video_w / h3.CANVAS_MULTIPLE) * h3.CANVAS_MULTIPLE)
             canvas_h = max(h3.CANVAS_MULTIPLE, round(video_h / h3.CANVAS_MULTIPLE) * h3.CANVAS_MULTIPLE)
         frames = h3._resize(frames, canvas_w, canvas_h, "disabled")
+        if item.input_index == SOURCE_VIDEO_REFERENCE_INDEX:
+            # 换人模式的关键：原片参考只当「动作/构图模板」，不能让它把原片的人脸、
+            # 服装、背景一起带进来。缩放比由节点上的「原片参考强度」控制（默认 0.34
+            # ≈ 1/3 边长 ≈ 1/9 像素）；调到很小就等于只留动作轮廓。
+            _source_scale = max(0.0, float(source_reference_scale))
+            small_w = max(
+                h3.CANVAS_MULTIPLE,
+                int(round(canvas_w * _source_scale / h3.CANVAS_MULTIPLE)) * h3.CANVAS_MULTIPLE,
+            )
+            small_h = max(
+                h3.CANVAS_MULTIPLE,
+                int(round(canvas_h * _source_scale / h3.CANVAS_MULTIPLE)) * h3.CANVAS_MULTIPLE,
+            )
+            if small_w < canvas_w or small_h < canvas_h:
+                frames = h3._resize(frames, small_w, small_h, "disabled")
+                canvas_w, canvas_h = small_w, small_h
         if frames.shape[0] > frame_count:
             frames = frames[:frame_count]
         count = frames.shape[0]
@@ -5566,19 +5788,44 @@ def _reference_conditioning(
 
     if not ref_items or all(item.get("type") == "audio" for item in ref_items):
         raise ValueError("Reference mode needs at least one image or video")
+    # 只返回 VAE 侧的中间结果；文本编码交给 _reference_encode，这样上层可以
+    # 先把所有段的 VAE 编码跑完，再统一进文本编码器（15GB 只加载一次）。
+    return {
+        "latent": latent,
+        "ref_items": ref_items,
+        "ref_blocks": ref_blocks,
+        "tag_by_input": tag_by_input,
+        "soundtrack_pairs": soundtrack_pairs,
+        "video_count": len(videos),
+        "audio_count": len(audios),
+    }
 
+
+def _reference_encode(bundle, prompt, prepared):
+    """文本编码器侧：解析 <Picture/Video/Audio N> 标签并生成参考条件。"""
     resolved_prompt = _resolve_reference_prompt(
         prompt,
-        tag_by_input,
-        soundtrack_pairs,
-        len(videos),
-        len(audios),
+        prepared["tag_by_input"],
+        prepared["soundtrack_pairs"],
+        prepared["video_count"],
+        prepared["audio_count"],
     )
-
-    tokens = bundle.clip.tokenize(resolved_prompt, minimax_ref_items=ref_items)
+    tokens = bundle.clip.tokenize(resolved_prompt, minimax_ref_items=prepared["ref_items"])
     conditioning = bundle.clip.encode_from_tokens_scheduled(tokens)
-    conditioning = node_helpers.conditioning_set_values(conditioning, {"minimax_refs": ref_blocks})
-    return conditioning, latent
+    return node_helpers.conditioning_set_values(conditioning, {"minimax_refs": prepared["ref_blocks"]})
+
+
+def _reference_conditioning(
+    bundle, prompt, width, height, length, ref_image_size,
+    items: list[_MediaInput], *, include_audio: bool = True,
+    source_reference_scale: float = SOURCE_VIDEO_REFERENCE_SCALE,
+):
+    """一次性版本（VAE + 文本编码），保持既有调用点行为不变。"""
+    prepared = _reference_prepare(
+        bundle, width, height, length, ref_image_size, items, include_audio=include_audio,
+        source_reference_scale=source_reference_scale,
+    )
+    return _reference_encode(bundle, prompt, prepared), prepared["latent"]
 
 
 def _validate_reference_media(items: list[_MediaInput], scope: str = "Reference mode") -> None:
@@ -5834,9 +6081,11 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
     def INPUT_TYPES(cls):
         base = super().INPUT_TYPES()
         base_required = dict(base.get("required") or {})
+        # AICG3D：本节点不再要「候选视频」这个独立输入。要替换的长视频直接在
+        # 「MiniMax H3 Aicg资源库」上传，本节点从资源库（AICG3D 输入）里取第一
+        # 条视频当时间轴母版；老工作流显式接进来的 selected_video 仍然兼容。
         selected = {
             "h3_bundle": base_required.pop("h3_bundle"),
-            "selected_video": ("VIDEO",),
         }
         for name in ("mode", "prompt"):
             if name in base_required:
@@ -5880,10 +6129,153 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
                 },
             ),
         })
+        # 一体化分段替换：本节点自带「每段几秒 → 自动切点」，并把源视频默认作为
+        # <Video 1> 参考送进参考条件，H3 才真的看得见原片再按提示词换人。
+        # 新控件一律追加在控件列表最后，旧工作流的位置序不会错位。
+        selected.update({
+            "auto_cuts": ("BOOLEAN", {"default": True}),
+            "segment_seconds": ("FLOAT", {"default": 5.0, "min": 0.5, "max": 60.0, "step": 0.1}),
+            "snap_to_latent_grid": ("BOOLEAN", {"default": True}),
+            "max_segments": ("INT", {"default": 120, "min": 1, "max": 600, "step": 1}),
+            "video_reference": (
+                "BOOLEAN",
+                {
+                    "default": True,
+                    "tooltip": (
+                        "决定走哪条通路（直接影响动作一致性）：\n"
+                        "开 = 原片当 <Video 1> 参考，从空潜变量重画：换人换景更彻底，"
+                        "但动作只是从参考里推出来的，容易和原片不一致；\n"
+                        "关 = 不给原片参考，直接从原片潜变量起步：动作最稳，"
+                        "人物/背景按参考图重绘，重绘幅度由「步数 / 调度」里的 denoise 决定——"
+                        "0.4~0.6 = 动作基本保持；0.8 以上接近重画；1.0 = 动作基本丢。"
+                    ),
+                },
+            ),
+        })
+        # 输出画布（分辨率 / 宽高比 / 像素）和收尾清理同样追加在最后，
+        # 老工作流已保存的控件位置完全不受影响。
+        selected.update({
+            "output_resolution": (
+                list(SELECTED_VIDEO_CANVAS_BUCKETS),
+                {
+                    "default": CANVAS_FOLLOW_SOURCE,
+                    "tooltip": (
+                        "输出分辨率。默认「跟随原片」= 按源视频自己的像素出片（老行为）；"
+                        "选 480P / 720P / 1080P 等档位，就按该档位的像素量 + 右边选的宽高比重算画布。"
+                    ),
+                },
+            ),
+            "output_aspect_ratio": (
+                list(SELECTED_VIDEO_CANVAS_ASPECTS),
+                {
+                    "default": CANVAS_FOLLOW_SOURCE,
+                    "tooltip": (
+                        "输出宽高比。默认「跟随原片」；改成 16:9 / 9:16 等就把画幅换掉——"
+                        "在「跟随原片」档下像素总量按原片规模保留，只换形状。"
+                    ),
+                },
+            ),
+            "cleanup_after_run": (
+                list(RENDER_CLEANUP_CHOICES),
+                {
+                    "default": RENDER_CLEANUP_UNLOAD,
+                    "tooltip": (
+                        "整条线跑完（⑥ 分段解码之后）怎么收尾："
+                        "卸载模型 = 连模型一起卸出显存并回收内存，占用最低，代价是下次运行要重新加载；"
+                        "释放缓存 = 只把缓存还给驱动，模型留在显存里，下次运行更快；"
+                        "不处理 = 保持 ComfyUI 默认行为。"
+                    ),
+                },
+            ),
+            "source_reference_scale": (
+                "FLOAT",
+                {
+                    "default": SOURCE_VIDEO_REFERENCE_SCALE,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.02,
+                    "tooltip": (
+                        "原片参考强度（换人模式专用）：原片作为 <Video 1> 参考时缩小到原来的几倍。"
+                        "1.0 = 原样喂给模型，最容易把原片的人物/服装/背景一起照抄下来；"
+                        "0.34 = 默认（约 1/9 像素），只留下构图、动作、景别；"
+                        "调到 0.15 以下基本只剩动作轮廓，人物长相就只能靠参考图重新生成——"
+                        "如果换了参考图但成片还是原片那个人，就把这一格往小调。"
+                    ),
+                },
+            ),
+            "face_anchor": (
+                "BOOLEAN",
+                {
+                    "default": True,
+                    "tooltip": (
+                        "锁脸（人脸锚定）：从参考图里抠出人脸，贴到每段原片首帧的人脸位置，"
+                        "再把这一帧当关键帧送进采样，逼模型用参考图的长相。\n"
+                        "· 换人模式=开：每段首帧 = 原片画面 + 参考脸，身份最重，但容易被原片轮廓带回原人；\n"
+                        "· 换人模式=关（保动作）：动作先由原片潜变量锚死，首帧再用参考脸锚一次身份——"
+                        "想要「动作不变 + 换成参考图那个人」就用这个组合，配上 denoise 0.45~0.55。"
+                    ),
+                },
+            ),
+            "replacement_target": (
+                list(SELECTED_VIDEO_REPLACEMENT_TARGETS),
+                {
+                    "default": SELECTED_VIDEO_REPLACEMENT_CUSTOM,
+                    "tooltip": (
+                        "简化模式：只替换人物，或只替换背景。选择后，节点自动生成对应提示词，"
+                        "并自动使用按每段秒数切分、逐段替换、最后拼回完整视频。"
+                    ),
+                },
+            ),
+            "replacement_total_seconds": (
+                "FLOAT",
+                {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 600.0,
+                    "step": 0.1,
+                    "tooltip": "替换总时长（秒）。0 = 使用整条原视频；例如原片 20 秒填 10 就只替换前 10 秒。",
+                },
+            ),
+            "replacement_description": (
+                "STRING",
+                {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": "补充说明要替换的人物、服装、场景或必须保持的内容，会附加到自动提示词。",
+                },
+            ),
+        })
         # Keep the inherited hidden media/optimizer transport inputs intact;
         # this gives the dedicated node the same @-mention and Media Loader /
         # Media Bridge behaviour as the normal Aicg node.
         return {"required": selected, "optional": dict(base.get("optional") or {})}
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, replacement_target=SELECTED_VIDEO_REPLACEMENT_CUSTOM, **_kwargs):
+        # The frontend localizes combo labels before submission.
+        cls._replacement_target(replacement_target)
+        return True
+
+    @staticmethod
+    def _resolve_source_video(selected_video: Any, items: list[_MediaInput]) -> tuple[Any, list[_MediaInput]]:
+        """挑出当「时间轴母版」的那条视频，并把它从参考素材里摘掉。
+
+        显式接进来的 VIDEO 优先（老工作流照旧）；没接就看 AICG3D 资源库，
+        取里面的第一条视频。摘掉是为了不让同一条片子既当母版、又当
+        ``<Video N>`` 参考重复编码。
+        """
+        if _is_video_payload(selected_video):
+            return selected_video, list(items)
+        source = next(
+            (item for item in items if item.media_type == "video" and _is_video_payload(item.value)),
+            None,
+        )
+        if source is None:
+            raise ValueError(
+                "「已选视频上下文」现在直接从「MiniMax H3 Aicg资源库」取视频："
+                "请把要被替换的长视频上传到资源库节点，再把它的 AICG3D 输出接到本节点。"
+            )
+        return source.value, [item for item in items if item is not source]
 
     @staticmethod
     def _nearest_aspect_ratio(width: int, height: int) -> str:
@@ -5896,26 +6288,179 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
         )
 
     @classmethod
-    def generate(cls, h3_bundle, selected_video, mode, prompt, advanced, keyframe_role,
+    def _resolve_canvas(cls, frames, resolution, aspect_ratio, width, height):
+        """算出这一条片子的输出画布，返回 ``(宽, 高, 宽高比)``。
+
+        默认完全跟随原片（老行为），此时画布就是源视频自己的像素。用户指定了档位 /
+        宽高比时：
+        * 只改宽高比（分辨率仍是「跟随原片」）→ 保留原片的像素总量，只换画幅形状；
+        * 指定了分辨率档位 → 按该档位的像素量 + 选定宽高比重算（宽/高只在 custom 档用）。
+        """
+        video_width = _align_canvas_dimension(int(frames.shape[2]))
+        video_height = _align_canvas_dimension(int(frames.shape[1]))
+        video_aspect = cls._nearest_aspect_ratio(video_width, video_height)
+        follow_resolution = str(resolution or CANVAS_FOLLOW_SOURCE) == CANVAS_FOLLOW_SOURCE
+        requested_aspect = str(aspect_ratio or CANVAS_FOLLOW_SOURCE)
+        chosen_aspect = requested_aspect if requested_aspect in ASPECT_RATIOS else video_aspect
+        if follow_resolution:
+            if chosen_aspect == video_aspect:
+                out_width, out_height = video_width, video_height
+            else:
+                ratio_w, ratio_h = ASPECT_RATIOS[chosen_aspect]
+                scale = math.sqrt((video_width * video_height) / float(ratio_w * ratio_h))
+                out_width = _align_canvas_dimension(ratio_w * scale)
+                out_height = _align_canvas_dimension(ratio_h * scale)
+        else:
+            out_width, out_height = _canvas_dimensions(
+                resolution, chosen_aspect, int(width), int(height),
+            )
+        out_width = max(h3.CANVAS_MULTIPLE, min(int(nodes.MAX_RESOLUTION), int(out_width)))
+        out_height = max(h3.CANVAS_MULTIPLE, min(int(nodes.MAX_RESOLUTION), int(out_height)))
+        return out_width, out_height, chosen_aspect
+
+    @staticmethod
+    def _replacement_target(value: Any) -> str:
+        raw = str(value or SELECTED_VIDEO_REPLACEMENT_CUSTOM).strip().lower()
+        aliases = {
+            SELECTED_VIDEO_REPLACEMENT_CUSTOM: SELECTED_VIDEO_REPLACEMENT_CUSTOM,
+            "自定义": SELECTED_VIDEO_REPLACEMENT_CUSTOM,
+            "custom": SELECTED_VIDEO_REPLACEMENT_CUSTOM,
+            SELECTED_VIDEO_REPLACEMENT_PEOPLE: SELECTED_VIDEO_REPLACEMENT_PEOPLE,
+            "替换人物": SELECTED_VIDEO_REPLACEMENT_PEOPLE,
+            "replace people": SELECTED_VIDEO_REPLACEMENT_PEOPLE,
+            SELECTED_VIDEO_REPLACEMENT_BACKGROUND: SELECTED_VIDEO_REPLACEMENT_BACKGROUND,
+            "替换背景": SELECTED_VIDEO_REPLACEMENT_BACKGROUND,
+            "replace background": SELECTED_VIDEO_REPLACEMENT_BACKGROUND,
+            SELECTED_VIDEO_REPLACEMENT_MULTI: SELECTED_VIDEO_REPLACEMENT_MULTI,
+            "多参考": SELECTED_VIDEO_REPLACEMENT_MULTI,
+            "multi reference": SELECTED_VIDEO_REPLACEMENT_MULTI,
+        }
+        return aliases.get(raw, SELECTED_VIDEO_REPLACEMENT_CUSTOM)
+
+    @classmethod
+    def generate(cls, h3_bundle, mode, prompt, advanced, keyframe_role,
                  ref_image_size, reference_mention_mode, prompt_optimizer_settings,
                  prompt_optimizer_scene_guide, segment_mode, segment_cuts,
                  context_length, continuity_mode, context_prompt_optimizer_mode,
-                 context_prompt_optimizer_concurrency, **kwargs):
-        if not hasattr(selected_video, "get_components") and not isinstance(selected_video, (Mapping, torch.Tensor)):
-            raise ValueError("Connect a completed candidate video from Load Video or another VIDEO node")
+                 context_prompt_optimizer_concurrency, auto_cuts=True, segment_seconds=5.0,
+                 snap_to_latent_grid=True, max_segments=120, video_reference=True,
+                 output_resolution=CANVAS_FOLLOW_SOURCE, output_aspect_ratio=CANVAS_FOLLOW_SOURCE,
+                 output_width=1344, output_height=768, cleanup_after_run=None,
+                 source_reference_scale=SOURCE_VIDEO_REFERENCE_SCALE,
+                 face_anchor=True,
+                 replacement_target=SELECTED_VIDEO_REPLACEMENT_CUSTOM,
+                 replacement_total_seconds=0.0,
+                 replacement_description="",
+                 selected_video=None, **kwargs):
+        # 源视频来源：优先用显式接进来的 VIDEO（兼容老工作流），否则取 AICG3D
+        # 资源库里的第一条视频。library_items 保留完整素材表，方便 @ 引用按资
+        # 源库里的原始顺序定位（前端就是按这个顺序发的引用标记）。
+        library_items = cls._collect_media(kwargs)
+        selected_video, items = cls._resolve_source_video(selected_video, library_items)
+        # 「运行后清理」在本节点只是记档：真正的卸载放在这条链的最后一步（⑥ 分段解码），
+        # 否则会在采样前就把模型卸掉，反而拖慢后面的分段采样。
+        cleanup_policy = str(cleanup_after_run or RENDER_CLEANUP_UNLOAD)
         frames, source_audio, source_fps = _video_parts(selected_video)
         frames = _normalize_video_frames(frames)
         frames = _resample_video_frames(frames, float(source_fps or h3.FPS))
+        replacement_mode = cls._replacement_target(replacement_target)
+        simple_replacement = replacement_mode in {
+            SELECTED_VIDEO_REPLACEMENT_PEOPLE,
+            SELECTED_VIDEO_REPLACEMENT_BACKGROUND,
+            SELECTED_VIDEO_REPLACEMENT_MULTI,
+        }
+        original_frame_count = max(5, int(frames.shape[0]))
+        requested_total_seconds = max(0.0, _coerce_float(replacement_total_seconds, 0.0))
+        if simple_replacement and requested_total_seconds > 0.0:
+            requested_frames = max(5, int(round(requested_total_seconds * float(h3.FPS))))
+            keep_frames = min(int(frames.shape[0]), requested_frames)
+            frames = frames[:keep_frames]
+            if source_audio is not None:
+                source_audio = _segment_trim_audio(source_audio, 0, keep_frames)
+            print(
+                "[AICG3D][替换] 总时长限制：{:.2f}s / 原片 {:.2f}s".format(
+                    keep_frames / float(h3.FPS),
+                    original_frame_count / float(h3.FPS),
+                ),
+                flush=True,
+            )
         source_frame_count = max(5, int(frames.shape[0]))
+        if simple_replacement:
+            image_count = sum(1 for item in items if item.media_type == "image")
+            description = str(replacement_description or "").strip()
+            if replacement_mode == SELECTED_VIDEO_REPLACEMENT_MULTI:
+                ref_image_size = REF_IMAGE_15K
+                prompt = str(prompt or "").strip() or description or SELECTED_VIDEO_MULTI_REFERENCE_PROMPT
+                prompt = re.sub(r"图像\s*([0-9]+)", r"<Picture \1>", prompt)
+                prompt = re.sub(r"视频\s*([0-9]+)", r"<Video \1>", prompt)
+                if not SEGMENT_TAG_PATTERN.search(prompt):
+                    prompt = f"{prompt} 参考视频：<Video 1>；参考图片：<Picture 1>、<Picture 2>。"
+                prompt = re.sub(r"<Video\s+1\s*>", "原视频", prompt, flags=re.IGNORECASE)
+            else:
+                if replacement_mode == SELECTED_VIDEO_REPLACEMENT_PEOPLE:
+                    ref_image_size = REF_IMAGE_15K
+                picture_index = 2 if replacement_mode == SELECTED_VIDEO_REPLACEMENT_BACKGROUND and image_count >= 2 else 1
+                prompt = SELECTED_VIDEO_SIMPLE_REPLACEMENT_PROMPTS[replacement_mode].replace(
+                    "<Picture 1>", f"<Picture {picture_index}>"
+                )
+                if description:
+                    prompt = f"{prompt} 补充要求：{description}"
+            continuity_mode = CONTEXT_CONTINUITY_LATENT
+            segment_mode_value = SELECTED_VIDEO_SEGMENT_TIME_CUTS
+            auto_cuts = True
+            snap_to_latent_grid = True
+            max_segments = min(600, max(1, _coerce_int(max_segments, 120)))
+            if replacement_mode == SELECTED_VIDEO_REPLACEMENT_PEOPLE:
+                prompt = f"{prompt} 必须严格保持 <Picture 1> 中人物的脸部身份、五官比例和发型，不要生成另一个同风格人物。"
+            print(
+                "[AICG3D][替换] 简化模式：{}".format(
+                    {
+                        SELECTED_VIDEO_REPLACEMENT_PEOPLE: "替换全部人物",
+                        SELECTED_VIDEO_REPLACEMENT_BACKGROUND: "替换背景",
+                        SELECTED_VIDEO_REPLACEMENT_MULTI: "多参考（由提示词决定）",
+                    }.get(replacement_mode, replacement_mode)
+                ),
+                flush=True,
+            )
         normalized_continuity_mode = (
             str(continuity_mode)
             if str(continuity_mode) in CONTEXT_CONTINUITY_MODES
             else CONTEXT_CONTINUITY_LATENT
         )
+        segment_mode_value = str(segment_mode or SELECTED_VIDEO_SEGMENT_WHOLE)
+        if simple_replacement:
+            segment_mode_value = SELECTED_VIDEO_SEGMENT_TIME_CUTS
+        cuts_spec = str(segment_cuts or "")
+        use_video_reference = _coerce_bool(video_reference, True)
+        if simple_replacement:
+            person_replacement_intent = any(
+                token in prompt for token in ("人物", "人脸", "长相", "角色", "换人", "人的脸")
+            )
+            use_video_reference = replacement_mode in {
+                SELECTED_VIDEO_REPLACEMENT_PEOPLE,
+            }
+            face_anchor = replacement_mode == SELECTED_VIDEO_REPLACEMENT_PEOPLE or (
+                replacement_mode == SELECTED_VIDEO_REPLACEMENT_MULTI and person_replacement_intent
+            )
+            source_reference_scale = 0.15 if replacement_mode == SELECTED_VIDEO_REPLACEMENT_PEOPLE else SOURCE_VIDEO_REFERENCE_SCALE
+        # auto_cuts 「非空才算开」：旧工作流里这一格是空字符串，会读成关闭，
+        # 于是继续使用上游 SegmentCuts / 手填切点，不会被自动切点顶掉。
+        if _coerce_bool(auto_cuts, False) and segment_mode_value != SELECTED_VIDEO_SEGMENT_WHOLE:
+            # 「自动分段切点」并入本节点：按每段秒数计算切点，并对齐到 17 帧潜空间网格，
+            # 保证 Motion Context 不会报 cuts cannot be aligned。
+            auto_cut_frames, _auto_cut_body = _auto_segment_cut_frames(
+                source_frame_count,
+                float(h3.FPS),
+                max(0.5, _coerce_float(segment_seconds, 5.0)),
+                _coerce_bool(snap_to_latent_grid, True),
+                max(1, _coerce_int(max_segments, 120)),
+            )
+            cuts_spec = ",".join(str(int(frame)) for frame in auto_cut_frames)
+            segment_mode_value = SELECTED_VIDEO_SEGMENT_FRAME_CUTS
         boundaries = _selected_video_segment_boundaries(
             source_frame_count,
-            str(segment_mode or SELECTED_VIDEO_SEGMENT_WHOLE),
-            segment_cuts,
+            segment_mode_value,
+            cuts_spec,
         )
         if normalized_continuity_mode == CONTEXT_CONTINUITY_LATENT and len(boundaries) > 1:
             boundaries = _motion_context_selected_video_boundaries(
@@ -5926,7 +6471,6 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
         duration_spec = ",".join(
             f"{(end - start) / float(h3.FPS):.6f}" for start, end in boundaries
         )
-        items = cls._collect_media(kwargs)
         _validate_context_media_library(items)
         optimizer_mode = (
             MODE_REFERENCE
@@ -5950,15 +6494,43 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
             ),
         )
         prompt_parts = _selected_video_prompt_parts(optimization.prompt, segment_count)
-        width = _align_canvas_dimension(int(frames.shape[2]))
-        height = _align_canvas_dimension(int(frames.shape[1]))
-        width = max(h3.CANVAS_MULTIPLE, min(int(nodes.MAX_RESOLUTION), width))
-        height = max(h3.CANVAS_MULTIPLE, min(int(nodes.MAX_RESOLUTION), height))
-        aspect_ratio = cls._nearest_aspect_ratio(width, height)
+        width, height, aspect_ratio = cls._resolve_canvas(
+            frames, output_resolution, output_aspect_ratio, output_width, output_height,
+        )
+        print(
+            f"[MiniMax H3 Aicg][换人] 输出画布 {width}x{height}（宽高比 {aspect_ratio}），"
+            f"源片 {int(frames.shape[2])}x{int(frames.shape[1])}；"
+            f"运行后清理={cleanup_policy}"
+        )
         shots = []
         uses_visual_media = False
         for index, ((start, end), text) in enumerate(zip(boundaries, prompt_parts), start=1):
-            media, rewritten = bind_segment_media(text, items)
+            # 先用完整素材表把前端的 @ 引用（__MINIMAX_H3_REF_n__）翻成官方标签，
+            # 再挑本段真正用到的素材：这样即便母版视频是从资源库里取的，引用也不会
+            # 因为位置被摘掉而落空。
+            media, rewritten = bind_segment_media(
+                _segment_expand_media_placeholders(text, library_items), items,
+            )
+            if use_video_reference:
+                # 把这一段对应的原片画面作为 <Video 1> 参考交给 H3。没有它，模型只拿到
+                # 一张人物参考图和文字，既保不住原片的镜头运动，也谈不上「替换原片里的人」。
+                window = frames[start:end]
+                if int(window.shape[0]) >= SEGMENT_MIN_CONTEXT_FRAMES:
+                    media = [
+                        _MediaInput(
+                            SOURCE_VIDEO_REFERENCE_INDEX,
+                            "video",
+                            {
+                                "images": window.detach().to("cpu").contiguous(),
+                                "fps": float(h3.FPS),
+                            },
+                        ),
+                        *media,
+                    ]
+                    if not SEGMENT_VIDEO_TAG_PATTERN.search(rewritten):
+                        rewritten = " ".join(
+                            part for part in (rewritten.strip(), "<Video 1>") if part
+                        )
             if media:
                 _validate_reference_media(media, f"Selected Video Segment {index}")
                 uses_visual_media = uses_visual_media or any(
@@ -5994,8 +6566,22 @@ class MiniMaxH3EasySelectedVideoContext(MiniMaxH3Easy):
             "ref_image_size": ref_image_size,
             "shots": shots,
             "selected_video": selected_video,
-            "selected_video_segment_mode": str(segment_mode or SELECTED_VIDEO_SEGMENT_WHOLE),
+            "selected_video_segment_mode": segment_mode_value,
             "selected_video_source_frames": source_frame_count,
+            "replacement_target": replacement_mode,
+            # 是否把原片作为 <Video 1> 参考（= 换人模式）。render_chain 用它决定
+            # 是从空潜变量重画（换人），还是沿用「原片潜变量 + 二采」的老行为。
+            "video_reference": bool(use_video_reference),
+            # ⑥ 分段解码是这条链的最后一步重活，跑完由它按这个策略收尾。
+            "cleanup_after_run": cleanup_policy,
+            # 换人模式：原片参考缩小到几分之几（越小越不会照抄原片的人物/服装/背景）。
+            # 注意：这里不能用 `or`——0.0 是合法值（= 完全不给原片细节），会被 falsy 吃掉。
+            "source_reference_scale": max(
+                0.0,
+                float(SOURCE_VIDEO_REFERENCE_SCALE if source_reference_scale is None else source_reference_scale),
+            ),
+            # 锁脸开关：关掉就不再往原片首帧上贴参考脸。
+            "face_anchor": _coerce_bool(face_anchor, True),
         }
         model = h3_bundle.model_for(plan["model_role"])
         context = MiniMaxH3Context(
@@ -6567,6 +7153,10 @@ class MiniMaxH3EasyRenderAdvanced:
                     },
                 ),
             },
+            "optional": {
+                # MODEL 补丁链显式连线优先；未连接时继续使用 h3_context 自带模型。
+                "model": ("MODEL",),
+            },
         }
 
     @classmethod
@@ -6619,10 +7209,11 @@ class MiniMaxH3EasyRenderAdvanced:
         steps,
         denoise,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+        model=None,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
-        model = _resolve_h3_model(h3_context)
+        model = _resolve_h3_model(h3_context, model)
         if h3_context.conditioning is None or h3_context.latent is None:
             raise ValueError(
                 "MiniMax H3 Aicg 渲染器（高级）只处理单段生成：请把上游 MiniMax H3 Aicg "
@@ -6759,6 +7350,21 @@ def _unpack_pass1(pass1: Any) -> tuple[Any, Any]:
     )
 
 
+class MiniMaxH3EasyRenderAdvancedWithModel(MiniMaxH3EasyRenderAdvanced):
+    """Same renderer, with MODEL ordered before H3 Context for a clean two-track layout."""
+
+    DESCRIPTION = (
+        "AICG-渲染器（高级·加速）：MODEL 优先使用显式补丁链，H3 Context 负责条件与 latent。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        base = super().INPUT_TYPES()
+        required = {"model": ("MODEL",)}
+        required.update(base["required"])
+        return {"required": required}
+
+
 class _StageAbsoluteProgress:
     """把分块采样的进度回调同时接到「原生进度条」和「渲染器阶段进度条」上。
 
@@ -6878,6 +7484,9 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
                     },
                 ),
             },
+            "optional": {
+                "model": ("MODEL",),
+            },
         }
 
     @classmethod
@@ -6897,6 +7506,7 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         sample_preview=RENDER_PREVIEW_OFF,
         preview_interval=RENDER_PREVIEW_INTERVAL,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+        model=None,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
@@ -6906,7 +7516,7 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
                 "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
             )
 
-        model = _resolve_h3_model(h3_context)
+        model = _resolve_h3_model(h3_context, model)
         from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
         from h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
@@ -7677,10 +8287,11 @@ class MiniMaxH3EasySegmentRender:
     def _prepare_selected_video_chain(cls, h3_context, plan) -> MiniMaxH3SegmentResult:
         """Convert selected-video timeline ranges into first-pass segments.
 
-        No H3 denoising happens here.  The existing Segment Refine node owns
-        both the Pixel Resize and Latent Upscale second-pass paths, so this
-        branch only makes a candidate VIDEO look like the normal segment
-        sampler's intermediate result.
+        No H3 denoising happens here: the candidate VIDEO is only VAE-encoded
+        into the same segment intermediate the ordinary sampler path consumes.
+        ``render_chain`` then runs the replacement generation over that
+        intermediate, and the Segment Refine node can still follow with its
+        Pixel Resize / Latent Upscale second pass.
         """
         selected_video = plan.get("selected_video") or getattr(h3_context, "selected_video", None)
         if not hasattr(selected_video, "get_components") and not isinstance(selected_video, (Mapping, torch.Tensor)):
@@ -7779,10 +8390,59 @@ class MiniMaxH3EasySegmentRender:
         bundle = plan.get("bundle")
         if not isinstance(bundle, MiniMaxH3Bundle):
             raise ValueError("The segment plan has no MiniMax H3 bundle")
-        if plan.get("selected_video") is not None or getattr(h3_context, "selected_video", None) is not None:
+        selected_video_plan = (
+            plan.get("selected_video") is not None
+            or getattr(h3_context, "selected_video", None) is not None
+        )
+        if selected_video_plan:
             if sampling_plan is not None:
                 raise ValueError("Sampling strategies do not yet support selected-video preparation/refinement")
-            return (cls._prepare_selected_video_chain(h3_context, plan),)
+            # 换人模式（默认）：原片只作为 <Video 1> 参考进入参考条件，采样从「空潜变量」
+            # 开始。H3 是 flow 模型，若把原片编码成起始潜变量，注入噪声的上限只相当于
+            # 约 0.5 的破坏度——那永远只是二采精修，人物不可能被换掉，这正是之前
+            # 「换不了人」的根因。关掉「把原片作为 <Video 1> 参考」时才退回老行为。
+            if not _coerce_bool(plan.get("video_reference"), True):
+                prepared = cls._prepare_selected_video_chain(h3_context, plan)
+                return MiniMaxH3EasySegmentRefine.refine_chain(
+                    h3_context,
+                    prepared,
+                    model=model,
+                    sampler=sampler,
+                    sigmas=sigmas,
+                    seed=seed,
+                    refine_mode="pixel_resize",
+                    refine_execution=SEGMENT_REFINE_WHOLE,
+                    target_width=0,
+                    target_height=0,
+                    segment_seeds=segment_seeds,
+                )
+        if selected_video_plan:
+            # 换人模式=开 是「从空潜变量整段重画」，必须配完整的采样调度。
+            # 如果「步数 / 调度」里的 denoise 小于 1，调度会被截断，画面会变成「半成品」
+            # （人换了，衣服/背景也跟着走样）。这里直接把调度按完整区间重算。
+            _start_sigma = float(sigmas[0]) if torch.is_tensor(sigmas) else 1.0
+            if _start_sigma < 0.95:
+                _steps_n = max(1, int(sigmas.shape[-1]) - 1)
+                restored = None
+                try:
+                    _model_sampling = model.get_model_object("model_sampling")
+                    percent_values = torch.linspace(
+                        0.0, 1.0, _steps_n + 1, dtype=torch.float32
+                    ).tolist()
+                    restored = torch.tensor(
+                        [_model_sampling.percent_to_sigma(float(value)) for value in percent_values],
+                        dtype=torch.float32,
+                    )
+                except Exception as exc:
+                    print("[AICG3D][换人] 调度归一化失败（沿用原设置）：{}".format(exc), flush=True)
+                if torch.is_tensor(restored) and restored.ndim == 1 and int(restored.numel()) == _steps_n + 1:
+                    sigmas = restored
+                    print(
+                        "[AICG3D][换人] 换人模式=开：denoise≈%.2f 已按 1.0 重算（这条通路是整段重画，"
+                        "配部分调度只会出半成品）。想保住原片动作，请把换人模式关掉、把 denoise 设成 0.4~0.6。"
+                        % _start_sigma,
+                        flush=True,
+                    )
         width = int(plan["width"])
         height = int(plan["height"])
         continuity_mode = str(plan.get("continuity_mode") or CONTEXT_CONTINUITY_LATENT)
@@ -7793,6 +8453,9 @@ class MiniMaxH3EasySegmentRender:
             continuity_mode,
         )
         segment_seed_values = parse_segment_seeds(segment_seeds, len(shots), seed)
+        # 原片参考强度：由「已选视频上下文」节点传下来（缺省沿用 0.34）。
+        _source_scale_value = plan.get("source_reference_scale")
+        source_scale = SOURCE_VIDEO_REFERENCE_SCALE if _source_scale_value is None else max(0.0, float(_source_scale_value))
         source_audio = plan.get("source_audio")
         digital_human = str(plan.get("audio_mode") or CONTEXT_AUDIO_GENERATED) == CONTEXT_AUDIO_DIGITAL_HUMAN
         if sampling_plan is not None and continuity_mode in CONTEXT_CONTINUITY_AV_MODES:
@@ -7801,6 +8464,18 @@ class MiniMaxH3EasySegmentRender:
         total_steps = max(1, len(shots) * steps_per_shot)
         progress = comfy.utils.ProgressBar(total_steps)
         terminal_progress = _H3TerminalProgress("Context Render", len(shots))
+        if selected_video_plan:
+            _diag_prompt = str((shots[0] or {}).get("prompt") or "")[:120].replace("\n", " ")
+            print(
+                "[AICG3D][换人] 共 {} 段｜步数 {}｜sigma {}→{}｜采样起点=空潜变量｜首段提示词：{}".format(
+                    len(shots),
+                    max(1, int(sigmas.shape[-1]) - 1),
+                    float(sigmas[0]),
+                    float(sigmas[-1]),
+                    _diag_prompt,
+                ),
+                flush=True,
+            )
 
         segment_samples = []
         tail_frames = None
@@ -7808,6 +8483,124 @@ class MiniMaxH3EasySegmentRender:
         previous_motion_context_tail_latent = None
         audio_reference = None
         timeline_frame = 0
+        # 换人模式：先把所有参考「预编码」完，再进采样循环。
+        # 为什么按资源类型分组：16G 卡装不下 15GB 文本编码器 + 20GB 扩散模型，
+        # 只要两种模型交替调用，ComfyUI 就得反复把权重从磁盘搬回显存（文本编码器
+        # 一次约 1 分钟）。所以这里分三段跑——音轨 VAE → 视频 VAE → 文本编码器，
+        # 每种只加载一次；采样阶段只剩扩散模型常驻。段数越多省得越多。
+        precomputed_shots = {}
+        precomputed_shots = {}
+        # 人物锁脸：从参考图里抠出人脸（设定图/拼图也能用），每段再贴到原片首帧上。
+        face_anchor = None
+        face_source_frames = None
+        if selected_video_plan and _coerce_bool(plan.get("face_anchor"), True):
+            try:
+                _selected_payload = plan.get("selected_video")
+                if _selected_payload is not None:
+                    _raw_frames, _raw_audio, _raw_fps = _video_parts(_selected_payload)
+                    face_source_frames = _resample_video_frames(
+                        _normalize_video_frames(_raw_frames), float(_raw_fps or h3.FPS),
+                    )
+                for _item in (shots[0].get("media") or []):
+                    if _item.media_type == "image":
+                        face_anchor = _face_anchor_crop(_item.value)
+                        break
+            except Exception as exc:
+                print("[AICG3D][换人] 锁脸初始化失败，已跳过：{}".format(exc), flush=True)
+            if face_anchor is None:
+                print("[AICG3D][换人] 警告：没取到参考人脸，本次只能照抄原片人物", flush=True)
+            else:
+                print(
+                    "[AICG3D][换人] 锁脸已就绪：参考脸 {}x{}，将贴到每段首帧作为关键帧".format(
+                        int(face_anchor.shape[1]), int(face_anchor.shape[0]),
+                    ),
+                    flush=True,
+                )
+        if selected_video_plan:
+            pre_started = time.perf_counter()
+            pre_audio_refs = [None] * len(shots)
+            if source_audio is not None:
+                print(
+                    "[AICG3D][换人] 预编码 1/3：{} 段原片音轨（音频 VAE）".format(len(shots)),
+                    flush=True,
+                )
+                pre_timeline = 0
+                for pre_index, pre_shot in enumerate(shots):
+                    pre_delivery = max(5, int(pre_shot.get("delivery_frames") or 5))
+                    pre_output = max(5, int(pre_shot.get("output_frames") or pre_delivery))
+                    pre_head = context_length if pre_index else 0
+                    pre_audio_refs[pre_index] = _segment_source_audio_reference(
+                        bundle,
+                        source_audio,
+                        max(0, pre_timeline - pre_head),
+                        pre_head + pre_delivery,
+                    )
+                    pre_timeline += pre_output
+            print(
+                "[AICG3D][换人] 预编码 2/3：{} 段画面参考（视频 VAE，最慢的一步，约 20~40 秒/段）".format(len(shots)),
+                flush=True,
+            )
+            pre_prepared = []
+            for pre_index, pre_shot in enumerate(shots):
+                pre_delivery = max(5, int(pre_shot.get("delivery_frames") or 5))
+                pre_head = context_length if pre_index else 0
+                pre_media = list(pre_shot.get("media") or [])
+                pre_prepared.append(
+                    _reference_prepare(
+                        bundle,
+                        width,
+                        height,
+                        _segment_target_length(pre_delivery, pre_head),
+                        plan.get("ref_image_size"),
+                        pre_media,
+                        include_audio=not digital_human,
+                        source_reference_scale=source_scale,
+                    ) if pre_media else None
+                )
+                print(
+                    "[AICG3D][换人]   2/3 已完成 {}/{} 段画面参考".format(pre_index + 1, len(shots)),
+                    flush=True,
+                )
+            pre_extra_videos = sorted({
+                item.input_index
+                for pre_shot in shots
+                for item in (pre_shot.get("media") or [])
+                if item.media_type == "video" and item.input_index != SOURCE_VIDEO_REFERENCE_INDEX
+            })
+            if pre_extra_videos:
+                print(
+                    "[AICG3D][换人] 提醒：③ 资源库还带了 {} 个额外视频（下标 {}）。"
+                    "它们会变成 <Video 2>…，等于把原片的人再喂给模型，既拖慢速度也会干扰换人；"
+                    "建议 ③ 资源库只留人物参考图。".format(len(pre_extra_videos), pre_extra_videos),
+                    flush=True,
+                )
+            print(
+                "[AICG3D][换人] 预编码 3/3：{} 段提示词（15GB 文本编码器只加载一次）".format(len(shots)),
+                flush=True,
+            )
+            for pre_index, pre_shot in enumerate(shots):
+                prepared = pre_prepared[pre_index]
+                if prepared is None:
+                    pre_conditioning, pre_latent, _pre_sources = _empty_image_conditioning(
+                        bundle,
+                        str(pre_shot.get("prompt") or ""),
+                        width,
+                        height,
+                        _segment_target_length(
+                            max(5, int(pre_shot.get("delivery_frames") or 5)),
+                            context_length if pre_index else 0,
+                        ),
+                    )
+                else:
+                    pre_conditioning = _reference_encode(
+                        bundle, str(pre_shot.get("prompt") or ""), prepared,
+                    )
+                    pre_latent = prepared["latent"]
+                precomputed_shots[pre_index] = (pre_conditioning, pre_latent, pre_audio_refs[pre_index])
+            print(
+                "[AICG3D][换人] 预编码完成，用时 {:.0f} 秒；接下来逐段采样。".format(time.perf_counter() - pre_started),
+                flush=True,
+            )
 
         for position, shot in enumerate(shots):
             terminal_progress.update(position, f"segment {position + 1} sampling")
@@ -7827,23 +8620,42 @@ class MiniMaxH3EasySegmentRender:
             head_frames = hidden_prefix_frames
             prompt_text = str(shot.get("prompt") or "")
             items = list(shot.get("media") or [])
-            source_audio_reference = _segment_source_audio_reference(
-                bundle,
-                source_audio,
-                max(0, timeline_frame - head_frames),
-                head_frames + delivery_frames,
-            ) if source_audio is not None else None
+            if selected_video_plan:
+                print(
+                    "[AICG3D][换人] 第 {}/{} 段｜{}x{}｜采样 {} 帧｜隐藏头 {}｜交付 {} 帧｜参考[{}]".format(
+                        position + 1,
+                        len(shots),
+                        width,
+                        height,
+                        sample_length,
+                        head_frames,
+                        output_frames,
+                        ", ".join("{0}:{1}".format(item.media_type, item.input_index) for item in items) or "无",
+                    ),
+                    flush=True,
+                )
+            cached_prepare = precomputed_shots.pop(position, None)
+            if cached_prepare is not None:
+                conditioning, latent, source_audio_reference = cached_prepare
+            else:
+                source_audio_reference = _segment_source_audio_reference(
+                    bundle,
+                    source_audio,
+                    max(0, timeline_frame - head_frames),
+                    head_frames + delivery_frames,
+                ) if source_audio is not None else None
+                if items:
+                    conditioning, latent = _reference_conditioning(
+                        bundle, prompt_text, width, height, sample_length,
+                        plan.get("ref_image_size"), items, include_audio=not digital_human,
+                        source_reference_scale=source_scale,
+                    )
+                else:
+                    conditioning, latent, _sources = _empty_image_conditioning(
+                        bundle, prompt_text, width, height, sample_length,
+                    )
             if digital_human and source_audio_reference is None:
                 raise ValueError("Context Segments digital human audio does not cover this segment")
-            if items:
-                conditioning, latent = _reference_conditioning(
-                    bundle, prompt_text, width, height, sample_length,
-                    plan.get("ref_image_size"), items, include_audio=not digital_human,
-                )
-            else:
-                conditioning, latent, _sources = _empty_image_conditioning(
-                    bundle, prompt_text, width, height, sample_length,
-                )
             audio_context_reference = None if digital_human else (
                 source_audio_reference if source_audio_reference is not None else audio_reference
             )
@@ -7874,6 +8686,17 @@ class MiniMaxH3EasySegmentRender:
                 guides, _covered = _segment_context_keyframes(
                     bundle, tail_frames, width, height, context_length,
                 )
+            if face_anchor is not None and face_source_frames is not None:
+                _face_start = int(shot.get("source_start_frame") or 0)
+                if 0 <= _face_start < int(face_source_frames.shape[0]):
+                    _face_composite = _face_anchor_composite(
+                        face_source_frames[_face_start], face_anchor, width, height,
+                    )
+                    if _face_composite is not None:
+                        guides = list(guides) + [{
+                            "resolved_frame_index": 0,
+                            "latent": bundle.video_vae.encode(_face_composite[None]),
+                        }]
             conditioning = _segment_add_context_conditioning(
                 conditioning,
                 guides,
@@ -7892,6 +8715,10 @@ class MiniMaxH3EasySegmentRender:
                     continuity_mode,
                 )
             if digital_human:
+                latent = _lock_audio_latent(latent, source_audio_reference["audio_latent"])
+            elif selected_video_plan and source_audio_reference is not None:
+                # 换人模式：把原片音轨锁进 AV 潜变量（视频整体重画、音频保持原片），
+                # 这样换上去的人物口型依然跟着原片说话。
                 latent = _lock_audio_latent(latent, source_audio_reference["audio_latent"])
 
             sampled = cls._sample_one(
@@ -8946,6 +9773,15 @@ class MiniMaxH3EasySegmentRefine:
             raise ValueError(f"Unsupported segment refine execution mode: {execution}")
         steps_per_segment = max(1, int(sigmas.shape[-1]) - 1)
         segment_seed_values = parse_segment_seeds(segment_seeds, len(shots), seed)
+        if plan.get("selected_video") is not None:
+            _start_sigma = float(sigmas[0]) if getattr(sigmas, "numel", lambda: 0)() else 1.0
+            if _start_sigma > 0.75:
+                print(
+                    "[AICG3D][换人] 提示：本次 denoise≈%.2f，几乎等于从头重画，人物动作会和原片不一样；"
+                    "想保住原片动作，请把「步数 / 调度」里的 denoise 降到 0.4~0.6（这一段链是用原片潜变量起步的）。"
+                    % _start_sigma,
+                    flush=True,
+                )
         planned_passes = len(shots)
         if execution == SEGMENT_REFINE_TILED:
             planned_passes = sum(
@@ -8977,6 +9813,32 @@ class MiniMaxH3EasySegmentRefine:
         previous_full_delivery_frames = 0
         previous_tail_frames = None
         timeline_frame = 0
+
+        # 「锁脸」在保动作这条路上同样管用：每段首帧用「原片画面 + 抠出来的参考脸」合成，
+        # 再当关键帧送进采样——动作由原片潜变量锚着，身份由这张脸锚着。
+        refine_face_anchor = None
+        refine_face_source = None
+        if _coerce_bool(plan.get("face_anchor"), True) and plan.get("selected_video") is not None:
+            try:
+                _raw_frames, _raw_audio, _raw_fps = _video_parts(plan.get("selected_video"))
+                refine_face_source = _resample_video_frames(
+                    _normalize_video_frames(_raw_frames), float(_raw_fps or h3.FPS),
+                )
+                for _item in (shots[0].get("media") or []):
+                    if _item.media_type == "image":
+                        refine_face_anchor = _face_anchor_crop(_item.value)
+                        break
+            except Exception as exc:
+                print("[AICG3D][换人] 锁脸初始化失败，已跳过：{}".format(exc), flush=True)
+            if refine_face_anchor is not None:
+                print(
+                    "[AICG3D][换人] 保动作模式：锁脸已就绪（{}x{}），会贴到每段首帧当关键帧。".format(
+                        int(refine_face_anchor.shape[1]), int(refine_face_anchor.shape[0]),
+                    ),
+                    flush=True,
+                )
+            elif plan.get("selected_video") is not None:
+                print("[AICG3D][换人] 警告：没取到参考人脸，本次换人只能靠参考图整体重绘。", flush=True)
 
         for position, (shot, first_pass) in enumerate(zip(shots, segments.samples)):
             terminal_progress.update(
@@ -9103,6 +9965,17 @@ class MiniMaxH3EasySegmentRefine:
                     resolved_height,
                     context_length,
                 )
+            if refine_face_anchor is not None and refine_face_source is not None:
+                _face_start = int(shot.get("source_start_frame") or 0)
+                if 0 <= _face_start < int(refine_face_source.shape[0]):
+                    _face_composite = _face_anchor_composite(
+                        refine_face_source[_face_start], refine_face_anchor, resolved_width, resolved_height,
+                    )
+                    if _face_composite is not None:
+                        guides = list(guides) + [{
+                            "resolved_frame_index": 0,
+                            "latent": bundle.video_vae.encode(_face_composite[None]),
+                        }]
             conditioning = _segment_add_context_conditioning(
                 conditioning,
                 guides,
@@ -9415,6 +10288,11 @@ class MiniMaxH3EasySegmentDecode:
         terminal_progress = _H3TerminalProgress("Segment Decode", len(segments.samples))
         result = cls._decode_streaming(segments, bundle, source_audio, progress, terminal_progress)
         terminal_progress.finish()
+        # 「已选视频上下文」上的「运行后清理」在这里落地：解码是这条链的最后一步重活，
+        # 等它跑完再卸模型，才是真正的「跑完再卸」，不会拖慢中间的分段采样。
+        cleanup_policy = plan.get("cleanup_after_run") if isinstance(plan, Mapping) else None
+        if cleanup_policy:
+            _release_render_resources(cleanup_policy)
         return result
 
 
@@ -10011,6 +10889,8 @@ class MiniMaxH3SequenceConfig:
     audio_mode: str = CONTEXT_AUDIO_GENERATED
     #: 显存档位（见 MiniMaxH3VramProfile）：8G / 12G / 16G 各有一套显存策略。
     vram: Optional[MiniMaxH3VramProfile] = None
+    #: 可选的外部 MODEL 补丁链；未连接时继续使用 bundle 里的权重。
+    model: Any = None
 
 
 @dataclass(frozen=True)
@@ -10222,6 +11102,9 @@ class MiniMaxH3EasySequenceGlobal:
                     },
                 ),
             },
+            "optional": {
+                "model": ("MODEL",),
+            },
         }
 
     @classmethod
@@ -10255,6 +11138,7 @@ class MiniMaxH3EasySequenceGlobal:
         prompt_optimizer_settings=False,
         audio_mode=SEQUENCE_AUDIO_GENERATED,
         vram_tier=VRAM_TIER_AUTO,
+        model=None,
     ):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("请把 MiniMax H3 Aicg 加载器的「模型组合」接到 h3_bundle")
@@ -10297,6 +11181,7 @@ class MiniMaxH3EasySequenceGlobal:
             preview_interval=max(1, int(preview_interval or RENDER_PREVIEW_INTERVAL)),
             audio_mode=resolved_audio_mode,
             vram=vram_profile,
+            model=model,
         )
         print(
             f"[MiniMax H3 Aicg] 顺序生成全局设置：{config.width}x{config.height}"
@@ -10486,13 +11371,13 @@ class MiniMaxH3EasySequenceSegment:
             items, prompt_text = bind_reference_media(prompt_text, items)
             _sync_reference_video_cache_scope(items)
             _validate_reference_media(items, f"视频段落 {index}")
-            model = bundle.model_for("ref2va")
+            model = config.model if config.model is not None else bundle.model_for("ref2va")
             conditioning, latent = _reference_conditioning(
                 bundle, prompt_text, width, height, sample_length, config.ref_image_size, items,
                 include_audio=not digital_human,
             )
         else:
-            model = bundle.model_for("fl2va")
+            model = config.model if config.model is not None else bundle.model_for("fl2va")
             conditioning, latent, _sources = _empty_image_conditioning(
                 bundle, prompt_text, width, height, sample_length,
             )
@@ -10805,6 +11690,7 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasyAspectRatio": MiniMaxH3EasyAspectRatio,
     "MiniMaxH3EasySecondPassConditioning": MiniMaxH3EasySecondPassConditioning,
     "MiniMaxH3EasyRenderAdvanced": MiniMaxH3EasyRenderAdvanced,
+    "MiniMaxH3EasyRenderAdvancedWithModel": MiniMaxH3EasyRenderAdvancedWithModel,
     "MiniMaxH3EasyRenderPass1": MiniMaxH3EasyRenderPass1,
     "MiniMaxH3EasyRenderPass2": MiniMaxH3EasyRenderPass2,
     "MiniMaxH3EasySequenceGlobal": MiniMaxH3EasySequenceGlobal,
@@ -10836,6 +11722,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasyAspectRatio": "MiniMax H3 Aicg 宽高比",
     "MiniMaxH3EasySecondPassConditioning": "MiniMax H3 Aicg 二采条件",
     "MiniMaxH3EasyRenderAdvanced": "AICG-渲染器（高级）",
+    "MiniMaxH3EasyRenderAdvancedWithModel": "AICG-渲染器（高级·加速）",
     "MiniMaxH3EasyRenderPass1": "AICG-渲染器（一采）",
     "MiniMaxH3EasyRenderPass2": "AICG-渲染器（二采放大）",
     "MiniMaxH3EasySequenceGlobal": "MiniMax H3 Aicg 无限段落顺序生成（全局设置）",
@@ -10847,4 +11734,121 @@ if MiniMaxH3EasyLatentUpscaler3D is not None:
     NODE_DISPLAY_NAME_MAPPINGS["MiniMaxH3EasyLatentUpscaler3D"] = "MiniMax H3 Aicg 3D Latent 放大"
 
 
+
+# ---------------------------------------------------------------- 人物锁脸
+# H3 的「参考生视频」只会照抄最丰富的参考（整段原片），单靠 <Picture 1> 参考块
+# 换不掉人。这里改为把参考图里的脸用本地人脸检测抠出来、贴到每段原片首帧的
+# 人脸位置，再作为该段的首帧关键帧送进采样——身份是像素级锚死的，动作仍由原片
+# 参考提供。检测模型缺失时自动退回旧行为（只打日志，不报错）。
+FACE_ANCHOR_MODEL_HINTS = (
+    ("ultralytics", "bbox", "face_yolov8m.pt"),
+    ("ultralytics", "face_yolov8m.pt"),
+    ("ultralytics", "bbox", "face_yolov8n.pt"),
+)
+
+
+@lru_cache(maxsize=1)
+def _face_anchor_detector():
+    try:
+        from ultralytics import YOLO
+    except Exception as exc:
+        print("[AICG3D][换人] 未安装 ultralytics，跳过锁脸：{}".format(exc), flush=True)
+        return None
+    try:
+        import folder_paths
+        root = folder_paths.models_dir
+    except Exception:
+        return None
+    for parts in FACE_ANCHOR_MODEL_HINTS:
+        path = os.path.join(root, *parts)
+        if os.path.isfile(path):
+            try:
+                model = YOLO(path)
+                print("[AICG3D][换人] 人脸检测已启用：{}".format(path), flush=True)
+                return model
+            except Exception as exc:
+                print("[AICG3D][换人] 人脸检测加载失败：{}".format(exc), flush=True)
+                return None
+    print("[AICG3D][换人] 没找到 face_yolov8m.pt（放到 models/ultralytics/bbox/ 即可启用锁脸）", flush=True)
+    return None
+
+
+def _face_anchor_boxes(image_hwc) -> list:
+    """按面积从大到小返回人脸框；任何异常都当成没人脸。"""
+    model = _face_anchor_detector()
+    if model is None or not isinstance(image_hwc, torch.Tensor):
+        return []
+    frames = image_hwc[0] if image_hwc.ndim == 4 else image_hwc
+    try:
+        arr = (frames.detach().to("cpu").float().clamp(0.0, 1.0).numpy() * 255.0).astype("uint8")
+        results = model(arr, verbose=False)
+    except Exception:
+        return []
+    boxes = []
+    for res in results or []:
+        raw = getattr(res, "boxes", None)
+        if raw is None:
+            continue
+        for box in raw:
+            try:
+                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
+                conf = float(box.conf[0]) if box.conf is not None else 1.0
+            except Exception:
+                continue
+            if conf < 0.35 or x2 - x1 < 8 or y2 - y1 < 8:
+                continue
+            boxes.append((x1, y1, x2, y2))
+    boxes.sort(key=lambda bb: (bb[2] - bb[0]) * (bb[3] - bb[1]), reverse=True)
+    return boxes
+
+
+def _face_anchor_crop(image_hwc):
+    """从参考图（哪怕是拼图设定图）里取出最大的那张脸，脸部框偏紧所以往外扩一圈。"""
+    boxes = _face_anchor_boxes(image_hwc)
+    if not boxes:
+        return None
+    frames = image_hwc[0] if image_hwc.ndim == 4 else image_hwc
+    h, w = int(frames.shape[0]), int(frames.shape[1])
+    x1, y1, x2, y2 = boxes[0]
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    half = max(x2 - x1, y2 - y1) * 0.75
+    left = int(max(0, cx - half))
+    right = int(min(w, cx + half))
+    top = int(max(0, cy - half * 1.15))
+    bottom = int(min(h, cy + half * 1.05))
+    if right - left < 16 or bottom - top < 16:
+        return None
+    return frames[top:bottom, left:right, :].detach().to("cpu").float().clamp(0.0, 1.0).contiguous()
+
+
+def _face_anchor_composite(source_hwc, anchor_hwc, out_w: int, out_h: int):
+    """把参考人脸贴到原片首帧的人脸位置，羽化边缘后返回画布尺寸的首帧。"""
+    boxes = _face_anchor_boxes(source_hwc)
+    if not boxes:
+        return None
+    h, w = int(source_hwc.shape[0]), int(source_hwc.shape[1])
+    x1, y1, x2, y2 = boxes[0]
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    half = max(x2 - x1, y2 - y1) * 0.75
+    left = int(max(0, cx - half))
+    right = int(min(w, cx + half))
+    top = int(max(0, cy - half * 1.15))
+    bottom = int(min(h, cy + half * 1.05))
+    if right - left < 16 or bottom - top < 16:
+        return None
+    frame = source_hwc.detach().to("cpu").float().clamp(0.0, 1.0).clone()
+    patch = anchor_hwc.detach().to("cpu").float().clamp(0.0, 1.0)
+    patch = torch.nn.functional.interpolate(
+        patch.permute(2, 0, 1).unsqueeze(0),
+        size=(bottom - top, right - left),
+        mode="bilinear",
+        align_corners=False,
+    )[0].permute(1, 2, 0)
+    ys = torch.linspace(-1.0, 1.0, bottom - top)
+    xs = torch.linspace(-1.0, 1.0, right - left)
+    mask = (1.0 - torch.sqrt(ys[:, None] ** 2 + xs[None, :] ** 2)).clamp(0.0, 1.0)
+    mask = (mask / 0.45).clamp(0.0, 1.0).unsqueeze(-1)
+    region = frame[top:bottom, left:right, :]
+    frame[top:bottom, left:right, :] = region * (1.0 - mask) + patch * mask
+    return h3._resize(frame[None], out_w, out_h, "center")[0]
 

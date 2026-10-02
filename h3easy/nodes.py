@@ -10688,10 +10688,10 @@ SEQUENCE_HANDOFF_DEFAULT_FRAMES = 5
 SEQUENCE_EXPOSURE_LOCK_OFF = "关闭"
 SEQUENCE_EXPOSURE_LOCK_ON = "跨段曝光锁定"
 SEQUENCE_EXPOSURE_LOCK_CHOICES = (SEQUENCE_EXPOSURE_LOCK_OFF, SEQUENCE_EXPOSURE_LOCK_ON)
-SEQUENCE_EXPOSURE_LOCK_WINDOW = 25
-SEQUENCE_EXPOSURE_LOCK_GAIN_WINDOW = 5
-SEQUENCE_EXPOSURE_LOCK_MIN_GAIN = 0.75
-SEQUENCE_EXPOSURE_LOCK_MAX_GAIN = 1.33
+SEQUENCE_EXPOSURE_LOCK_WINDOW = 9
+SEQUENCE_EXPOSURE_LOCK_GAIN_WINDOW = 3
+SEQUENCE_EXPOSURE_LOCK_MIN_GAIN = 0.80
+SEQUENCE_EXPOSURE_LOCK_MAX_GAIN = 1.25
 
 SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
 
@@ -10734,9 +10734,9 @@ class _SequenceExposureLock:
 
     H3 segments are sampled independently.  Even with latent context, their
     decoded RGB baseline can drift brighter or darker across a long chain.  The
-    first segment stays untouched; later segments receive a bounded, smoothed
-    gain around a moving local luminance baseline.  Local motion and lighting
-    changes remain, while the segment-to-segment DC drift is removed.
+    frames receive a bounded, smoothed gain around a moving local luminance
+    baseline.  This corrects both slow exposure changes inside a segment and
+    the accumulated baseline drift across segment boundaries.
     """
 
     def __init__(self, enabled: bool = True):
@@ -10777,7 +10777,6 @@ class _SequenceExposureLock:
             ordered = sorted(luma)
             self.target = float(ordered[len(ordered) // 2])
             self.history = luma[-12:]
-            return frames
 
         source = self.history + luma
         baseline = _sequence_smooth_signal(source, SEQUENCE_EXPOSURE_LOCK_WINDOW)[len(self.history):]
@@ -10795,7 +10794,7 @@ class _SequenceExposureLock:
             frames[frame_index].mul_(float(gain)).clamp_(0.0, 1.0)
         self.history = (self.history + luma)[-12:]
         print(
-            f"[MiniMax H3 Aicg] 视频段落 {index}：跨段曝光锁定已应用"
+            f"[MiniMax H3 Aicg] 视频段落 {index}：曝光锁定已应用"
             f"（增益 {min(gains):.3f}–{max(gains):.3f}）。"
         )
         return frames
@@ -11214,7 +11213,7 @@ class MiniMaxH3EasySequenceGlobal:
                     {
                         "default": SEQUENCE_EXPOSURE_LOCK_ON,
                         "tooltip": (
-                            "跨段曝光锁定：第一段保留原样并作为亮度锚点，后续段落自动消除慢速明暗漂移；"
+                            "曝光锁定：按第一段建立亮度锚点，稳定每一段内部的慢速明暗变化，"
                             "局部运动、风格和短暂光线变化仍保留。关闭则完全按原采样结果输出。"
                         ),
                     },

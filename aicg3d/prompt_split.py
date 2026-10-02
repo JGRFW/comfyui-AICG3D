@@ -11,9 +11,10 @@
 两种用法：
 
 1. 一键填入（推荐，不用拉线）
-   节点上的按钮「一键填入全部视频段落」会按画布上的段落顺序，
-   把每一段写进对应「视频段落」节点的提示词框。
-   打开「自动填入」后，改一次剧本文本就自动重填一次。
+    节点上的按钮「一键填入全部视频段落」会按画布上的段落顺序，
+    把每一段写进对应「视频段落」节点的提示词框。
+    打开「自动填入」后，改一次剧本文本就自动重填一次。
+    开启「顺序写入种子」后，会用一个起点按段落顺序填写 seed，并固定每段的生成后种子控制。
 
 2. 图内走线（走 API / 队列也一样认）
    本节点只有一路输出「段1提示词」，接到第 1 个「视频段落」的 prompt 输入即可；
@@ -346,6 +347,8 @@ class AICG3DPromptSegmentSplit:
         "把一整篇分段剧本（第1段 / 第2段）自动拆开，再一段一段填进画布上的「视频段落」节点。"
         "节点上的「一键填入全部视频段落」按钮会把结果直接写进画布上每个「MiniMax H3 Aicg 视频段落」节点，"
         "不用手动拉线；打开「自动填入」后改文本就自动重填。"
+        "开启「顺序写入种子」后，提示词、秒数和种子会按段落顺序一起填写；"
+        "第1段使用起点种子，后续每段依次 +1，并自动固定生成后不再随机变换。"
         "唯一那根「段1提示词」输出接不接都不影响按钮；接上就相当于第一段走线、后面几段照旧一键填。"
     )
 
@@ -397,11 +400,31 @@ class AICG3DPromptSegmentSplit:
                 ),
                 "randomize_seed": (
                     "BOOLEAN",
-                    {"default": True, "tooltip": "一键填入时给每段换一个随机种子，避免各段画面太像。"},
+                    {
+                        "default": True,
+                        "tooltip": (
+                            "一键填入时按段落顺序写入连续种子：第1段使用起点种子，第2段+1，依次递增，"
+                            "并把每段的生成后控制固定为 fixed。关闭则不修改原有种子。"
+                        ),
+                    },
                 ),
                 "max_segments": (
                     "INT",
                     {"default": MAX_SEGMENTS, "min": 1, "max": MAX_SEGMENTS, "step": 1},
+                ),
+                # 放在最后一位：旧工作流的位置参数不会被新控件顶错行。
+                "seed_start": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 4294967294,
+                        "step": 1,
+                        "tooltip": (
+                            "顺序写入种子的起点：开启后第1段用这个数，第2段+1，依次递增；"
+                            "填0 = 每次一键填入随机选一个起点。"
+                        ),
+                    },
                 ),
             },
         }
@@ -417,8 +440,9 @@ class AICG3DPromptSegmentSplit:
         auto_fill=True,
         randomize_seed=True,
         max_segments=MAX_SEGMENTS,
+        seed_start=0,
     ):
-        del auto_fill, randomize_seed, seconds_mode  # 只给界面按钮用，走线时不影响
+        del auto_fill, randomize_seed, seed_start, seconds_mode  # 只给界面按钮用，走线时不影响
 
         try:
             prompts, seconds = parse_prompt_text(

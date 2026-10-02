@@ -10164,6 +10164,11 @@ class MiniMaxH3EasySegmentDecode:
         if isinstance(vram_profile, MiniMaxH3VramProfile) and vram_profile.unload_before_decode:
             _release_bundle_models(bundle, "最终合成解码", vram_profile)
 
+        exposure_mode = str(
+            segments.plan.get("exposure_lock") if isinstance(segments.plan, Mapping) else ""
+        )
+        exposure_lock = _SequenceExposureLock(exposure_mode == SEQUENCE_EXPOSURE_LOCK_ON)
+
         def start_video(frame: torch.Tensor):
             height, width = int(frame.shape[0]), int(frame.shape[1])
             args = [
@@ -10194,6 +10199,7 @@ class MiniMaxH3EasySegmentDecode:
                     delivered = decoded_full[
                         sample.head_frames:sample.head_frames + output_frames
                     ].detach().to("cpu").contiguous()
+                    delivered = exposure_lock.apply(delivered, index)
                     if preview_frame is None:
                         preview_frame = delivered[:1].detach().to("cpu").contiguous()
                     if video_process is None:
@@ -10658,7 +10664,7 @@ except Exception:
 # 段落衔接复用本插件已验证的两套上下文机制：
 #   尾帧续写（latent）：把上一段尾部的 latent 当作下一段的时间上下文，无损、最快（默认）；
 #   尾帧画面（RGB）  ：把上一段尾部的画面重新编码成 Guide，像素级对齐。
-# 衔接帧数可填 1~20，H3 原生时间栅格只有 5 / 22 两档：1~5 取 5 帧，6~20 取 22 帧。
+# 衔接帧数可填 1~22，H3 原生时间栅格只有 5 / 22 两档：1~5 取 5 帧，6~22 取 22 帧。
 # ===========================================================================
 
 SEQUENCE_CONFIG_TYPE = "MINIMAX_H3_SEQUENCE_CONFIG"
@@ -10676,9 +10682,16 @@ SEQUENCE_AUDIO_DIGITAL_HUMAN = "数字人（锁定音频）"
 SEQUENCE_AUDIO_CHOICES = (SEQUENCE_AUDIO_GENERATED, SEQUENCE_AUDIO_DIGITAL_HUMAN)
 
 SEQUENCE_HANDOFF_MIN_FRAMES = 1
-SEQUENCE_HANDOFF_MAX_FRAMES = 20
+SEQUENCE_HANDOFF_MAX_FRAMES = 22
 SEQUENCE_HANDOFF_DEFAULT_FRAMES = 5
-SEQUENCE_HANDOFF_GRID_HINT = " / ".join(str(item) for item in SEGMENT_CONTEXT_GUIDE_FRAME_GRID)
+
+SEQUENCE_EXPOSURE_LOCK_OFF = "关闭"
+SEQUENCE_EXPOSURE_LOCK_ON = "跨段曝光锁定"
+SEQUENCE_EXPOSURE_LOCK_CHOICES = (SEQUENCE_EXPOSURE_LOCK_OFF, SEQUENCE_EXPOSURE_LOCK_ON)
+SEQUENCE_EXPOSURE_LOCK_WINDOW = 25
+SEQUENCE_EXPOSURE_LOCK_GAIN_WINDOW = 5
+SEQUENCE_EXPOSURE_LOCK_MIN_GAIN = 0.75
+SEQUENCE_EXPOSURE_LOCK_MAX_GAIN = 1.33
 
 SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
 
@@ -10694,6 +10707,98 @@ def _sequence_handoff_context_frames(frames: Any) -> int:
         if value <= int(grid):
             return int(grid)
     return int(SEGMENT_CONTEXT_GUIDE_FRAME_GRID[-1])
+
+
+def _sequence_smooth_signal(values: list[float], window: int) -> list[float]:
+    """Small, dependency-free moving average used by the exposure stabilizer."""
+    if not values:
+        return []
+    width = max(1, int(window))
+    if width % 2 == 0:
+        width += 1
+    if width <= 1 or len(values) == 1:
+        return [float(item) for item in values]
+    radius = width // 2
+    result: list[float] = []
+    for index in range(len(values)):
+        weighted = 0.0
+        for offset in range(-radius, radius + 1):
+            source = min(max(index + offset, 0), len(values) - 1)
+            weighted += float(values[source])
+        result.append(weighted / float(width))
+    return result
+
+
+class _SequenceExposureLock:
+    """Keep the first segment's exposure while removing slow drift in later ones.
+
+    H3 segments are sampled independently.  Even with latent context, their
+    decoded RGB baseline can drift brighter or darker across a long chain.  The
+    first segment stays untouched; later segments receive a bounded, smoothed
+    gain around a moving local luminance baseline.  Local motion and lighting
+    changes remain, while the segment-to-segment DC drift is removed.
+    """
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = bool(enabled)
+        self.target: float | None = None
+        self.history: list[float] = []
+
+    def _frame_luma(self, frames: torch.Tensor) -> list[float]:
+        if not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.shape[0] < 1:
+            return []
+        working = frames.detach()
+        if working.dtype != torch.float32:
+            working = working.float()
+        if int(working.shape[-1]) < 3:
+            return []
+        if int(working.shape[1]) > 180 or int(working.shape[2]) > 320:
+            sample = torch.nn.functional.interpolate(
+                working[..., :3].permute(0, 3, 1, 2),
+                size=(90, 160),
+                mode="area",
+            )
+        else:
+            sample = working[..., :3].permute(0, 3, 1, 2)
+        luma = (
+            sample[:, 0] * 0.2126
+            + sample[:, 1] * 0.7152
+            + sample[:, 2] * 0.0722
+        ).mean(dim=(1, 2))
+        return [float(value) for value in luma.tolist()]
+
+    def apply(self, frames: torch.Tensor, index: int) -> torch.Tensor:
+        if not self.enabled or not isinstance(frames, torch.Tensor) or frames.numel() == 0:
+            return frames
+        luma = self._frame_luma(frames)
+        if not luma:
+            return frames
+        if self.target is None:
+            ordered = sorted(luma)
+            self.target = float(ordered[len(ordered) // 2])
+            self.history = luma[-12:]
+            return frames
+
+        source = self.history + luma
+        baseline = _sequence_smooth_signal(source, SEQUENCE_EXPOSURE_LOCK_WINDOW)[len(self.history):]
+        gains = [
+            min(
+                SEQUENCE_EXPOSURE_LOCK_MAX_GAIN,
+                max(SEQUENCE_EXPOSURE_LOCK_MIN_GAIN, float(self.target) / max(value, 1e-4)),
+            )
+            for value in baseline
+        ]
+        gains = _sequence_smooth_signal(gains, SEQUENCE_EXPOSURE_LOCK_GAIN_WINDOW)
+        if len(gains) != int(frames.shape[0]):
+            return frames
+        for frame_index, gain in enumerate(gains):
+            frames[frame_index].mul_(float(gain)).clamp_(0.0, 1.0)
+        self.history = (self.history + luma)[-12:]
+        print(
+            f"[MiniMax H3 Aicg] 视频段落 {index}：跨段曝光锁定已应用"
+            f"（增益 {min(gains):.3f}–{max(gains):.3f}）。"
+        )
+        return frames
 
 
 #: 显存档位：全局设置上的一个下拉。档位不是装饰，它决定画布上限、什么时候把
@@ -10889,6 +10994,8 @@ class MiniMaxH3SequenceConfig:
     audio_mode: str = CONTEXT_AUDIO_GENERATED
     #: 显存档位（见 MiniMaxH3VramProfile）：8G / 12G / 16G 各有一套显存策略。
     vram: Optional[MiniMaxH3VramProfile] = None
+    #: 跨段曝光锁定：第一段作为锚点，后续段落消除慢速亮度漂移。
+    exposure_lock: str = SEQUENCE_EXPOSURE_LOCK_ON
     #: 可选的外部 MODEL 补丁链；未连接时继续使用 bundle 里的权重。
     model: Any = None
 
@@ -11002,8 +11109,8 @@ class MiniMaxH3EasySequenceGlobal:
                         "step": 1,
                         "tooltip": (
                             "每段开头要接住上一段结尾多少帧画面："
-                            f"H3 原生时间栅格只有 {SEQUENCE_HANDOFF_GRID_HINT} 这几档，"
-                            "填 1~5 按 5 帧衔接，填 6~20 按 22 帧衔接（越大越稳、越慢）。"
+                            "H3 使用固定时间栅格，当前面板开放 5 / 22 两档："
+                            "填 1~5 按 5 帧衔接，填 6~22 按 22 帧衔接（越大越稳、越慢）。"
                         ),
                     },
                 ),
@@ -11101,6 +11208,17 @@ class MiniMaxH3EasySequenceGlobal:
                         ),
                     },
                 ),
+                # 放在最后一位，旧工作流的位置参数不会被新控件顶错行。
+                "exposure_lock": (
+                    list(SEQUENCE_EXPOSURE_LOCK_CHOICES),
+                    {
+                        "default": SEQUENCE_EXPOSURE_LOCK_ON,
+                        "tooltip": (
+                            "跨段曝光锁定：第一段保留原样并作为亮度锚点，后续段落自动消除慢速明暗漂移；"
+                            "局部运动、风格和短暂光线变化仍保留。关闭则完全按原采样结果输出。"
+                        ),
+                    },
+                ),
             },
             "optional": {
                 "model": ("MODEL",),
@@ -11115,6 +11233,7 @@ class MiniMaxH3EasySequenceGlobal:
             "sampler_name", "scheduler", "steps", "denoise",
             "vram_policy", "sample_preview", "preview_interval",
             "audio_mode", "vram_tier",
+            "exposure_lock",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -11138,6 +11257,7 @@ class MiniMaxH3EasySequenceGlobal:
         prompt_optimizer_settings=False,
         audio_mode=SEQUENCE_AUDIO_GENERATED,
         vram_tier=VRAM_TIER_AUTO,
+        exposure_lock=SEQUENCE_EXPOSURE_LOCK_ON,
         model=None,
     ):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
@@ -11181,6 +11301,11 @@ class MiniMaxH3EasySequenceGlobal:
             preview_interval=max(1, int(preview_interval or RENDER_PREVIEW_INTERVAL)),
             audio_mode=resolved_audio_mode,
             vram=vram_profile,
+            exposure_lock=(
+                SEQUENCE_EXPOSURE_LOCK_OFF
+                if str(exposure_lock or SEQUENCE_EXPOSURE_LOCK_ON) == SEQUENCE_EXPOSURE_LOCK_OFF
+                else SEQUENCE_EXPOSURE_LOCK_ON
+            ),
             model=model,
         )
         print(
@@ -11189,6 +11314,7 @@ class MiniMaxH3EasySequenceGlobal:
             f"（原生栅格 {config.context_frames} 帧 / {mode}），每段收尾「{config.cleanup}」，"
             f"音频「{SEQUENCE_AUDIO_DIGITAL_HUMAN if resolved_audio_mode == CONTEXT_AUDIO_DIGITAL_HUMAN else SEQUENCE_AUDIO_GENERATED}」，"
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
+            f"曝光处理「{config.exposure_lock}」；"
         )
         return (config,)
 
@@ -11617,6 +11743,7 @@ class MiniMaxH3EasySequenceCombine:
             "context_length": int(config.context_frames),
             "continuity_mode": str(config.continuity_mode),
             "audio_mode": str(config.audio_mode or CONTEXT_AUDIO_GENERATED),
+            "exposure_lock": str(config.exposure_lock or SEQUENCE_EXPOSURE_LOCK_ON),
             "source_audio": source_audio,
             "shots": shots,
             # 显存档位跟着计划传进解码器：合成前要不要先卸主干由它决定。

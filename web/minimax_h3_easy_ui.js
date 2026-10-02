@@ -8456,6 +8456,7 @@ const SEQUENCE_GLOBAL_WIDGET_LABELS = {
     preview_interval: TEXT.previewIntervalLabel,
     audio_mode: TEXT.audioMode,
     vram_tier: TEXT.vramTier,
+    exposure_lock: "跨段曝光锁定",
     // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
     prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
 };

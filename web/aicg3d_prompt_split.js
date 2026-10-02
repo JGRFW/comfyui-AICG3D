@@ -15,6 +15,8 @@ const NODE_CLASS = "AICG3DPromptSegmentSplit";
 const MAX_SEGMENTS = 64;
 const AUTOFILL_DELAY = 400;
 const BUTTON_PREFIX = "一键填入全部视频段落";
+const SEED_MAX = 4294967294;
+const SEED_CONTROL_NAMES = ["control_after_generate", "control_before_generate"];
 
 const MODE_HEADER = "第N段标记";
 const MODE_BLANK = "空行分段";
@@ -220,6 +222,7 @@ function writeWidget(node, name, value) {
     if (!widget) return false;
     if (widget.value === value) return true;
     widget.value = value;
+    if (widget._state) widget._state.value = value;
     try {
         node.onWidgetChanged?.(name, value, undefined, widget);
     } catch (err) {
@@ -228,6 +231,19 @@ function writeWidget(node, name, value) {
     return true;
 }
 
+function sequenceSeed(base, index) {
+    const span = SEED_MAX;
+    const normalized = Math.trunc(Number(base) || 0) - 1 + Number(index || 0);
+    return 1 + (((normalized % span) + span) % span);
+}
+
+/* 一键填入的种子必须真的保持固定，不能让生成后的 randomize 再把顺序打乱。 */
+function fixSeedAfterGenerate(node) {
+    for (const name of SEED_CONTROL_NAMES) {
+        if (writeWidget(node, name, "fixed")) return true;
+    }
+    return false;
+}
 /* AICG3D 的提示词框不是普通部件，是节点包自己的 contentEditable 编辑器：
    只写 prompt 部件的值，框里不会刷新；保存时编辑器还会把自己的内容反向覆盖回部件，
    填进去的文字就白填了。包在 domWidget 上留了 setValue（写值 + 重渲染编辑器），
@@ -404,6 +420,8 @@ function fillSegments(node, options = {}) {
     const secondsMode = readWidget(node, "seconds_mode", SECONDS_FROM_TEXT);
     const defaultSeconds = Number(readWidget(node, "default_seconds", 5)) || 5;
     const randomizeSeed = Boolean(readWidget(node, "randomize_seed", true));
+    const seedStartRaw = Math.trunc(Number(readWidget(node, "seed_start", 0)) || 0);
+    const seedStart = Math.max(0, Math.min(seedStartRaw, SEED_MAX));
     const limitRaw = Number(readWidget(node, "max_segments", MAX_SEGMENTS)) || MAX_SEGMENTS;
     const limit = Math.max(1, Math.min(limitRaw, MAX_SEGMENTS));
 
@@ -428,6 +446,10 @@ function fillSegments(node, options = {}) {
     }
 
     const used = Math.min(prompts.length, targets.length);
+    const seedBase = randomizeSeed
+        ? (seedStart > 0 ? seedStart : randomSeed())
+        : 0;
+    let seedsWritten = 0;
     for (let index = 0; index < used; index += 1) {
         const target = targets[index];
         writePrompt(target, prompts[index]);
@@ -435,7 +457,13 @@ function fillSegments(node, options = {}) {
             const value = secondsMode === SECONDS_FIXED ? defaultSeconds : seconds[index];
             writeWidget(target, "seconds", roundSeconds(value));
         }
-        if (randomizeSeed) writeWidget(target, "seed", randomSeed());
+        if (randomizeSeed) {
+            const seed = sequenceSeed(seedBase, index);
+            if (writeWidget(target, "seed", seed)) {
+                fixSeedAfterGenerate(target);
+                seedsWritten += 1;
+            }
+        }
         try {
             target.setSize?.(target.computeSize?.() ?? target.size);
         } catch (err) {
@@ -454,6 +482,9 @@ function fillSegments(node, options = {}) {
     if (options.silent !== true) {
         const linked = targets.filter((target) => promptTakenByLink(node, target, graph)).length;
         const notes = [`已把 ${used} 段写进「视频段落」节点`];
+        if (seedsWritten) {
+            notes.push(`种子按顺序写入 ${seedBase}–${sequenceSeed(seedBase, seedsWritten - 1)}`);
+        }
         if (parsed.prompts.length > prompts.length) {
             notes.push(`解析出 ${parsed.prompts.length} 段，但「解析上限」只有 ${limit}，多的没填（把上限调大就行）`);
         }
@@ -501,8 +532,16 @@ function install(node) {
     });
     if (button) {
         button.serialize = false;
-        button.tooltip = "按画布上的段落顺序，把每段提示词写进对应的「视频段落」节点。";
+        button.tooltip = "按画布顺序写入每段提示词、秒数和连续种子；顺序种子会固定为 fixed，运行后不再自动变。";
     }
+
+    const seedToggle = findWidget(node, "randomize_seed");
+    if (seedToggle) {
+        seedToggle.label = "顺序写入种子";
+        seedToggle.tooltip = "开启后，一键填入会按第1段、第2段…依次写入连续种子，并固定生成后不再随机。";
+    }
+    const seedStartWidget = findWidget(node, "seed_start");
+    if (seedStartWidget) seedStartWidget.label = "起始种子（0=随机）";
 
     const textWidget = findWidget(node, "text");
     if (textWidget) {

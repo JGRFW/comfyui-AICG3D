@@ -20,7 +20,7 @@ from aiohttp import web
 
 import aicg3d.prompt_guides as guide_lib, aicg3d.skills as skill_lib
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 MEDIA_KINDS = {
     "image": (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"),
     "video": (".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v", ".mpg", ".mpeg", ".wmv", ".flv"),

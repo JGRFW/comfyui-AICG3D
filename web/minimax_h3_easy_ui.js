@@ -8648,6 +8648,7 @@ function scheduleSequenceSegmentPromptLayout(node) {
 
 function openSequenceMediaPopup(node) {
     if (!isSequenceSegmentNode(node)) return false;
+    propagateSequenceResourceLibrary(node);
     if (node.__h3InlineMediaPanelWidget) {
         setSequenceInlineResourceOpen(node, !node.__h3InlineMediaOpen);
         return true;
@@ -8823,6 +8824,7 @@ function deleteSequenceSegment(node) {
     graph.remove?.(node);
     graph.setDirtyCanvas?.(true, true);
     graph.change?.();
+    if (previous) scheduleSequenceResourcePropagation(previous);
     toast("已删除这一段并自动整理段落链", "ok");
     return true;
 }
@@ -8861,6 +8863,7 @@ function addSequenceNextSegment(node) {
         toast("下一段创建成功但自动连线失败", "warn");
         return false;
     }
+    scheduleSequenceResourcePropagation(node);
     connectSequenceTailToCombine(next, node);
     const seconds = Number(getWidgetValue(node, "seconds", ""));
     if (Number.isFinite(seconds)) setWidgetValue(next, "seconds", seconds);
@@ -8936,6 +8939,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         mediaLoaderHideStateWidget(getWidget(node, "inline_media_state"));
         installSequenceActionRow(node);
         scheduleSequenceSegmentPromptLayout(node);
+        scheduleSequenceResourcePropagation(node);
     };
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Sequence() {
@@ -8955,6 +8959,15 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         const result = originalAdded?.apply(this, arguments);
         setup(this);
         refreshSequenceSegmentPromptLayout(this);
+        return result;
+    };
+    const originalConnectionsChange = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function onConnectionsChangeH3Sequence(type, index, connected, linkInfo) {
+        const result = originalConnectionsChange?.apply(this, arguments);
+        const input = this.inputs?.[Number(index)];
+        if (input?.name === "media" || input?.name === "previous_segment") {
+            scheduleSequenceResourcePropagation(this);
+        }
         return result;
     };
     const originalConfigure = nodeType.prototype.onConfigure;
@@ -9653,7 +9666,7 @@ function mediaLoaderReadState(node) {
     };
 }
 
-function mediaLoaderWriteState(node, state) {
+function mediaLoaderWriteState(node, state, options = {}) {
     const unique = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
     const value = JSON.stringify({
         images: unique(state.images).map((filename) => ({ filename })),
@@ -9666,14 +9679,97 @@ function mediaLoaderWriteState(node, state) {
     if (widget._state) widget._state.value = value;
     node.properties ||= {};
     if (isSequenceSegmentNode(node)) {
+        const inherited = options.inherited === true;
         node.properties.minimax_h3_inline_media_state = value;
+        node.properties.minimax_h3_inline_media_owned = !inherited;
+        node.properties.minimax_h3_inline_media_inherited = inherited;
     } else {
         node.properties.media_loader_state = value;
     }
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
-    app.graph?.change?.();
+    if (options.notify !== false) app.graph?.change?.();
     requestMentionPreviewRefresh();
+    if (options.propagate !== false) scheduleSequenceResourcePropagation(node);
+}
+
+function mediaStateHasItems(state) {
+    return Boolean(state && MEDIA_LOADER_GROUPS.some((group) => (state[group.key] || []).length > 0));
+}
+
+function sequenceSegmentHasOwnMedia(node) {
+    return isSequenceSegmentNode(node)
+        && node?.properties?.minimax_h3_inline_media_owned === true
+        && mediaStateHasItems(mediaLoaderState(node));
+}
+
+function sequenceSegmentEffectiveMediaState(node, seen = new Set()) {
+    if (!isSequenceSegmentNode(node) || seen.has(node)) return { images: [], audios: [], videos: [] };
+    seen.add(node);
+    if (sequenceSegmentHasOwnMedia(node)) return mediaLoaderReadState(node);
+    const native = getNativeMediaBridgeLink(node);
+    const loader = native ? app.graph?.getNodeById?.(Number(native.source_id)) : null;
+    if (loader && isMediaLoader(loader) && mediaStateHasItems(mediaLoaderState(loader))) {
+        return mediaLoaderReadState(loader);
+    }
+    return sequenceSegmentEffectiveMediaState(previousSequenceSegment(node), seen);
+}
+
+function sequenceMediaStateValue(state) {
+    const normalize = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
+    return JSON.stringify({
+        images: normalize(state?.images).map((filename) => ({ filename })),
+        audios: normalize(state?.audios).map((filename) => ({ filename })),
+        videos: normalize(state?.videos).map((filename) => ({ filename })),
+    });
+}
+
+function propagateSequenceResourceLibrary(start) {
+    if (!start) return 0;
+    if (isMediaLoader(start)) {
+        const targets = aicg3dPromptTargets(start).filter(isSequenceSegmentNode);
+        return targets.reduce((count, node) => count + propagateSequenceResourceLibrary(node), 0);
+    }
+    if (!isSequenceSegmentNode(start)) return 0;
+    let state = sequenceSegmentEffectiveMediaState(start);
+    let current = start;
+    let changed = 0;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        if (sequenceSegmentHasOwnMedia(current)) {
+            state = mediaLoaderReadState(current);
+        } else {
+            const native = getNativeMediaBridgeLink(current);
+            const loader = native ? app.graph?.getNodeById?.(Number(native.source_id)) : null;
+            if (loader && isMediaLoader(loader) && mediaStateHasItems(mediaLoaderState(loader))) {
+                state = mediaLoaderReadState(loader);
+            }
+            const widget = mediaLoaderStorageWidget(current);
+            const nextValue = sequenceMediaStateValue(state);
+            if (widget && mediaStateHasItems(state) && String(widget.value || "") !== nextValue) {
+                mediaLoaderWriteState(current, state, { inherited: true, propagate: false, notify: false });
+                if (current.__h3MediaLoaderPanel) mediaLoaderRender(current);
+                changed += 1;
+            }
+        }
+        current = nextSequenceSegmentNode(current, (app.graph?._nodes || app.graph?.nodes || []).filter(isSequenceSegmentNode));
+    }
+    return changed;
+}
+
+function scheduleSequenceResourcePropagation(start) {
+    if (!start) return;
+    if (start.__h3SequenceMediaPropagationTimer) clearTimeout(start.__h3SequenceMediaPropagationTimer);
+    let attempts = 0;
+    const apply = () => {
+        start.__h3SequenceMediaPropagationTimer = null;
+        const changed = propagateSequenceResourceLibrary(start);
+        if (changed > 0 || attempts >= 5) return;
+        attempts += 1;
+        start.__h3SequenceMediaPropagationTimer = setTimeout(apply, 100 * attempts);
+    };
+    start.__h3SequenceMediaPropagationTimer = setTimeout(apply, 0);
 }
 
 function mediaLoaderHideStateWidget(widget) {

@@ -10167,7 +10167,7 @@ class MiniMaxH3EasySegmentDecode:
         exposure_mode = str(
             segments.plan.get("exposure_lock") if isinstance(segments.plan, Mapping) else ""
         )
-        exposure_lock = _SequenceExposureLock(exposure_mode == SEQUENCE_EXPOSURE_LOCK_ON)
+        seam_matcher = _SequenceSeamMatcher(exposure_mode == SEQUENCE_EXPOSURE_LOCK_ON)
 
         def start_video(frame: torch.Tensor):
             height, width = int(frame.shape[0]), int(frame.shape[1])
@@ -10199,7 +10199,7 @@ class MiniMaxH3EasySegmentDecode:
                     delivered = decoded_full[
                         sample.head_frames:sample.head_frames + output_frames
                     ].detach().to("cpu").contiguous()
-                    delivered = exposure_lock.apply(delivered, index)
+                    delivered = seam_matcher.apply(delivered, index)
                     if preview_frame is None:
                         preview_frame = delivered[:1].detach().to("cpu").contiguous()
                     if video_process is None:
@@ -10690,8 +10690,23 @@ SEQUENCE_EXPOSURE_LOCK_ON = "跨段曝光锁定"
 SEQUENCE_EXPOSURE_LOCK_CHOICES = (SEQUENCE_EXPOSURE_LOCK_OFF, SEQUENCE_EXPOSURE_LOCK_ON)
 SEQUENCE_EXPOSURE_LOCK_WINDOW = 9
 SEQUENCE_EXPOSURE_LOCK_GAIN_WINDOW = 3
-SEQUENCE_EXPOSURE_LOCK_MIN_GAIN = 0.80
-SEQUENCE_EXPOSURE_LOCK_MAX_GAIN = 1.25
+SEQUENCE_EXPOSURE_LOCK_MIN_GAIN = 0.75
+SEQUENCE_EXPOSURE_LOCK_MAX_GAIN = 1.30
+SEQUENCE_EXPOSURE_BOUNDARY_FRAMES = 10
+SEQUENCE_EXPOSURE_BOUNDARY_MIN_GAIN = 0.70
+SEQUENCE_EXPOSURE_BOUNDARY_MAX_GAIN = 1.25
+
+#: Director-style seam repair used by the sequence combiner.  It only touches
+#: the opening frames of a newly decoded segment instead of grading the whole
+#: segment, which preserves intentional in-shot lighting changes.
+SEQUENCE_SEAM_GRADE_FRAMES = 12
+SEQUENCE_SEAM_GRADE_WEIGHT = 0.70
+SEQUENCE_SEAM_GRADE_BLUR = 64
+SEQUENCE_SEAM_ADD_LUMA_FRAMES = 24
+SEQUENCE_SEAM_ADD_LUMA_MAX = 0.10
+SEQUENCE_SEGMENT_LUMA_MAX = 0.12
+SEQUENCE_SEGMENT_LUMA_EPSILON = 0.002
+SEQUENCE_SEAM_LUMA_EPSILON = 0.008
 
 SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
 
@@ -10729,6 +10744,191 @@ def _sequence_smooth_signal(values: list[float], window: int) -> list[float]:
     return result
 
 
+def _sequence_frame_luma(frame: torch.Tensor) -> float:
+    coeffs = frame.new_tensor([0.299, 0.587, 0.114])
+    return float((frame.float() * coeffs).sum(dim=-1).mean().item())
+
+
+def _sequence_robust_luma(frames: torch.Tensor) -> float:
+    """Median per-frame luma; ignores short spikes and local action."""
+    if not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.numel() == 0:
+        return 0.0
+    step = max(1, int(frames.shape[0]) // 24)
+    sample = frames[::step].detach().float()
+    coeffs = sample.new_tensor([0.299, 0.587, 0.114])
+    per_frame = (sample * coeffs).sum(dim=-1).mean(dim=(1, 2))
+    return float(per_frame.median().item())
+
+
+def _sequence_match_segment_luma(
+    frames: torch.Tensor, target_luma: float | None
+) -> tuple[torch.Tensor, float]:
+    """Apply a bounded additive DC offset to the whole segment."""
+    if target_luma is None or not isinstance(frames, torch.Tensor) or frames.numel() == 0:
+        return frames, 0.0
+    current = _sequence_robust_luma(frames)
+    offset = max(
+        -float(SEQUENCE_SEGMENT_LUMA_MAX),
+        min(float(SEQUENCE_SEGMENT_LUMA_MAX), float(target_luma) - current),
+    )
+    if abs(offset) < SEQUENCE_SEGMENT_LUMA_EPSILON:
+        return frames, 0.0
+    frames.add_(offset).clamp_(0.0, 1.0)
+    return frames, float(offset)
+
+
+def _sequence_fit_frame(frame: torch.Tensor, width: int, height: int) -> torch.Tensor:
+    """Resize one HWC guide frame without depending on the main H3 helpers."""
+    if frame.dim() == 4:
+        frame = frame[0]
+    if tuple(frame.shape[:2]) == (int(height), int(width)):
+        return frame
+    resized = torch.nn.functional.interpolate(
+        frame.permute(2, 0, 1).unsqueeze(0).float(),
+        size=(int(height), int(width)),
+        mode="bilinear",
+        align_corners=False,
+    )[0]
+    return resized.permute(1, 2, 0).to(dtype=frame.dtype)
+
+
+def _sequence_box_blur(frames: torch.Tensor, kernel: int) -> torch.Tensor:
+    """Box blur an HWC/BHWC frame batch for the low-frequency seam grade."""
+    k = int(kernel)
+    if k < 3:
+        return frames.detach().float()
+    if k % 2 == 0:
+        k += 1
+    source = frames.detach().float()
+    if source.dim() == 3:
+        source = source.unsqueeze(0)
+    padded = torch.nn.functional.pad(
+        source.permute(0, 3, 1, 2),
+        (k // 2, k // 2, k // 2, k // 2),
+        mode="replicate",
+    )
+    blurred = torch.nn.functional.avg_pool2d(padded, kernel_size=k, stride=1)
+    return blurred.permute(0, 2, 3, 1)
+
+
+def _sequence_match_opening_grade(frames: torch.Tensor, previous_tail: torch.Tensor) -> torch.Tensor:
+    """Match only the new segment opening's low-frequency lighting to prev tail.
+
+    This mirrors the Director workflow's per-segment export grade: it moves the
+    broad lighting/color cast without copying pose edges or flattening the rest
+    of the segment.
+    """
+    if (
+        not isinstance(frames, torch.Tensor)
+        or not isinstance(previous_tail, torch.Tensor)
+        or frames.numel() == 0
+        or previous_tail.numel() == 0
+    ):
+        return frames
+    count = min(int(SEQUENCE_SEAM_GRADE_FRAMES), int(frames.shape[0]))
+    if count <= 0:
+        return frames
+    weights = [
+        float(SEQUENCE_SEAM_GRADE_WEIGHT) * (1.0 - float(index) / float(count))
+        for index in range(count)
+    ]
+    if not weights or weights[-1] <= 0.0:
+        return frames
+    guide = _sequence_fit_frame(previous_tail[-1], int(frames.shape[2]), int(frames.shape[1]))
+    out = frames
+    try:
+        source = out[:count].float()
+        source_blur = _sequence_box_blur(source, SEQUENCE_SEAM_GRADE_BLUR)
+        guide_blur = _sequence_box_blur(guide.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0]
+        weight = out.new_tensor(weights).view(-1, 1, 1, 1)
+        corrected = (
+            source
+            + weight * (guide_blur.unsqueeze(0) - source_blur)
+        ).clamp_(0.0, 1.0)
+        out[:count] = corrected.to(dtype=out.dtype)
+    except Exception as exc:
+        print(f"[MiniMax H3 Aicg] 接缝低频匹配已跳过：{exc}")
+    return out
+
+
+def _sequence_additive_opening_luma(
+    frames: torch.Tensor, previous_tail: torch.Tensor
+) -> tuple[torch.Tensor, float, float]:
+    """Ease a segment opening from the previous tail's luma to its own level.
+
+    Unlike a multiplicative whole-segment gain, this adds the same RGB delta to
+    each exposed frame.  Local contrast and intended in-shot lighting survive.
+    """
+    if (
+        not isinstance(frames, torch.Tensor)
+        or not isinstance(previous_tail, torch.Tensor)
+        or int(frames.shape[0]) < 3
+        or previous_tail.numel() == 0
+    ):
+        return frames, 0.0, 0.0
+    count = min(int(SEQUENCE_SEAM_ADD_LUMA_FRAMES), int(frames.shape[0]) - 1)
+    if count < 2:
+        return frames, 0.0, 0.0
+    guide = _sequence_fit_frame(previous_tail[-1], int(frames.shape[2]), int(frames.shape[1]))
+    y_start = _sequence_frame_luma(guide)
+    y0 = _sequence_frame_luma(frames[0])
+    y1 = _sequence_frame_luma(frames[min(1, count)])
+    y2 = _sequence_frame_luma(frames[min(2, count)])
+    y_end = _sequence_frame_luma(frames[count])
+    seam_gap = abs(y0 - y_start)
+    opening_spike = abs(y1 - y0) + abs(y2 - y1)
+    if (
+        seam_gap < SEQUENCE_SEAM_LUMA_EPSILON
+        and opening_spike < SEQUENCE_SEAM_LUMA_EPSILON
+        and abs(y_end - y_start) < SEQUENCE_SEAM_LUMA_EPSILON
+    ):
+        return frames, seam_gap, opening_spike
+    out = frames
+    for index in range(count):
+        t = float(index) / float(count)
+        target = y_start * (1.0 - t) + y_end * t
+        current = _sequence_frame_luma(out[index])
+        delta = max(
+            -float(SEQUENCE_SEAM_ADD_LUMA_MAX),
+            min(float(SEQUENCE_SEAM_ADD_LUMA_MAX), target - current),
+        )
+        if abs(delta) >= 1e-5:
+            out[index] = (out[index].float() + delta).clamp_(0.0, 1.0).to(dtype=out.dtype)
+    return out, seam_gap, opening_spike
+
+
+class _SequenceSeamMatcher:
+    """Director-style seam repair for the streaming sequence combiner."""
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = bool(enabled)
+        self.previous_tail: torch.Tensor | None = None
+        self.previous_segment_luma: float | None = None
+
+    def apply(self, frames: torch.Tensor, index: int) -> torch.Tensor:
+        if not self.enabled or not isinstance(frames, torch.Tensor) or frames.numel() == 0:
+            return frames
+        repaired = frames
+        if self.previous_tail is not None:
+            repaired = _sequence_match_opening_grade(frames, self.previous_tail)
+            repaired, global_offset = _sequence_match_segment_luma(
+                repaired, self.previous_segment_luma
+            )
+            repaired, seam_gap, opening_spike = _sequence_additive_opening_luma(
+                repaired, self.previous_tail
+            )
+            print(
+                f"[MiniMax H3 Aicg] 视频段落 {index}：接缝亮度匹配已应用"
+                f"（低频 {min(SEQUENCE_SEAM_GRADE_FRAMES, int(frames.shape[0]))} 帧 +"
+                f" 加性亮度 {min(SEQUENCE_SEAM_ADD_LUMA_FRAMES, max(0, int(frames.shape[0]) - 1))} 帧，"
+                f"整段校正 {global_offset:+.3f}，接缝差 {seam_gap:.3f}，"
+                f"开头波动 {opening_spike:.3f}）。"
+            )
+        self.previous_tail = repaired[-1:].detach().to("cpu").contiguous()
+        self.previous_segment_luma = _sequence_robust_luma(repaired)
+        return repaired
+
+
 class _SequenceExposureLock:
     """Keep the first segment's exposure while removing slow drift in later ones.
 
@@ -10737,12 +10937,17 @@ class _SequenceExposureLock:
     frames receive a bounded, smoothed gain around a moving local luminance
     baseline.  This corrects both slow exposure changes inside a segment and
     the accumulated baseline drift across segment boundaries.
+    The first ten frames after a boundary are additionally pinned, frame by
+    frame, to the previous segment's corrected median luminance; the pin then
+    ramps back to the normal per-segment curve.  This removes the two-frame
+    exposure flashes H3 sometimes emits at the first visible tokens.
     """
 
     def __init__(self, enabled: bool = True):
         self.enabled = bool(enabled)
         self.target: float | None = None
         self.history: list[float] = []
+        self.previous_output_luma: float | None = None
 
     def _frame_luma(self, frames: torch.Tensor) -> list[float]:
         if not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.shape[0] < 1:
@@ -10755,7 +10960,7 @@ class _SequenceExposureLock:
         if int(working.shape[1]) > 180 or int(working.shape[2]) > 320:
             sample = torch.nn.functional.interpolate(
                 working[..., :3].permute(0, 3, 1, 2),
-                size=(90, 160),
+                size=(180, 320),
                 mode="area",
             )
         else:
@@ -10764,7 +10969,7 @@ class _SequenceExposureLock:
             sample[:, 0] * 0.2126
             + sample[:, 1] * 0.7152
             + sample[:, 2] * 0.0722
-        ).mean(dim=(1, 2))
+        ).flatten(1).median(dim=1).values
         return [float(value) for value in luma.tolist()]
 
     def apply(self, frames: torch.Tensor, index: int) -> torch.Tensor:
@@ -10788,14 +10993,35 @@ class _SequenceExposureLock:
             for value in baseline
         ]
         gains = _sequence_smooth_signal(gains, SEQUENCE_EXPOSURE_LOCK_GAIN_WINDOW)
+        boundary_factors = []
+        if self.previous_output_luma is not None:
+            boundary_count = min(SEQUENCE_EXPOSURE_BOUNDARY_FRAMES, len(gains))
+            for frame_index in range(boundary_count):
+                projected = float(luma[frame_index]) * float(gains[frame_index])
+                factor = min(
+                    SEQUENCE_EXPOSURE_BOUNDARY_MAX_GAIN,
+                    max(
+                        SEQUENCE_EXPOSURE_BOUNDARY_MIN_GAIN,
+                        float(self.previous_output_luma) / max(projected, 1e-4),
+                    ),
+                )
+                alpha = 1.0 - frame_index / float(max(1, boundary_count))
+                gains[frame_index] *= 1.0 + (factor - 1.0) * alpha
+                boundary_factors.append(float(factor))
         if len(gains) != int(frames.shape[0]):
             return frames
         for frame_index, gain in enumerate(gains):
             frames[frame_index].mul_(float(gain)).clamp_(0.0, 1.0)
         self.history = (self.history + luma)[-12:]
+        self.previous_output_luma = float(luma[-1]) * float(gains[-1])
         print(
             f"[MiniMax H3 Aicg] 视频段落 {index}：曝光锁定已应用"
-            f"（增益 {min(gains):.3f}–{max(gains):.3f}）。"
+            f"（增益 {min(gains):.3f}–{max(gains):.3f}"
+            + (
+                f"，边界校正 {min(boundary_factors):.3f}–{max(boundary_factors):.3f}"
+                if boundary_factors else ""
+            )
+            + "）。"
         )
         return frames
 
@@ -10993,7 +11219,7 @@ class MiniMaxH3SequenceConfig:
     audio_mode: str = CONTEXT_AUDIO_GENERATED
     #: 显存档位（见 MiniMaxH3VramProfile）：8G / 12G / 16G 各有一套显存策略。
     vram: Optional[MiniMaxH3VramProfile] = None
-    #: 跨段曝光锁定：第一段作为锚点，后续段落消除慢速亮度漂移。
+    #: 接缝亮度匹配：低频色光对齐 + 24 帧加性过渡 + 有上限的整段直流亮度对齐。
     exposure_lock: str = SEQUENCE_EXPOSURE_LOCK_ON
     #: 可选的外部 MODEL 补丁链；未连接时继续使用 bundle 里的权重。
     model: Any = None
@@ -11213,8 +11439,8 @@ class MiniMaxH3EasySequenceGlobal:
                     {
                         "default": SEQUENCE_EXPOSURE_LOCK_ON,
                         "tooltip": (
-                            "曝光锁定：按第一段建立亮度锚点，稳定每一段内部的慢速明暗变化，"
-                            "局部运动、风格和短暂光线变化仍保留。关闭则完全按原采样结果输出。"
+                            "接缝亮度匹配：开头 12 帧匹配上一段尾帧的低频色光，24 帧加性亮度平滑过渡，"
+                            "再对有上限的整段直流亮度做对齐，保留局部明暗变化。关闭则完全按原采样结果输出。"
                         ),
                     },
                 ),
@@ -11313,7 +11539,7 @@ class MiniMaxH3EasySequenceGlobal:
             f"（原生栅格 {config.context_frames} 帧 / {mode}），每段收尾「{config.cleanup}」，"
             f"音频「{SEQUENCE_AUDIO_DIGITAL_HUMAN if resolved_audio_mode == CONTEXT_AUDIO_DIGITAL_HUMAN else SEQUENCE_AUDIO_GENERATED}」，"
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
-            f"曝光处理「{config.exposure_lock}」；"
+            f"接缝处理「{config.exposure_lock}」；"
         )
         return (config,)
 
@@ -11333,8 +11559,8 @@ class MiniMaxH3EasySequenceSegment:
     DESCRIPTION = (
         "顺序生成的一段视频。接上一条「视频段落」的 segment 即可无限往下接；"
         "第一段不接 previous_segment。段落之间自动衔接上一段的结尾帧（帧数在全局设置里调）。"
-        "全局设置与资源库只在第 1 段接一次，后面的段落顺着 previous_segment 继承，"
-        "想给某一段换素材或换配置，再单独把线接到这一段即可。"
+        "全局设置顺着 previous_segment 继承；每段可以用节点内嵌资源库选择独立素材，"
+        "没有独立素材时沿用上一段，也可以继续外接资源库 Bundle。"
     )
 
     @classmethod
@@ -11345,6 +11571,7 @@ class MiniMaxH3EasySequenceSegment:
             "sequence_config": (SEQUENCE_CONFIG_TYPE,),
             "previous_segment": (SEQUENCE_SEGMENT_TYPE,),
             "media": ("*",),
+            "inline_media_state": ("STRING", {"default": "", "multiline": False}),
         }
         for index in range(1, SEGMENT_MAX_MEDIA + 1):
             optional[f"media_{index}"] = ("*", {"hidden": True})
@@ -11463,9 +11690,17 @@ class MiniMaxH3EasySequenceSegment:
         head_frames = context_length if position else 0
         sample_length = _segment_target_length(delivery_frames, head_frames)
 
-        items = MiniMaxH3Easy._collect_media(kwargs, SEGMENT_MAX_MEDIA)
-        # 素材同理：资源库只在第 1 段（或要换素材的那一段）接一次，后面的段落默认沿用
-        # 上一段的素材库，画布上就少了 N 条线；提示词里没写标签时两边拿到的素材完全一致。
+        connected_items = MiniMaxH3Easy._collect_media(kwargs, SEGMENT_MAX_MEDIA)
+        inline_state = str(kwargs.pop("inline_media_state", "") or "").strip()
+        inline_items: list[_MediaInput] = []
+        if inline_state:
+            inline_bundle = MiniMaxH3EasyMediaLoader().load(inline_state)[0]
+            if not isinstance(inline_bundle, MiniMaxH3MediaBundle):
+                raise ValueError("视频段落的内嵌资源库状态无法解析")
+            inline_items = list(inline_bundle.items)
+        # 当前段的独立资源库优先；没填独立资源时，继续沿用外接资源库或上一段素材。
+        items = inline_items if inline_items else connected_items
+        # 没填内嵌资源时沿用外接资源库或上一段素材；提示词里没写标签时两边拿到的一致。
         if not items and previous_segment is not None:
             previous_sample = previous_segment.sample
             items = list(previous_sample.source_media or previous_sample.media or ())
@@ -11512,9 +11747,8 @@ class MiniMaxH3EasySequenceSegment:
         tail_frames = state["tail_frames"]
         # 数字人模式的音频由驱动音轨整段锁定，不再叠加「上一段尾音」的上下文条件。
         audio_context_reference = None if digital_human else state["audio_reference"]
-        if continuity_mode == CONTEXT_CONTINUITY_GUIDE:
-            # RGB Guide 只带画面；带音频会在同一个衔接点上再压一层条件。
-            audio_context_reference = None
+        # RGB Guide carries the visual tail; keep the matching audio tail too.
+        # Otherwise speech restarts at every segment boundary even though the picture is continuous.
 
         guides: list[dict[str, Any]] = []
         if motion_tail_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
@@ -11531,9 +11765,7 @@ class MiniMaxH3EasySequenceSegment:
             guides,
             h3.temporal_shape(sample_length)[0],
             audio_context_reference,
-            _segment_motion_context_audio_index(audio_context_reference, context_length)
-            if continuity_mode == CONTEXT_CONTINUITY_LATENT
-            else 0,
+            _segment_motion_context_audio_index(audio_context_reference, context_length),
         )
 
         # 数字人：把这一段对应的驱动音频切片锁进 AV latent（音频流 noise_mask=0，

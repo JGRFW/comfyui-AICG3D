@@ -152,6 +152,7 @@ const MAX_AUDIOS = 3;
 /* 提示词编辑器默认高度（含 DOM 控件上下 margin）。
    base 为一行高的旧默认值，这里放大到约 4 倍。 */
 const PROMPT_EDITOR_MIN_HEIGHT = 140;
+const SEQUENCE_PROMPT_NODE_MIN_HEIGHT = 320;
 const SEGMENT_MAX_COUNT = 30;
 const SEGMENT_MAX_MEDIA = MAX_MEDIA * 3;
 const SEGMENT_MAX_IMAGES = MAX_IMAGES * 3;
@@ -238,6 +239,7 @@ const TEXT = {
     optimizerDone: ZH_BROWSER ? "\u4f18\u5316\u5b8c\u6210" : "Optimization complete",
     optimizerError: ZH_BROWSER ? "\u4f18\u5316\u5931\u8d25" : "Optimization failed",
     promptExternalConnected: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u6765\u81ea\u5916\u90e8\u6587\u672c\u8fde\u63a5" : "Prompt supplied by external text input",
+    promptExternalEditableHint: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u6765\u81ea\u5916\u90e8\u6587\u672c\u8fde\u63a5\uff1b\u76f4\u63a5\u8f93\u5165\u4f1a\u81ea\u52a8\u65ad\u5f00\u8fd9\u6761\u63d0\u793a\u8bcd\u8fde\u7ebf" : "Prompt is supplied by an external text link; typing will disconnect it for this segment",
     referencePromptPlaceholder: ZH_BROWSER ? "Prompt... \u8f93\u5165 @ \u5f15\u7528\u5df2\u8fde\u63a5\u7d20\u6750" : "Prompt... Type @ to reference connected media",
     mentionTitle: ZH_BROWSER ? "\u5f15\u7528\u7d20\u6750" : "Reference media",
     mentionEmpty: ZH_BROWSER ? "\u5148\u5c06\u7d20\u6750\u8fde\u63a5\u5230\u4e3b\u8282\u70b9" : "Connect media to the main node first",
@@ -726,7 +728,6 @@ function isContextSegmentsNode(node) {
 function isSelectedVideoContextNode(node) {
     return nodeMatchesClass(node, SELECTED_VIDEO_CONTEXT_CLASS, TEXT.selectedVideoContextTitle, "__h3SelectedVideoContextNodeInstalled");
 }
-
 function isSimpleSwapContextNode(node) {
     return isSelectedVideoContextNode(node) && node?.properties?.[SIMPLE_SWAP_UI_PROP] === true;
 }
@@ -3392,9 +3393,17 @@ function sourceFilename(node, mediaType) {
     return widgetFilename(node?.properties?.filename || node?.properties?.file || "");
 }
 
+function mediaLoaderStorageWidget(node) {
+    if (isMediaLoader(node)) return getWidget(node, "media_state");
+    if (isSequenceSegmentNode(node)) return getWidget(node, "inline_media_state");
+    return null;
+}
+
 function mediaLoaderState(node) {
-    if (!isMediaLoader(node)) return { images: [], audios: [], videos: [] };
-    let value = getWidgetValue(node, "media_state", "");
+    const widget = mediaLoaderStorageWidget(node);
+    if (!widget) return { images: [], audios: [], videos: [] };
+    let value = widget.value;
+    if (isSequenceSegmentNode(node) && !value) value = node.properties?.minimax_h3_inline_media_state || "";
     if (typeof value === "string") {
         try { value = JSON.parse(value || "{}"); } catch { value = {}; }
     }
@@ -3418,7 +3427,7 @@ function mediaLoaderEntryUrl(filename, type) {
 }
 
 function mediaLoaderMentionOptions(source, targetNode = source) {
-    source = isMediaLoader(source) ? source : null;
+    source = isMediaLoader(source) || isSequenceSegmentNode(source) ? source : null;
     if (!source) return [];
     const state = mediaLoaderState(source);
     const result = [];
@@ -3451,11 +3460,30 @@ function truncateMentionLabel(value, maxLength = 22) {
     return `${text.slice(0, Math.max(4, maxLength - 1))}\u2026`;
 }
 
+function sequenceSegmentResourceSource(node) {
+    const seen = new Set();
+    let current = node;
+    while (current && isSequenceSegmentNode(current) && !seen.has(current)) {
+        seen.add(current);
+        const state = mediaLoaderState(current);
+        if (Object.values(state).some((entries) => entries.length > 0)) return current;
+        current = previousSequenceSegment(current);
+    }
+    return null;
+}
+
 function mentionOptions(node) {
     if (!canUseMediaMentions(node)) return [];
+    if (isSequenceSegmentNode(node) && sequenceSegmentResourceSource(node) === node) {
+        return mediaLoaderMentionOptions(node, node);
+    }
     const native = getNativeMediaBridgeLink(node);
     const loader = native ? app.graph?.getNodeById?.(Number(native.source_id)) : null;
     if (loader && isMediaLoader(loader)) return mediaLoaderMentionOptions(loader, node);
+    if (isSequenceSegmentNode(node)) {
+        const inherited = sequenceSegmentResourceSource(previousSequenceSegment(node));
+        if (inherited) return mediaLoaderMentionOptions(inherited, node);
+    }
     const links = normalizeLinks(node);
     const mediaOrder = { image: 0, video: 1, audio: 2 };
     const orderedLinks = links
@@ -3558,7 +3586,7 @@ function getNodeVideoSrc(node) {
 
 function refreshMentionPreviews() {
     for (const node of app.graph?._nodes || []) {
-        if (!isTarget(node)) continue;
+        if (!isTarget(node) && !isSequenceSegmentNode(node)) continue;
         normalizeLinks(node);
         if (!canUseMediaMentions(node)) {
             closeMentionMenu(node);
@@ -4794,6 +4822,7 @@ function appendMentionTagToWidget(node, option) {
  */
 function insertMentionOption(node, option, range = null) {
     if (!node || !option) return false;
+    disconnectSequencePromptInputForEdit(node);
     const editor = node.__h3Editor;
     // 没有富编辑器就直接写官方标签，跟原始视图同一种写法。
     if (!editor) return appendMentionTagToWidget(node, option);
@@ -4984,7 +5013,7 @@ function syncEditorThemes(force = false) {
     if (!force && lastVueNodesMode === modern) return;
     lastVueNodesMode = modern;
     for (const node of app.graph?._nodes || []) {
-        if (!isTarget(node)) continue;
+        if (!isTarget(node) && !isSequenceSegmentNode(node)) continue;
         applyNativeEditorTheme(node.__h3EditorWrap);
         applyNativeEditorTheme(node.__h3MentionMenu?.element);
     }
@@ -5169,6 +5198,7 @@ function setNodeSizeExact(node, size) {
 }
 
 function restorePromptEditorStableSize(node) {
+    if (isSequenceSegmentNode(node)) return false;
     const stableSize = Array.isArray(node?.__h3EditorStableSize) ? [...node.__h3EditorStableSize] : null;
     if (!stableSize || stableSize.length < 2) return false;
     const restored = setNodeSizeExact(node, stableSize);
@@ -6421,23 +6451,41 @@ function notifyPromptOptimizer(message, severity = "error") {
     globalThis.alert?.(detail);
 }
 
+function disconnectSequencePromptInputForEdit(node) {
+    if (!isSequenceSegmentNode(node) || !promptInputIsConnected(node)) return false;
+    const input = promptInputSlot(node);
+    const index = Array.isArray(node.inputs) ? node.inputs.indexOf(input) : -1;
+    if (index < 0) return false;
+    const linkId = input?.link;
+    try { node.disconnectInput?.(index); } catch (error) { /* compatibility */ }
+    if (input && input.link === linkId) input.link = null;
+    node.graph?.change?.();
+    node.setDirtyCanvas?.(true, true);
+    node.graph?.setDirtyCanvas?.(true, true);
+    syncPromptExternalConnectionState(node);
+    return true;
+}
+
 function syncPromptExternalConnectionState(node) {
     const connected = promptInputIsConnected(node);
+    const sequenceLinked = connected && isSequenceSegmentNode(node);
+    const locked = connected && !sequenceLinked;
     node.__h3PromptExternalConnected = connected;
+    node.__h3PromptExternalEditable = sequenceLinked;
     const editor = node?.__h3Editor;
     const wrap = node?.__h3EditorWrap;
     if (editor) {
-        editor.contentEditable = connected ? "false" : "true";
-        editor.setAttribute("aria-readonly", connected ? "true" : "false");
-        editor.title = connected ? TEXT.promptExternalConnected : "";
-        editor.classList.toggle("is-external", connected);
-        editor.tabIndex = connected ? -1 : 0;
-        if (connected) {
+        editor.contentEditable = locked ? "false" : "true";
+        editor.setAttribute("aria-readonly", locked ? "true" : "false");
+        editor.title = locked ? TEXT.promptExternalConnected : sequenceLinked ? TEXT.promptExternalEditableHint : "";
+        editor.classList.toggle("is-external", locked);
+        editor.tabIndex = locked ? -1 : 0;
+        if (locked) {
             closeMentionMenu(node);
             if (document.activeElement === editor) editor.blur();
         }
     }
-    wrap?.classList?.toggle("is-external", connected);
+    wrap?.classList?.toggle("is-external", locked);
     syncPromptOptimizerButton(node);
 }
 
@@ -6499,7 +6547,9 @@ function syncPromptOptimizerButton(node) {
     if (!button) return;
     const state = promptOptimizerState(node);
     const configured = promptOptimizerConfigured(state);
-    const external = promptInputIsConnected(node);
+    const connected = promptInputIsConnected(node);
+    const sequenceLinked = connected && isSequenceSegmentNode(node);
+    const external = connected && !sequenceLinked;
     const pending = Boolean(node.__h3OptimizerPending);
     const locked = external || pending;
     button.title = external ? TEXT.promptExternalConnected : TEXT.optimizePrompt;
@@ -6516,7 +6566,13 @@ function syncPromptOptimizerButton(node) {
         editor.setAttribute("aria-readonly", locked ? "true" : "false");
         editor.setAttribute("aria-busy", pending ? "true" : "false");
         editor.tabIndex = locked ? -1 : 0;
-        editor.title = external ? TEXT.promptExternalConnected : pending ? TEXT.optimizerRunning : "";
+        editor.title = external
+            ? TEXT.promptExternalConnected
+            : sequenceLinked
+                ? TEXT.promptExternalEditableHint
+                : pending
+                    ? TEXT.optimizerRunning
+                    : "";
         editor.classList.toggle("is-loading", pending);
     }
     wrap?.classList?.toggle("is-loading", pending);
@@ -6610,7 +6666,25 @@ function clearAutomaticPromptMarker(node) {
     return true;
 }
 
-function setPromptFromOptimizedText(node, value, { preserveAutoMarker = false, notifyGraphChange = true } = {}) {
+function holdSequenceSegmentSize(node, size) {
+    if (!isSequenceSegmentNode(node) || !Array.isArray(size) || size.length < 2 || !Array.isArray(node.size)) return;
+    const target = [Number(size[0]), Number(size[1])];
+    if (!target.every(Number.isFinite)) return;
+    const restore = () => {
+        if (!node.graph || !Array.isArray(node.size)) return;
+        const changed = Math.abs((Number(node.size[0]) || 0) - target[0]) > 0.5
+            || Math.abs((Number(node.size[1]) || 0) - target[1]) > 0.5;
+        if (changed) setNodeSizeExact(node, target);
+        node.__h3EditorStableSize = [...target];
+    };
+    restore();
+    if (typeof queueMicrotask === "function") queueMicrotask(restore);
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(restore));
+    for (const delay of [0, 60, 180]) setTimeout(restore, delay);
+}
+
+function setPromptFromOptimizedText(node, value, { preserveAutoMarker = false, notifyGraphChange = true, preserveNodeSize = false } = {}) {
+    const pinnedSize = isSequenceSegmentNode(node) && Array.isArray(node.size) ? [...node.size] : null;
     const text = String(value || "").replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/, "").trim();
     const doc = { version: 1, text, parts: promptPartsFromText(node, text) };
     const widget = getWidget(node, "prompt");
@@ -6625,6 +6699,8 @@ function setPromptFromOptimizedText(node, value, { preserveAutoMarker = false, n
     renderEditorFromNode(node, true);
     syncPromptFromEditor(node, false);
     pushPromptHistory(node);
+    holdSequenceSegmentSize(node, pinnedSize);
+    if (preserveNodeSize) applyPromptEditorWidgetHeight(node);
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
     if (notifyGraphChange) app.graph?.change?.();
@@ -6666,7 +6742,8 @@ function applyRuntimePromptOptimization(node, message) {
 }
 
 async function optimizePromptFromEditor(node) {
-    if (!node || node.__h3OptimizerPending || promptInputIsConnected(node)) return;
+    if (!node || node.__h3OptimizerPending || (promptInputIsConnected(node) && !isSequenceSegmentNode(node))) return;
+    disconnectSequencePromptInputForEdit(node);
     syncPromptFromEditor(node, false);
     pushPromptHistory(node);
     try {
@@ -7395,6 +7472,7 @@ function ensurePromptEditor(node) {
     }
     editorTools.append(...tools, optimizeButton, viewButton);
     editor.addEventListener("beforeinput", (event) => {
+        disconnectSequencePromptInputForEdit(node);
         if (isRawPromptMode(node)) {
             node.__h3DialogueHashHandled = false;
             return;
@@ -7425,6 +7503,7 @@ function ensurePromptEditor(node) {
         if (canUseMediaMentions(node) && event.data === "@") setTimeout(() => syncMentionMenuToCaret(node, editor), 0);
     });
     editor.addEventListener("input", (event) => {
+        disconnectSequencePromptInputForEdit(node);
         const raw = isRawPromptMode(node);
         if (raw) node.__h3RawPromptNeedsSync = true;
         syncPromptFromEditor(node);
@@ -7440,6 +7519,7 @@ function ensurePromptEditor(node) {
         syncMentionMenuToCaret(node, editor);
     });
     editor.addEventListener("compositionstart", () => {
+        disconnectSequencePromptInputForEdit(node);
         node.__h3PromptComposing = true;
     });
     editor.addEventListener("compositionend", () => {
@@ -7551,6 +7631,7 @@ function ensurePromptEditor(node) {
         event.stopPropagation();
     });
     editor.addEventListener("paste", (event) => {
+        disconnectSequencePromptInputForEdit(node);
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
@@ -7768,6 +7849,7 @@ function applyPromptEditorWidgetHeight(node, widget = node?.__h3DomWidget) {
 
 /* 编辑器变高后，节点自身也要留够位置，否则下面几行会被挤出节点边框。 */
 function growNodeForPromptEditor(node) {
+    if (isSequenceSegmentNode(node)) return false;
     const domWidget = node?.__h3DomWidget;
     if (!domWidget || !Array.isArray(node?.size) || typeof node?.computeSize !== "function") return false;
     let measured = null;
@@ -7808,6 +7890,18 @@ function keepPromptEditorWidgetHeight(node) {
     };
     node.__h3PromptHeightTimer = setTimeout(tick, 250);
 }
+
+/* 只校正编辑器高度并补足节点最小高度，不调用 computeSize 回写整个节点尺寸。
+   批量填词、素材刷新都会走这里，用户手动放大过的节点不会再被缩回去。 */
+function refreshPromptNodeLayout(node) {
+    if (!node?.__h3Editor) return false;
+    if (Array.isArray(node.size)) node.__h3EditorStableSize = [...node.size];
+    const widgetChanged = applyPromptEditorWidgetHeight(node);
+    const grew = growNodeForPromptEditor(node);
+    if (widgetChanged || grew) refreshVueNodeWidgets(node);
+    return true;
+}
+
 function updatePromptEditor(node) {
     if (!node.__h3Editor) {
         installPromptEditorSoon(node);
@@ -8467,6 +8561,351 @@ const SEQUENCE_SEGMENT_WIDGET_LABELS = {
     seed: TEXT.seedLabel,
 };
 
+function sequenceSlotIndex(slots, name) {
+    return (slots || []).findIndex((slot) => String(slot?.name || "") === name);
+}
+
+function focusGraphNode(node) {
+    if (!node) return;
+    const canvas = app?.canvas;
+    try { canvas?.selectNode?.(node, false); } catch (error) { /* compatibility */ }
+    try { canvas?.centerOnNode?.(node); } catch (error) { /* compatibility */ }
+    node.setDirtyCanvas?.(true, true);
+    (node.graph || app.graph)?.setDirtyCanvas?.(true, true);
+}
+
+function nextSequenceSegmentNode(node, pool) {
+    const links = new Set(((node?.outputs || [])[0]?.links || []).map(String));
+    if (!links.size) return null;
+    return pool.find((candidate) => candidate !== node
+        && (candidate.inputs || []).some((input) => input?.name === "previous_segment"
+            && input.link != null && links.has(String(input.link)))) || null;
+}
+
+function existingSequenceNext(node) {
+    const graph = node?.graph || app.graph;
+    const pool = (graph?._nodes || graph?.nodes || []).filter(isSequenceSegmentNode);
+    return nextSequenceSegmentNode(node, pool);
+}
+
+function setSequenceInlineResourceOpen(node, open) {
+    const widget = node?.__h3InlineMediaPanelWidget;
+    if (!widget) return false;
+    if (open) {
+        widget.hidden = false;
+        widget.type = widget.__h3InlineOriginalType || "h3_sequence_inline_media";
+        if (widget.__h3InlineOriginalComputeSize) widget.computeSize = widget.__h3InlineOriginalComputeSize;
+        node.__h3InlineMediaOpen = true;
+        mediaLoaderRender(node);
+        mediaLoaderResize(node);
+    } else {
+        if (!widget.__h3InlineOriginalType) widget.__h3InlineOriginalType = widget.type;
+        if (!widget.__h3InlineOriginalComputeSize) widget.__h3InlineOriginalComputeSize = widget.computeSize;
+        widget.hidden = true;
+        widget.type = "hidden";
+        widget.computeSize = () => [0, -4];
+        node.__h3InlineMediaOpen = false;
+    }
+    node._widgetSlotsDirty = true;
+    refreshVueNodeWidgets(node);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function closeSequenceMediaPopup(node) {
+    return setSequenceInlineResourceOpen(node, false);
+}
+
+function refreshSequenceSegmentPromptLayout(node) {
+    if (!isSequenceSegmentNode(node)) return false;
+    if (Array.isArray(node.size)) node.__h3EditorStableSize = [...node.size];
+    installPromptEditorSoon(node);
+    if (!node.__h3Editor) return false;
+    refreshPromptNodeLayout(node);
+    return true;
+}
+
+function scheduleSequenceSegmentPromptLayout(node) {
+    if (!isSequenceSegmentNode(node)) return;
+    if (node.__h3SequencePromptLayoutTimer) clearTimeout(node.__h3SequencePromptLayoutTimer);
+    let attempts = 0;
+    const apply = () => {
+        node.__h3SequencePromptLayoutTimer = null;
+        if (refreshSequenceSegmentPromptLayout(node)) return;
+        if (attempts >= 8) return;
+        const delay = Math.min(1200, 100 * (2 ** attempts));
+        attempts += 1;
+        node.__h3SequencePromptLayoutTimer = setTimeout(apply, delay);
+    };
+    if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => requestAnimationFrame(apply));
+    } else {
+        setTimeout(apply, 0);
+    }
+}
+
+
+function openSequenceMediaPopup(node) {
+    if (!isSequenceSegmentNode(node)) return false;
+    if (node.__h3InlineMediaPanelWidget) {
+        setSequenceInlineResourceOpen(node, !node.__h3InlineMediaOpen);
+        return true;
+    }
+    installMediaLoaderStyles();
+    const stateWidget = getWidget(node, "inline_media_state");
+    mediaLoaderHideStateWidget(stateWidget);
+    const panel = document.createElement("div");
+    panel.className = "h3-media-loader-panel";
+    panel.dataset.dropLabel = TEXT.mediaLoaderDrop;
+    installMediaLoaderFileDrop(node, panel);
+    panel.addEventListener("pointerdown", (event) => event.stopPropagation());
+    panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+    const toolbar = document.createElement("div");
+    toolbar.className = "h3-media-loader-toolbar";
+    const heading = document.createElement("div");
+    heading.className = "h3-media-loader-heading";
+    const title = document.createElement("span");
+    title.className = "h3-media-loader-title";
+    title.textContent = TEXT.mediaLoaderAll;
+    const count = document.createElement("span");
+    count.className = "h3-media-loader-count";
+    heading.append(title, count);
+    const upload = document.createElement("button");
+    upload.type = "button";
+    upload.className = "h3-media-loader-upload";
+    upload.textContent = TEXT.mediaLoaderUpload;
+    upload.addEventListener("click", () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/*,audio/*,video/*";
+        input.multiple = true;
+        input.addEventListener("change", () => {
+            mediaLoaderUpload(node, input).catch((error) => console.error("Inline media upload failed", error));
+        }, { once: true });
+        input.click();
+    });
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "h3-media-loader-upload";
+    close.textContent = "收起";
+    close.addEventListener("click", () => closeSequenceMediaPopup(node));
+    toolbar.append(heading, upload, close);
+    const groups = document.createElement("div");
+    groups.className = "h3-media-loader-groups";
+    for (const group of MEDIA_LOADER_GROUPS) {
+        const section = document.createElement("section");
+        section.className = "h3-media-loader-section";
+        section.dataset.mediaLoaderSection = group.type;
+        const header = document.createElement("div");
+        header.className = "h3-media-loader-header";
+        const sectionTitle = document.createElement("span");
+        sectionTitle.textContent = group.type === "image" ? TEXT.mediaLoaderImages : group.type === "audio" ? TEXT.mediaLoaderAudio : TEXT.mediaLoaderVideos;
+        header.append(sectionTitle);
+        const list = document.createElement("div");
+        list.className = "h3-media-loader-list";
+        section.append(header, list);
+        groups.append(section);
+    }
+    panel.append(toolbar, groups);
+    node.__h3MediaLoaderPanel = panel;
+    node.__h3MediaLoaderCount = count;
+    const domWidget = node.addDOMWidget("h3_sequence_inline_media", "h3_sequence_inline_media", panel, {
+        serialize: false,
+        getMinHeight: () => Math.max(1, Number(node.__h3MediaLoaderMinWidgetHeight) || 120),
+        afterResize: () => mediaLoaderResize(node),
+    });
+    if (!domWidget) return false;
+    domWidget.serialize = false;
+    setWidgetOption(domWidget, "serialize", false);
+    setWidgetOption(domWidget, "canvasOnly", false);
+    node.__h3MediaLoaderWidget = domWidget;
+    node.__h3InlineMediaPanelWidget = domWidget;
+    node.__h3InlineMediaOpen = true;
+    mediaLoaderRender(node);
+    mediaLoaderResize(node);
+    refreshVueNodeWidgets(node);
+    return true;
+}
+
+function addSequenceResourceLibrary(node) {
+    if (!isSequenceSegmentNode(node)) return false;
+    const wasOpen = Boolean(node.__h3InlineMediaOpen);
+    const opened = openSequenceMediaPopup(node);
+    if (opened) toast(wasOpen ? "已收起当前段落的资源选择面板" : "已在当前视频段落内展开独立资源选择面板", "ok");
+    return opened;
+}
+
+function sequenceCombineNodes(graph = app.graph) {
+    const nodes = graph?._nodes || graph?.nodes || [];
+    return nodes.filter((candidate) => sequenceSlotIndex(candidate?.inputs, "final_segment") >= 0);
+}
+
+function disconnectSequenceInput(node, inputName) {
+    const index = sequenceSlotIndex(node?.inputs, inputName);
+    if (index < 0 || node.inputs[index]?.link == null) return false;
+    try { node.disconnectInput?.(index); } catch (error) { /* compatibility */ }
+    if (node.inputs[index]) node.inputs[index].link = null;
+    return true;
+}
+
+function nativeLinkOriginId(graph, input) {
+    if (!input || input.link == null) return null;
+    const link = getNativeGraphLink(graph, input.link);
+    return link?.origin_id ?? link?.originId ?? link?.from_id ?? link?.fromId ?? null;
+}
+
+function connectSequenceTailToCombine(segment, previousSource = null) {
+    if (!isSequenceSegmentNode(segment)) return false;
+    const graph = segment.graph || app.graph;
+    const outputSlot = sequenceSlotIndex(segment.outputs, "segment");
+    if (outputSlot < 0) return false;
+    let changed = false;
+    for (const combine of sequenceCombineNodes(graph)) {
+        const inputSlot = sequenceSlotIndex(combine.inputs, "final_segment");
+        if (inputSlot < 0) continue;
+        const input = combine.inputs[inputSlot];
+        const originId = nativeLinkOriginId(graph, input);
+        const relinkingOldSource = previousSource && Number(originId) === Number(previousSource.id);
+        if (input.link == null || Number(originId) === Number(segment.id) || relinkingOldSource) {
+            if (input.link != null) disconnectSequenceInput(combine, "final_segment");
+            if (segment.connect?.(outputSlot, combine, inputSlot)) changed = true;
+        }
+    }
+    return changed;
+}
+
+function previousSequenceSegment(node) {
+    const graph = node?.graph || app.graph;
+    const input = (node?.inputs || []).find((item) => item?.name === "previous_segment");
+    const sourceId = nativeLinkOriginId(graph, input);
+    const source = sourceId != null ? graph?.getNodeById?.(Number(sourceId)) : null;
+    return isSequenceSegmentNode(source) ? source : null;
+}
+
+function sequenceChainTail(node) {
+    const graph = node?.graph || app.graph;
+    const pool = (graph?._nodes || graph?.nodes || []).filter(isSequenceSegmentNode);
+    const seen = new Set();
+    let tail = node;
+    while (tail && !seen.has(tail)) {
+        seen.add(tail);
+        const next = nextSequenceSegmentNode(tail, pool);
+        if (!next) break;
+        tail = next;
+    }
+    return tail || node;
+}
+
+function deleteSequenceSegment(node) {
+    if (!isSequenceSegmentNode(node)) return false;
+    const graph = node.graph || app.graph;
+    if (!graph) return false;
+    const previous = previousSequenceSegment(node);
+    const next = existingSequenceNext(node);
+    const oldTail = next ? sequenceChainTail(next) : previous;
+    if (next) {
+        disconnectSequenceInput(next, "previous_segment");
+        if (previous) {
+            const outputSlot = sequenceSlotIndex(previous.outputs, "segment");
+            const inputSlot = sequenceSlotIndex(next.inputs, "previous_segment");
+            if (outputSlot >= 0 && inputSlot >= 0) previous.connect?.(outputSlot, next, inputSlot);
+        }
+    }
+    for (const combine of sequenceCombineNodes(graph)) {
+        const inputSlot = sequenceSlotIndex(combine.inputs, "final_segment");
+        const input = inputSlot >= 0 ? combine.inputs[inputSlot] : null;
+        if (Number(nativeLinkOriginId(graph, input)) !== Number(node.id)) continue;
+        disconnectSequenceInput(combine, "final_segment");
+        if (oldTail && oldTail !== node) connectSequenceTailToCombine(oldTail);
+    }
+    closeSequenceMediaPopup(node);
+    graph.remove?.(node);
+    graph.setDirtyCanvas?.(true, true);
+    graph.change?.();
+    toast("已删除这一段并自动整理段落链", "ok");
+    return true;
+}
+
+function addSequenceNextSegment(node) {
+    if (!isSequenceSegmentNode(node)) return false;
+    const existing = existingSequenceNext(node);
+    if (existing) {
+        connectSequenceTailToCombine(sequenceChainTail(existing), node);
+        focusGraphNode(existing);
+        toast("这一段已经有下一段，已为你选中", "ok");
+        return true;
+    }
+    const graph = node.graph || app.graph;
+    const LiteGraph = globalThis.LiteGraph;
+    if (!graph || !LiteGraph?.createNode) return false;
+    const outputSlot = sequenceSlotIndex(node.outputs, "segment");
+    if (outputSlot < 0) {
+        toast("当前节点没有可用的视频段落输出", "warn");
+        return false;
+    }
+    const next = LiteGraph.createNode(h3NodeId(SEQUENCE_SEGMENT_CLASS));
+    if (!next) {
+        toast("无法创建新的视频段落节点", "warn");
+        return false;
+    }
+    const width = Math.max(Number(node.size?.[0]) || 220, 360);
+    const height = Math.max(Number(node.size?.[1]) || 260, SEQUENCE_PROMPT_NODE_MIN_HEIGHT);
+    next.pos = [(Number(node.pos?.[0]) || 0) + width + 50, Number(node.pos?.[1]) || 0];
+    next.size = [width, height];
+    graph.add(next);
+    const inputSlot = sequenceSlotIndex(next.inputs, "previous_segment");
+    const connected = inputSlot >= 0 && node.connect?.(outputSlot, next, inputSlot);
+    if (!connected) {
+        graph.remove?.(next);
+        toast("下一段创建成功但自动连线失败", "warn");
+        return false;
+    }
+    connectSequenceTailToCombine(next, node);
+    const seconds = Number(getWidgetValue(node, "seconds", ""));
+    if (Number.isFinite(seconds)) setWidgetValue(next, "seconds", seconds);
+    graph.setDirtyCanvas?.(true, true);
+    graph.change?.();
+    focusGraphNode(next);
+    toast("已添加下一段，并自动连接到上一分段", "ok");
+    return true;
+}
+
+function installSequenceActionRow(node) {
+    if (!node || !isSequenceSegmentNode(node) || node.__h3SequenceActionRow || typeof node.addDOMWidget !== "function") return;
+    if (typeof document === "undefined" || !document.head) return;
+    const row = document.createElement("div");
+    row.className = "h3-sequence-actions";
+    row.style.cssText = "display:flex;align-items:center;gap:6px;width:100%;height:100%;box-sizing:border-box;padding:2px 6px;";
+    row.addEventListener("pointerdown", (event) => event.stopPropagation());
+    const makeButton = (label, tone, handler) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        const border = tone === "danger" ? "#9a4e4e" : tone === "primary" ? "#4f8cff" : "#56657a";
+        const background = tone === "danger" ? "#5b2b2b" : tone === "primary" ? "#284a7c" : "#273244";
+        button.style.cssText = `flex:1 1 0;min-width:0;height:26px;padding:0 2px;border:1px solid ${border};border-radius:6px;background:${background};color:#e7eef8;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handler();
+        });
+        row.append(button);
+    };
+    makeButton("添加资源库", "neutral", () => addSequenceResourceLibrary(node));
+    makeButton("添加下一段", "primary", () => addSequenceNextSegment(node));
+    makeButton("删除这一段", "danger", () => deleteSequenceSegment(node));
+    const domWidget = node.addDOMWidget("h3_sequence_actions", "h3_sequence_actions", row, {
+        serialize: false,
+        getMinHeight: () => 32,
+    });
+    if (!domWidget) return;
+    domWidget.serialize = false;
+    setWidgetOption(domWidget, "serialize", false);
+    setWidgetOption(domWidget, "canvasOnly", false);
+    node.__h3SequenceActionRow = domWidget;
+}
+
 /* 视频段落节点：把虚拟素材那一堆传输字段（media_N / media_type_N）从前端定义里删掉，
    面板上只留一个 media 入口，避得节点上挂出一长串空输入。
    它不走虚拟素材拖拽，所以不能进 isTarget（会被灌上 mode / resolution 等字段）。 */
@@ -8494,7 +8933,9 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         }
         // 段落节点同样要有个能贴素材、能写 @ 引用的提示词框：AICG3D 素材库点选
         // 就是往这里写引用。
-        installPromptEditorSoon(node);
+        mediaLoaderHideStateWidget(getWidget(node, "inline_media_state"));
+        installSequenceActionRow(node);
+        scheduleSequenceSegmentPromptLayout(node);
     };
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Sequence() {
@@ -8502,10 +8943,33 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         setup(this);
         return result;
     };
+    const originalRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function onRemovedH3Sequence() {
+        if (this.__h3SequencePromptLayoutTimer) clearTimeout(this.__h3SequencePromptLayoutTimer);
+        this.__h3SequencePromptLayoutTimer = null;
+        closeSequenceMediaPopup(this);
+        return originalRemoved?.apply(this, arguments);
+    };
+    const originalAdded = nodeType.prototype.onAdded;
+    nodeType.prototype.onAdded = function onAddedH3Sequence() {
+        const result = originalAdded?.apply(this, arguments);
+        setup(this);
+        refreshSequenceSegmentPromptLayout(this);
+        return result;
+    };
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3Sequence(info) {
         const result = originalConfigure?.apply(this, arguments);
         setup(this);
+        return result;
+    };
+    const originalResize = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function onResizeH3Sequence(size) {
+        const result = originalResize?.apply(this, arguments);
+        const resolved = Array.isArray(size) ? size : this.size;
+        if (Array.isArray(resolved) && resolved.length >= 2) {
+            this.__h3EditorStableSize = [Number(resolved[0]), Number(resolved[1])];
+        }
         return result;
     };
 }
@@ -9196,12 +9660,16 @@ function mediaLoaderWriteState(node, state) {
         audios: unique(state.audios).map((filename) => ({ filename })),
         videos: unique(state.videos).map((filename) => ({ filename })),
     });
-    const widget = getWidget(node, "media_state");
+    const widget = mediaLoaderStorageWidget(node);
     if (!widget) return;
     widget.value = value;
     if (widget._state) widget._state.value = value;
     node.properties ||= {};
-    node.properties.media_loader_state = value;
+    if (isSequenceSegmentNode(node)) {
+        node.properties.minimax_h3_inline_media_state = value;
+    } else {
+        node.properties.media_loader_state = value;
+    }
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
     app.graph?.change?.();
@@ -10770,6 +11238,7 @@ app.registerExtension({
    ========================================================================== */
 
 function aicg3dPromptTargets(loader) {
+    if (isSequenceSegmentNode(loader) && !isMediaLoader(loader)) return [loader];
     const id = Number(loader?.id);
     if (!Number.isFinite(id)) return [];
     const direct = (app.graph?._nodes || []).filter((node) => {
@@ -10822,12 +11291,14 @@ function aicg3dPreferredTarget(targets) {
 }
 
 function aicg3dLinkedLoader(node) {
+    if (isSequenceSegmentNode(node)) return node;
     const native = getNativeMediaBridgeLink(node);
     const loader = native ? app.graph?.getNodeById?.(Number(native.source_id)) : null;
     return loader && isMediaLoader(loader) ? loader : null;
 }
 
 function aicg3dAppendPlainText(node, text) {
+    disconnectSequencePromptInputForEdit(node);
     const editor = node?.__h3Editor;
     if (!editor) {
         const widget = getWidget(node, "prompt");
@@ -10872,6 +11343,7 @@ globalThis.AICG3D_H3 = {
     canUseMediaMentions,
     linkedMediaLoader: aicg3dLinkedLoader,
     insertLoaderMention: aicg3dInsertLoaderMention,
+    refreshPromptNodeLayout,
 
     /** 用整段文本覆盖某一段的提示词：结构化编辑器、prompt 控件、存档属性一起刷新。 */
     setPromptText(node, text, options = {}) {

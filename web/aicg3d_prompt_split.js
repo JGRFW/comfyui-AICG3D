@@ -252,6 +252,15 @@ const H3_PROMPT_DOC_PROP = "minimax_h3_prompt_reference_doc";
 
 function writePrompt(node, text) {
     const value = String(text ?? "");
+    const bridge = globalThis.AICG3D_H3;
+    if (typeof bridge?.setPromptText === "function") {
+        try {
+            bridge.setPromptText(node, value, { notifyGraphChange: false, preserveNodeSize: true });
+            return true;
+        } catch (err) {
+            /* 回退到 DOM 控件写入 */
+        }
+    }
     const domWidget = node?.__h3DomWidget;
     const setter = domWidget?.setValue || domWidget?.options?.setValue;
     if (typeof setter === "function") {
@@ -464,11 +473,7 @@ function fillSegments(node, options = {}) {
                 seedsWritten += 1;
             }
         }
-        try {
-            target.setSize?.(target.computeSize?.() ?? target.size);
-        } catch (err) {
-            /* 有些节点自己管尺寸，失败就保持原样 */
-        }
+        globalThis.AICG3D_H3?.refreshPromptNodeLayout?.(target);
         target.setDirtyCanvas?.(true, true);
     }
 

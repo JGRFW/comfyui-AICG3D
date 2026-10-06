@@ -11340,7 +11340,7 @@ class MiniMaxH3SequenceConfig:
     #: 接缝亮度匹配：低频色光对齐 + 12 帧加性过渡 + 很有限的整段亮度对齐。
     #: 同镜头的一帧接缝跳变还会做轻微运动桥接，硬切镜头保持不动。
     exposure_lock: str = SEQUENCE_EXPOSURE_LOCK_ON
-    #: 对应导演台「保完整」：RGB 引导时保留 17k+5 对齐余帧，避免句尾/接缝被裁掉。
+    #: 对应工作台「保完整」：RGB 引导时保留 17k+5 对齐余帧，避免句尾/接缝被裁掉。
     keep_full: bool = True
     #: 可选的外部 MODEL 补丁链；未连接时继续使用 bundle 里的权重。
     model: Any = None
@@ -11571,7 +11571,7 @@ class MiniMaxH3EasySequenceGlobal:
                     {
                         "default": True,
                         "tooltip": (
-                            "对应导演台「保完整」。尾帧画面（RGB）引导时，每段会保留对齐网格多出的约 12 帧，"
+                            "对应工作台「保完整」。尾帧画面（RGB）引导时，每段会保留对齐网格多出的约 12 帧，"
                             "成片会略长于界面秒数，但句尾和接缝更稳；关闭则严格裁齐界面时长。"
                         ),
                     },
@@ -11824,7 +11824,7 @@ class MiniMaxH3EasySequenceSegment:
         head_frames = context_length if position else 0
         sample_length = _segment_target_length(delivery_frames, head_frames)
         requested_frames = max(5, int(delivery_frames))
-        # 导演台「保完整」：guide / latent 的 sample_length 会保留 17k+5 对齐余帧。
+        # 工作台「保完整」：guide / latent 的 sample_length 会保留 17k+5 对齐余帧。
         # Head is still trimmed; the remainder is exported so the next pin sees a complete tail.
         if (
             bool(getattr(config, "keep_full", False))

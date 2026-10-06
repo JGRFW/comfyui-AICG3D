@@ -8551,7 +8551,7 @@ const SEQUENCE_GLOBAL_WIDGET_LABELS = {
     audio_mode: TEXT.audioMode,
     vram_tier: TEXT.vramTier,
     exposure_lock: "跨段曝光锁定",
-    keep_full: "保完整（导演台）",
+    keep_full: "保完整（工作台）",
     // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
     prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
 };

@@ -21,6 +21,16 @@ from aiohttp import web
 import aicg3d.prompt_guides as guide_lib, aicg3d.skills as skill_lib
 
 VERSION = "1.1.3"
+PROJECT_NAME = "短剧工作台"
+PROJECT_DESCRIPTION = "无限时长视频的 MiniMax H3 ComfyUI 工作流与插件"
+REPOSITORY_URL = "https://github.com/JGRFW/comfyui-AICG3D"
+SEARCH_ALIASES = [
+    "短剧工作台",
+    "无限时长视频的 MiniMax H3 工作流",
+    "ComfyUI MiniMax H3 无限长视频",
+    "MiniMax H3 本地短剧工作流",
+    "MiniMax H3 无限分段生视频",
+]
 MEDIA_KINDS = {
     "image": (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"),
     "video": (".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v", ".mpg", ".mpeg", ".wmv", ".flv"),
@@ -217,6 +227,10 @@ def register_routes() -> bool:
     @routes.get("/aicg3d/api/meta")
     async def aicg3d_meta(_request):
         return web.json_response({
+            "name": PROJECT_NAME,
+            "description": PROJECT_DESCRIPTION,
+            "repository": REPOSITORY_URL,
+            "search_aliases": SEARCH_ALIASES,
             "version": VERSION,
             "skills": len(skill_lib.discover()),
             "presets": len(skill_lib.discover_presets()),

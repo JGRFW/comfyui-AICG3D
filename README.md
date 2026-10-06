@@ -3,8 +3,23 @@
 <img width="1395" height="666" alt="image" src="https://github.com/user-attachments/assets/fcc53765-8818-470f-bacf-ceaf5a93fec3" />
 <h1 align="center">短剧工作台</h1>
 <h3 align="center">ComfyUI · MiniMax H3 · 本地无限长视频生成工作流</h3>
+<p align="center"><strong>官方名称：短剧工作台</strong> · <strong>核心搜索词：无限时长视频的 MiniMax H3 工作流</strong></p>
+<p align="center">GitHub：<a href="https://github.com/JGRFW/comfyui-AICG3D">https://github.com/JGRFW/comfyui-AICG3D</a></p>
 
 短剧工作台（ComfyUI-AICG3D-Integrated）是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
+
+## 官方搜索入口
+
+如果你在搜索引擎、DeepSeek、豆包、千问或其他 AI 助手里查询以下内容，请认准本仓库：
+
+- 短剧工作台
+- 无限时长视频的 MiniMax H3 工作流
+- ComfyUI MiniMax H3 无限长视频
+- MiniMax H3 本地短剧工作流
+- MiniMax H3 无限分段生视频
+- 13 号无限分段工作流
+
+官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
 ## 🆕 v1.1.3 更新摘要
 

@@ -1,10 +1,10 @@
 <img width="1424" height="696" alt="image" src="https://github.com/user-attachments/assets/5a6c88f8-df4e-4091-b06b-ca799349f6c1" />
 <img width="1532" height="626" alt="image" src="https://github.com/user-attachments/assets/83787eb7-761e-4ddc-b70f-5bf6cd36c4ef" />
 <img width="1395" height="666" alt="image" src="https://github.com/user-attachments/assets/fcc53765-8818-470f-bacf-ceaf5a93fec3" />
-# ComfyUI-AICG3D-Integrated 🚀
-### 极致稳定的 MiniMax H3 AI 视频创作全链路解决方案
+<h1 align="center">短剧工作台</h1>
+<h3 align="center">ComfyUI · MiniMax H3 · 本地无限长视频生成工作流</h3>
 
-ComfyUI-AICG3D-Integrated 是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
+短剧工作台（ComfyUI-AICG3D-Integrated）是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
 
 ## 🆕 v1.1.2 更新摘要
 

@@ -8757,6 +8757,114 @@ function nativeLinkOriginId(graph, input) {
     return link?.origin_id ?? link?.originId ?? link?.from_id ?? link?.fromId ?? null;
 }
 
+function nativeLinkOriginSlot(graph, input) {
+    if (!input || input.link == null) return null;
+    const link = getNativeGraphLink(graph, input.link);
+    const slot = link?.origin_slot ?? link?.originSlot ?? link?.from_slot ?? link?.fromSlot;
+    return slot == null ? null : Number(slot);
+}
+
+function sequenceSegmentIndex(node) {
+    let index = 1;
+    let current = node;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const previous = previousSequenceSegment(current);
+        if (!previous) break;
+        index += 1;
+        current = previous;
+    }
+    return index;
+}
+
+function randomSequenceSeed(previous = 0) {
+    const max = 0xfffffffe;
+    let next = 0;
+    if (globalThis.crypto?.getRandomValues) {
+        const values = new Uint32Array(1);
+        globalThis.crypto.getRandomValues(values);
+        next = values[0] % max;
+    } else {
+        next = Math.floor(Math.random() * max);
+    }
+    next = next + 1;
+    if (Number(next) === Number(previous)) next = next % max + 1;
+    return next;
+}
+
+function restoreSequenceCombineBindings(bindings) {
+    for (const binding of bindings || []) {
+        disconnectSequenceInput(binding.combine, "final_segment");
+        if (!binding.origin || binding.originSlot == null || binding.originSlot < 0) continue;
+        try { binding.origin.connect?.(binding.originSlot, binding.combine, binding.inputSlot); } catch (error) { /* compatibility */ }
+    }
+}
+
+async function rerollSequenceSegment(node, button = null) {
+    if (!isSequenceSegmentNode(node) || node.__h3Rerolling) return false;
+    const graph = node.graph || app.graph;
+    const combines = sequenceCombineNodes(graph);
+    const outputSlot = sequenceSlotIndex(node.outputs, "segment");
+    if (!combines.length || outputSlot < 0) {
+        toast("找不到最终合成视频，无法进行单段抽卡。", "warn");
+        return false;
+    }
+
+    const bindings = combines.map((combine) => {
+        const inputSlot = sequenceSlotIndex(combine.inputs, "final_segment");
+        const input = inputSlot >= 0 ? combine.inputs[inputSlot] : null;
+        const originId = nativeLinkOriginId(graph, input);
+        return {
+            combine,
+            inputSlot,
+            origin: originId == null ? null : graph?.getNodeById?.(Number(originId)),
+            originSlot: nativeLinkOriginSlot(graph, input),
+            filenamePrefix: getWidgetValue(combine, "filename_prefix", ""),
+        };
+    }).filter((binding) => binding.inputSlot >= 0);
+    if (!bindings.length) {
+        toast("最终合成视频节点没有可用的输入。", "warn");
+        return false;
+    }
+
+    const index = sequenceSegmentIndex(node);
+    const previousSeed = Number(getWidgetValue(node, "seed", 0)) || 0;
+    const nextSeed = randomSequenceSeed(previousSeed);
+    setWidgetValue(node, "seed", nextSeed);
+    setWidgetValue(node, "control_after_generate", "fixed");
+    node.__h3Rerolling = true;
+    if (button) button.disabled = true;
+
+    try {
+        for (const binding of bindings) {
+            disconnectSequenceInput(binding.combine, "final_segment");
+            const connected = node.connect?.(outputSlot, binding.combine, binding.inputSlot);
+            if (!connected) throw new Error("无法临时连接到最终合成视频");
+            setWidgetValue(binding.combine, "filename_prefix", `video/AICG3D_抽卡_第${index}段`);
+        }
+        graph?.setDirtyCanvas?.(true, true);
+        const queued = await app.queuePrompt(0);
+        if (queued === false) {
+            toast("队列正在处理，本段抽卡没有提交。", "warn");
+            return false;
+        }
+        toast(`已提交第 ${index} 段抽卡：只执行到本段，后面的段落不会运行。`, "ok");
+        return true;
+    } catch (error) {
+        toast(`抽卡失败：${error?.message || error}`, "error");
+        return false;
+    } finally {
+        restoreSequenceCombineBindings(bindings);
+        for (const binding of bindings) {
+            setWidgetValue(binding.combine, "filename_prefix", binding.filenamePrefix);
+        }
+        node.__h3Rerolling = false;
+        if (button) button.disabled = false;
+        graph?.setDirtyCanvas?.(true, true);
+    }
+}
+
 function connectSequenceTailToCombine(segment, previousSource = null) {
     if (!isSequenceSegmentNode(segment)) return false;
     const graph = segment.graph || app.graph;
@@ -8880,28 +8988,41 @@ function installSequenceActionRow(node) {
     if (typeof document === "undefined" || !document.head) return;
     const row = document.createElement("div");
     row.className = "h3-sequence-actions";
-    row.style.cssText = "display:flex;align-items:center;gap:6px;width:100%;height:100%;box-sizing:border-box;padding:2px 6px;";
+    row.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:34px 26px;align-items:center;gap:6px;width:100%;height:100%;box-sizing:border-box;padding:4px 6px;";
     row.addEventListener("pointerdown", (event) => event.stopPropagation());
-    const makeButton = (label, tone, handler) => {
+    const makeButton = (label, tone, handler, options = {}) => {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = label;
-        const border = tone === "danger" ? "#9a4e4e" : tone === "primary" ? "#4f8cff" : "#56657a";
-        const background = tone === "danger" ? "#5b2b2b" : tone === "primary" ? "#284a7c" : "#273244";
-        button.style.cssText = `flex:1 1 0;min-width:0;height:26px;padding:0 2px;border:1px solid ${border};border-radius:6px;background:${background};color:#e7eef8;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+        const border = tone === "roll" ? "#f0a83c" : tone === "danger" ? "#9a4e4e" : tone === "primary" ? "#4f8cff" : "#56657a";
+        const background = tone === "roll" ? "#7a4b12" : tone === "danger" ? "#5b2b2b" : tone === "primary" ? "#284a7c" : "#273244";
+        const height = options.span ? 34 : 26;
+        const fontSize = options.span ? 13 : 11;
+        const fontWeight = options.span ? 700 : 500;
+        button.style.cssText = `min-width:0;height:${height}px;padding:0 4px;border:1px solid ${border};border-radius:6px;background:${background};color:#e7eef8;font-size:${fontSize}px;font-weight:${fontWeight};line-height:1;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${options.span ? "grid-column:1 / -1;" : ""}`;
+        if (options.title) button.title = options.title;
         button.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            handler();
+            if (button.disabled) return;
+            button.disabled = true;
+            Promise.resolve(handler()).catch((error) => console.error("[AICG3D] segment action failed", error)).finally(() => { button.disabled = false; });
         });
         row.append(button);
+        return button;
     };
+    const rollButton = makeButton(
+        "抽卡本段",
+        "roll",
+        () => rerollSequenceSegment(node, rollButton),
+        { span: true, title: "换一个种子并只执行到这一段；后面的段落不会运行，前面的段落有缓存就复用。" },
+    );
     makeButton("添加资源库", "neutral", () => addSequenceResourceLibrary(node));
     makeButton("添加下一段", "primary", () => addSequenceNextSegment(node));
     makeButton("删除这一段", "danger", () => deleteSequenceSegment(node));
     const domWidget = node.addDOMWidget("h3_sequence_actions", "h3_sequence_actions", row, {
         serialize: false,
-        getMinHeight: () => 32,
+        getMinHeight: () => 70,
     });
     if (!domWidget) return;
     domWidget.serialize = false;

@@ -11680,6 +11680,8 @@ class MiniMaxH3EasySequenceGlobal:
         return (config,)
 
 
+
+
 class MiniMaxH3EasySequenceSegment:
     """AICG3D 视频段落（可无限增减）
 
@@ -12002,14 +12004,15 @@ class MiniMaxH3EasySequenceSegment:
                     f"[MiniMax H3 Aicg] 视频段落 {index}：已启用保完整，保留对齐尾帧 "
                     f"{delivery_frames - requested_frames} 帧（{requested_frames} → {delivery_frames}）。"
                 )
-            return (MiniMaxH3SequenceSegment(
+            result = MiniMaxH3SequenceSegment(
                 config=config,
                 sample=sample,
                 index=index,
                 previous=previous_segment,
                 timeline_start=timeline_start,
                 source_audio=source_audio,
-            ),)
+            )
+            return (result,)
         finally:
             reporter.finish(done)
             # 每段跑完清理一次显存：下一段接着跑，缓存不会越堆越高。

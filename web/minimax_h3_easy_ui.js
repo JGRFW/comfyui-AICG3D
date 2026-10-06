@@ -1600,6 +1600,27 @@ function getWidgetValue(node, name, fallback = "") {
     return widget?.value ?? fallback;
 }
 
+function setWidgetValue(node, name, value) {
+    const widget = getWidget(node, name);
+    if (!widget) return false;
+    widget.value = value;
+    if (widget._state) widget._state.value = value;
+    return true;
+}
+
+function toast(message, tone = "ok") {
+    const severity = tone === "error" ? "error" : tone === "warn" ? "warn" : "success";
+    try {
+        const api = app?.extensionManager?.toast;
+        if (api?.add) {
+            api.add({ severity, summary: "AICG3D", detail: String(message || ""), life: 2600 });
+            return true;
+        }
+    } catch (error) { /* fall through */ }
+    console.info(`[AICG3D] ${message}`);
+    return false;
+}
+
 function linkedInputValue(node, inputName) {
     const input = node?.inputs?.find((candidate) => String(candidate?.name || "") === String(inputName || ""));
     if (!input || input.link == null) return { found: false, value: undefined };
@@ -8589,29 +8610,30 @@ function existingSequenceNext(node) {
     return nextSequenceSegmentNode(node, pool);
 }
 
-function setSequenceInlineResourceOpen(node, open) {
+
+function removeSequenceInlinePanel(node) {
     const widget = node?.__h3InlineMediaPanelWidget;
-    if (!widget) return false;
-    if (open) {
-        widget.hidden = false;
-        widget.type = widget.__h3InlineOriginalType || "h3_sequence_inline_media";
-        if (widget.__h3InlineOriginalComputeSize) widget.computeSize = widget.__h3InlineOriginalComputeSize;
-        node.__h3InlineMediaOpen = true;
-        mediaLoaderRender(node);
-        mediaLoaderResize(node);
-    } else {
-        if (!widget.__h3InlineOriginalType) widget.__h3InlineOriginalType = widget.type;
-        if (!widget.__h3InlineOriginalComputeSize) widget.__h3InlineOriginalComputeSize = widget.computeSize;
-        widget.hidden = true;
-        widget.type = "hidden";
-        widget.computeSize = () => [0, -4];
-        node.__h3InlineMediaOpen = false;
+    if (widget) {
+        try { widget.element?.remove?.(); } catch (error) { /* already detached */ }
+        if (Array.isArray(node.widgets)) node.widgets = node.widgets.filter((item) => item !== widget);
+        if (Array.isArray(node._widgets)) node._widgets = node._widgets.filter((item) => item !== widget);
     }
+    node.__h3InlineMediaPanelWidget = null;
+    node.__h3MediaLoaderWidget = null;
+    node.__h3MediaLoaderPanel = null;
+    node.__h3MediaLoaderCount = null;
+    node.__h3InlineMediaOpen = false;
+    node.__h3MediaLoaderMinWidgetHeight = 0;
     node._widgetSlotsDirty = true;
     refreshVueNodeWidgets(node);
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
-    return true;
+    applySequenceWidgetGrid(node, false);
+    return Boolean(widget);
+}
+
+function setSequenceInlineResourceOpen(node, open) {
+    return open ? openSequenceMediaPopup(node) : removeSequenceInlinePanel(node);
 }
 
 function closeSequenceMediaPopup(node) {
@@ -8651,8 +8673,11 @@ function openSequenceMediaPopup(node) {
     if (!isSequenceSegmentNode(node)) return false;
     propagateSequenceResourceLibrary(node);
     if (node.__h3InlineMediaPanelWidget) {
-        setSequenceInlineResourceOpen(node, !node.__h3InlineMediaOpen);
-        return true;
+        const widget = node.__h3InlineMediaPanelWidget;
+        const attached = widget.element?.isConnected !== false;
+        const actuallyOpen = Boolean(node.__h3InlineMediaOpen && attached && !widget.hidden);
+        if (actuallyOpen) return closeSequenceMediaPopup(node);
+        removeSequenceInlinePanel(node);
     }
     installMediaLoaderStyles();
     const stateWidget = getWidget(node, "inline_media_state");
@@ -8757,113 +8782,24 @@ function nativeLinkOriginId(graph, input) {
     return link?.origin_id ?? link?.originId ?? link?.from_id ?? link?.fromId ?? null;
 }
 
-function nativeLinkOriginSlot(graph, input) {
-    if (!input || input.link == null) return null;
-    const link = getNativeGraphLink(graph, input.link);
-    const slot = link?.origin_slot ?? link?.originSlot ?? link?.from_slot ?? link?.fromSlot;
-    return slot == null ? null : Number(slot);
+
+
+
+
+
+
+
+function refreshSequenceNextButton(node) {
+    const button = node?.__h3SequenceNextButton;
+    if (!button) return;
+    button.textContent = existingSequenceNext(node) ? "打开下一段" : "添加下一段";
 }
 
-function sequenceSegmentIndex(node) {
-    let index = 1;
-    let current = node;
-    const seen = new Set();
-    while (current && !seen.has(current)) {
-        seen.add(current);
-        const previous = previousSequenceSegment(current);
-        if (!previous) break;
-        index += 1;
-        current = previous;
-    }
-    return index;
-}
 
-function randomSequenceSeed(previous = 0) {
-    const max = 0xfffffffe;
-    let next = 0;
-    if (globalThis.crypto?.getRandomValues) {
-        const values = new Uint32Array(1);
-        globalThis.crypto.getRandomValues(values);
-        next = values[0] % max;
-    } else {
-        next = Math.floor(Math.random() * max);
-    }
-    next = next + 1;
-    if (Number(next) === Number(previous)) next = next % max + 1;
-    return next;
-}
 
-function restoreSequenceCombineBindings(bindings) {
-    for (const binding of bindings || []) {
-        disconnectSequenceInput(binding.combine, "final_segment");
-        if (!binding.origin || binding.originSlot == null || binding.originSlot < 0) continue;
-        try { binding.origin.connect?.(binding.originSlot, binding.combine, binding.inputSlot); } catch (error) { /* compatibility */ }
-    }
-}
 
-async function rerollSequenceSegment(node, button = null) {
-    if (!isSequenceSegmentNode(node) || node.__h3Rerolling) return false;
-    const graph = node.graph || app.graph;
-    const combines = sequenceCombineNodes(graph);
-    const outputSlot = sequenceSlotIndex(node.outputs, "segment");
-    if (!combines.length || outputSlot < 0) {
-        toast("找不到最终合成视频，无法进行单段抽卡。", "warn");
-        return false;
-    }
 
-    const bindings = combines.map((combine) => {
-        const inputSlot = sequenceSlotIndex(combine.inputs, "final_segment");
-        const input = inputSlot >= 0 ? combine.inputs[inputSlot] : null;
-        const originId = nativeLinkOriginId(graph, input);
-        return {
-            combine,
-            inputSlot,
-            origin: originId == null ? null : graph?.getNodeById?.(Number(originId)),
-            originSlot: nativeLinkOriginSlot(graph, input),
-            filenamePrefix: getWidgetValue(combine, "filename_prefix", ""),
-        };
-    }).filter((binding) => binding.inputSlot >= 0);
-    if (!bindings.length) {
-        toast("最终合成视频节点没有可用的输入。", "warn");
-        return false;
-    }
 
-    const index = sequenceSegmentIndex(node);
-    const previousSeed = Number(getWidgetValue(node, "seed", 0)) || 0;
-    const nextSeed = randomSequenceSeed(previousSeed);
-    setWidgetValue(node, "seed", nextSeed);
-    setWidgetValue(node, "control_after_generate", "fixed");
-    node.__h3Rerolling = true;
-    if (button) button.disabled = true;
-
-    try {
-        for (const binding of bindings) {
-            disconnectSequenceInput(binding.combine, "final_segment");
-            const connected = node.connect?.(outputSlot, binding.combine, binding.inputSlot);
-            if (!connected) throw new Error("无法临时连接到最终合成视频");
-            setWidgetValue(binding.combine, "filename_prefix", `video/AICG3D_抽卡_第${index}段`);
-        }
-        graph?.setDirtyCanvas?.(true, true);
-        const queued = await app.queuePrompt(0);
-        if (queued === false) {
-            toast("队列正在处理，本段抽卡没有提交。", "warn");
-            return false;
-        }
-        toast(`已提交第 ${index} 段抽卡：只执行到本段，后面的段落不会运行。`, "ok");
-        return true;
-    } catch (error) {
-        toast(`抽卡失败：${error?.message || error}`, "error");
-        return false;
-    } finally {
-        restoreSequenceCombineBindings(bindings);
-        for (const binding of bindings) {
-            setWidgetValue(binding.combine, "filename_prefix", binding.filenamePrefix);
-        }
-        node.__h3Rerolling = false;
-        if (button) button.disabled = false;
-        graph?.setDirtyCanvas?.(true, true);
-    }
-}
 
 function connectSequenceTailToCombine(segment, previousSource = null) {
     if (!isSequenceSegmentNode(segment)) return false;
@@ -8934,6 +8870,7 @@ function deleteSequenceSegment(node) {
     graph.setDirtyCanvas?.(true, true);
     graph.change?.();
     if (previous) scheduleSequenceResourcePropagation(previous);
+    if (previous) refreshSequenceNextButton(previous);
     toast("已删除这一段并自动整理段落链", "ok");
     return true;
 }
@@ -8944,6 +8881,7 @@ function addSequenceNextSegment(node) {
     if (existing) {
         connectSequenceTailToCombine(sequenceChainTail(existing), node);
         focusGraphNode(existing);
+        refreshSequenceNextButton(node);
         toast("这一段已经有下一段，已为你选中", "ok");
         return true;
     }
@@ -8974,6 +8912,7 @@ function addSequenceNextSegment(node) {
     }
     scheduleSequenceResourcePropagation(node);
     connectSequenceTailToCombine(next, node);
+    refreshSequenceNextButton(node);
     const seconds = Number(getWidgetValue(node, "seconds", ""));
     if (Number.isFinite(seconds)) setWidgetValue(next, "seconds", seconds);
     graph.setDirtyCanvas?.(true, true);
@@ -8983,52 +8922,103 @@ function addSequenceNextSegment(node) {
     return true;
 }
 
+function applySequenceWidgetGrid(node, resourceOpen = Boolean(node?.__h3InlineMediaPanelWidget)) {
+    const row = node?.__h3SequenceActionRow?.element;
+    const grid = row?.parentElement?.parentElement?.parentElement;
+    if (!grid) return false;
+    grid.classList.add("h3-sequence-widget-grid");
+    grid.classList.toggle("h3-sequence-resource-open", Boolean(resourceOpen));
+    return true;
+}
+
+function scheduleSequenceWidgetGrid(node) {
+    if (!isSequenceSegmentNode(node) || node.__h3SequenceGridTimer) return;
+    let attempts = 0;
+    const run = () => {
+        node.__h3SequenceGridTimer = null;
+        if (applySequenceWidgetGrid(node, Boolean(node.__h3InlineMediaPanelWidget))) return;
+        if (attempts >= 8) return;
+        attempts += 1;
+        node.__h3SequenceGridTimer = setTimeout(run, Math.min(800, 40 * (2 ** attempts)));
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else setTimeout(run, 0);
+}
+
 function installSequenceActionRow(node) {
     if (!node || !isSequenceSegmentNode(node) || node.__h3SequenceActionRow || typeof node.addDOMWidget !== "function") return;
     if (typeof document === "undefined" || !document.head) return;
+    let style = document.getElementById("h3-sequence-action-styles");
+    if (!style) {
+        style = document.createElement("style");
+        style.id = "h3-sequence-action-styles";
+        style.textContent = `
+          .h3-sequence-widget-grid{grid-template-rows:minmax(120px,1fr) min-content min-content 32px !important;}
+          .h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(160px,1fr) min-content min-content 32px minmax(0,320px) !important;}
+        `;
+        document.head.append(style);
+    }
     const row = document.createElement("div");
     row.className = "h3-sequence-actions";
-    row.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:34px 26px;align-items:center;gap:6px;width:100%;height:100%;box-sizing:border-box;padding:4px 6px;";
+    row.style.cssText = "position:relative;z-index:10;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:26px;align-content:center;align-items:center;gap:5px;width:100%;height:32px;min-height:32px;max-height:32px;box-sizing:border-box;padding:3px 6px;pointer-events:auto;";
     row.addEventListener("pointerdown", (event) => event.stopPropagation());
-    const makeButton = (label, tone, handler, options = {}) => {
+    const makeButton = (label, tone, handler) => {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = label;
-        const border = tone === "roll" ? "#f0a83c" : tone === "danger" ? "#9a4e4e" : tone === "primary" ? "#4f8cff" : "#56657a";
-        const background = tone === "roll" ? "#7a4b12" : tone === "danger" ? "#5b2b2b" : tone === "primary" ? "#284a7c" : "#273244";
-        const height = options.span ? 34 : 26;
-        const fontSize = options.span ? 13 : 11;
-        const fontWeight = options.span ? 700 : 500;
-        button.style.cssText = `min-width:0;height:${height}px;padding:0 4px;border:1px solid ${border};border-radius:6px;background:${background};color:#e7eef8;font-size:${fontSize}px;font-weight:${fontWeight};line-height:1;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${options.span ? "grid-column:1 / -1;" : ""}`;
-        if (options.title) button.title = options.title;
+        const border = tone === "danger" ? "#9a4e4e" : tone === "primary" ? "#4f8cff" : "#56657a";
+        const background = tone === "danger" ? "#5b2b2b" : tone === "primary" ? "#284a7c" : "#273244";
+        button.style.cssText = `min-width:0;height:26px;padding:0 4px;border:1px solid ${border};border-radius:6px;background:${background};color:#e7eef8;font-size:11px;font-weight:500;line-height:1;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
         button.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (button.disabled) return;
-            button.disabled = true;
-            Promise.resolve(handler()).catch((error) => console.error("[AICG3D] segment action failed", error)).finally(() => { button.disabled = false; });
+            Promise.resolve(handler()).catch((error) => console.error("[AICG3D] segment action failed", error));
         });
         row.append(button);
         return button;
     };
-    const rollButton = makeButton(
-        "抽卡本段",
-        "roll",
-        () => rerollSequenceSegment(node, rollButton),
-        { span: true, title: "换一个种子并只执行到这一段；后面的段落不会运行，前面的段落有缓存就复用。" },
-    );
     makeButton("添加资源库", "neutral", () => addSequenceResourceLibrary(node));
-    makeButton("添加下一段", "primary", () => addSequenceNextSegment(node));
+    const nextButton = makeButton("添加下一段", "primary", () => addSequenceNextSegment(node));
+    node.__h3SequenceNextButton = nextButton;
+    refreshSequenceNextButton(node);
     makeButton("删除这一段", "danger", () => deleteSequenceSegment(node));
-    const domWidget = node.addDOMWidget("h3_sequence_actions", "h3_sequence_actions", row, {
+    let domWidget = null;
+    const applyHeight = () => {
+        if (!domWidget) return false;
+        domWidget.computedHeight = 32;
+        domWidget.options ||= {};
+        domWidget.options.getMinHeight = () => 32;
+        domWidget.computeLayoutSize = () => ({ minHeight: 32, maxHeight: 32, minWidth: 0 });
+        try { delete domWidget.computeSize; } catch { domWidget.computeSize = undefined; }
+        let host = row.parentElement;
+        for (let depth = 0; host && depth < 2; depth += 1, host = host.parentElement) {
+            host.style.height = "32px";
+            host.style.minHeight = "32px";
+            host.style.maxHeight = "32px";
+            host.style.padding = "0";
+            host.style.margin = "0";
+        }
+        const widgetGrid = row.parentElement?.parentElement?.parentElement;
+        if (widgetGrid) {
+            widgetGrid.classList.add("h3-sequence-widget-grid");
+            widgetGrid.classList.toggle("h3-sequence-resource-open", Boolean(node.__h3InlineMediaPanelWidget));
+        }
+        return true;
+    };
+    domWidget = node.addDOMWidget("h3_sequence_actions", "h3_sequence_actions", row, {
         serialize: false,
-        getMinHeight: () => 70,
+        margin: 0,
+        getMinHeight: () => 32,
+        afterResize: applyHeight,
+        onDraw: applyHeight,
     });
     if (!domWidget) return;
     domWidget.serialize = false;
     setWidgetOption(domWidget, "serialize", false);
     setWidgetOption(domWidget, "canvasOnly", false);
+    applyHeight();
     node.__h3SequenceActionRow = domWidget;
+    scheduleSequenceWidgetGrid(node);
 }
 
 /* 视频段落节点：把虚拟素材那一堆传输字段（media_N / media_type_N）从前端定义里删掉，
@@ -9073,6 +9063,8 @@ function installSequenceSegmentNode(nodeType, nodeData) {
     nodeType.prototype.onRemoved = function onRemovedH3Sequence() {
         if (this.__h3SequencePromptLayoutTimer) clearTimeout(this.__h3SequencePromptLayoutTimer);
         this.__h3SequencePromptLayoutTimer = null;
+        if (this.__h3SequenceGridTimer) clearTimeout(this.__h3SequenceGridTimer);
+        this.__h3SequenceGridTimer = null;
         closeSequenceMediaPopup(this);
         return originalRemoved?.apply(this, arguments);
     };
@@ -9090,6 +9082,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         if (input?.name === "media" || input?.name === "previous_segment") {
             scheduleSequenceResourcePropagation(this);
         }
+        if (input?.name === "previous_segment") refreshSequenceNextButton(previousSequenceSegment(this));
         return result;
     };
     const originalConfigure = nodeType.prototype.onConfigure;
@@ -10540,6 +10533,8 @@ function mediaLoaderResize(node) {
         const contentHeight = Math.max(1, Math.ceil(panel.scrollHeight || panel.getBoundingClientRect?.().height || 0));
         const widgetHeight = Math.max(1, contentHeight + 8);
         node.__h3MediaLoaderMinWidgetHeight = widgetHeight;
+        const inlinePanel = node.__h3InlineMediaPanelWidget === domWidget;
+        const layoutHeight = inlinePanel ? Math.max(1, Math.min(360, widgetHeight)) : widgetHeight;
 
         // Restore the fill layout after measuring. LiteGraph gives a DOM widget
         // its extra height through computedHeight when the user resizes the node.
@@ -10548,7 +10543,9 @@ function mediaLoaderResize(node) {
         panel.style.maxHeight = "100%";
         panel.style.flex = "1 1 auto";
         domWidget.options ||= {};
-        const getWidgetHeight = () => Math.max(1, Number(node.__h3MediaLoaderMinWidgetHeight) || widgetHeight);
+        const getWidgetHeight = () => inlinePanel
+            ? Math.max(1, Math.min(360, Number(node.__h3MediaLoaderMinWidgetHeight) || layoutHeight))
+            : Math.max(1, Number(node.__h3MediaLoaderMinWidgetHeight) || widgetHeight);
         // No fixed computeSize or maxHeight here. This is the same growable DOM
         // widget contract used by the batch text-card node: extra node height is
         // allocated to the panel instead of becoming an empty node background.
@@ -10557,13 +10554,19 @@ function mediaLoaderResize(node) {
         } catch {
             domWidget.computeSize = undefined;
         }
+        domWidget.computedHeight = layoutHeight;
         domWidget.computeLayoutSize = () => {
             const height = getWidgetHeight();
-            return { minHeight: height, maxHeight: undefined, minWidth: 0 };
+            return { minHeight: height, maxHeight: inlinePanel ? height : undefined, minWidth: 0 };
         };
         domWidget.options.getMinHeight = getWidgetHeight;
-        delete domWidget.options.getMaxHeight;
-        delete domWidget.options.getHeight;
+        if (inlinePanel) {
+            domWidget.options.getMaxHeight = getWidgetHeight;
+            domWidget.options.getHeight = getWidgetHeight;
+        } else {
+            delete domWidget.options.getMaxHeight;
+            delete domWidget.options.getHeight;
+        }
         const currentWidth = Number(node.size?.[0]) || 300;
         // Compute the fixed node chrome independently. Only grow a too-small
         // node to its content minimum; never shrink a user-resized node.
@@ -10580,13 +10583,23 @@ function mediaLoaderResize(node) {
         }
         if (Array.isArray(fixedSize) && typeof node.setSize === "function") {
             const width = Math.max(currentWidth, 320);
-            const minimumHeight = Math.max(1, Math.ceil((fixedSize[1] || 0) + widgetHeight + 4));
+            const minimumHeight = Math.max(1, Math.ceil((fixedSize[1] || 0) + layoutHeight + 4));
             const currentHeight = Number(node.size?.[1]) || 0;
-            if (currentHeight + 1 < minimumHeight) {
+            if (inlinePanel) {
+                if (currentHeight + 1 < minimumHeight) setNodeSizeExact(node, [width, minimumHeight]);
+            } else if (currentHeight + 1 < minimumHeight) {
                 node.setSize([width, minimumHeight]);
                 if (Array.isArray(node.size)) {
                     node.size[0] = width;
                     node.size[1] = minimumHeight;
+                }
+            }
+            if (inlinePanel && node.__h3SequenceActionRow?.element) {
+                const row = node.__h3SequenceActionRow.element;
+                const grid = row.parentElement?.parentElement?.parentElement;
+                if (grid) {
+                    grid.classList.add("h3-sequence-widget-grid");
+                    grid.classList.add("h3-sequence-resource-open");
                 }
             }
         }
@@ -10615,7 +10628,7 @@ function installMediaLoaderStyles() {
       .h3-media-loader-count { color:#888; font-size:10px; font-variant-numeric:tabular-nums; }
       .h3-media-loader-upload { border:1px solid #444; border-radius:4px; background:#2a2a2a; color:#ddd; padding:4px 8px; cursor:pointer; font-size:11px; line-height:1.35; }
       .h3-media-loader-upload:hover { background:#333; border-color:#666; color:#fff; }
-      .h3-media-loader-groups { display:flex; flex:1 1 auto; flex-direction:column; gap:8px; min-width:0; min-height:0; }
+      .h3-media-loader-groups { display:flex; flex:1 1 auto; flex-direction:column; gap:8px; min-width:0; min-height:0; overflow:auto; }
       .h3-media-loader-section { min-width:0; border-top:1px solid #353535; padding-top:7px; }
       .h3-media-loader-header { display:flex; align-items:center; justify-content:space-between; gap:6px; margin:0 0 5px; color:#bdbdbd; font-size:10px; font-weight:650; line-height:1.2; }
       .h3-media-loader-list { display:grid; grid-template-columns:repeat(auto-fill,76px); gap:8px; min-height:26px; }

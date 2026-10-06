@@ -8551,6 +8551,7 @@ const SEQUENCE_GLOBAL_WIDGET_LABELS = {
     audio_mode: TEXT.audioMode,
     vram_tier: TEXT.vramTier,
     exposure_lock: "跨段曝光锁定",
+    keep_full: "保完整（导演台）",
     // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
     prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
 };
@@ -11440,6 +11441,41 @@ globalThis.AICG3D_H3 = {
     linkedMediaLoader: aicg3dLinkedLoader,
     insertLoaderMention: aicg3dInsertLoaderMention,
     refreshPromptNodeLayout,
+
+    /** 供其它 AICG3D 文本节点复用的纯文本优化入口。 */
+    async optimizeText(text, options = {}) {
+        const source = String(text ?? "").trim();
+        if (!source) return { ok: false, error: "提示词为空" };
+        await loadPromptOptimizerSettings();
+        const state = {
+            ...promptOptimizerSettingsCache,
+            scene_guide: String(options.scene_guide || "none"),
+        };
+        if (!promptOptimizerConfigured(state)) {
+            if (options.openSettings !== false) openPromptOptimizerSettings(options.node || null);
+            return {
+                ok: false,
+                error: String(state?.mode || PROMPT_OPTIMIZER_ENGINE_API) === PROMPT_OPTIMIZER_ENGINE_LOCAL
+                    ? TEXT.optimizerMissingLocal
+                    : TEXT.optimizerMissing,
+            };
+        }
+        const data = await requestPromptOptimization({
+            prompt: source,
+            scene_guide: state.scene_guide,
+            prompt_optimizer_language: state.language,
+            mode: String(options.mode || MODE_SEGMENTS),
+            audio_mode: "",
+            seconds: Number(options.seconds || 5) || 5,
+            segment_seconds: String(options.segment_seconds || ""),
+            media_counts: { image: 0, video: 0, audio: 0 },
+            resources: [],
+            optimizer_mode: "whole_sequence",
+        });
+        return { ok: true, prompt: String(data?.prompt || "").trim() };
+    },
+
+    openPromptOptimizerSettings,
 
     /** 用整段文本覆盖某一段的提示词：结构化编辑器、prompt 控件、存档属性一起刷新。 */
     setPromptText(node, text, options = {}) {

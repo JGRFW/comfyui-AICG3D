@@ -4,6 +4,7 @@
    给「AICG3D 分段提示词解析」节点加两件事：
      1. 一个按钮：一键把解析结果填进画布上每个「视频段落」节点。
      2. 自动填入：改了剧本文本，就自动重填一次（可在节点上关掉）。
+     3. 提示词优化：复用全局优化器，保持分段数量和时长后写回文本。
 
    解析规则与 prompt_split.py 保持一致。
    ========================================================================== */
@@ -526,6 +527,71 @@ function scheduleAutoFill(node) {
     }, AUTOFILL_DELAY);
 }
 
+async function optimizePromptScript(node, button) {
+    const bridge = globalThis.AICG3D_H3;
+    const text = String(readWidget(node, "text", "") || "");
+    if (!text.trim()) {
+        notify("提示词为空。", "warn");
+        return;
+    }
+    if (typeof bridge?.optimizeText !== "function") {
+        notify("提示词优化器尚未加载，请刷新页面。", "error");
+        return;
+    }
+    const mode = readWidget(node, "mode", "自动识别");
+    const customRegex = readWidget(node, "custom_regex", "");
+    const keepHeader = Boolean(readWidget(node, "keep_header", false));
+    const defaultSeconds = Number(readWidget(node, "default_seconds", 5)) || 5;
+    let parsed;
+    try {
+        parsed = parsePromptText(text, mode, customRegex, keepHeader, defaultSeconds);
+    } catch (error) {
+        notify("解析失败：" + (error?.message || error), "error");
+        return;
+    }
+    if (!parsed.prompts.length) {
+        notify("没有可优化的段落，检查文本或解析方式。", "error");
+        return;
+    }
+    const oldLabel = button?.name || "✦ 优化提示词";
+    if (button) {
+        button.name = "✦ 正在优化...";
+        button.disabled = true;
+    }
+    try {
+        const result = await bridge.optimizeText(text, {
+            node,
+            mode: "context_segments",
+            seconds: parsed.seconds[0] || defaultSeconds,
+            segment_seconds: parsed.seconds.map((value) => String(roundSeconds(value))).join(","),
+        });
+        if (!result?.ok || !String(result.prompt || "").trim()) {
+            notify(result?.error || "提示词优化失败。", "error");
+            return;
+        }
+        let optimized = String(result.prompt);
+        const split = parsePromptText(optimized, MODE_DIVIDER, "", false, defaultSeconds);
+        if (split.prompts.length === parsed.prompts.length) {
+            optimized = split.prompts.map((body, index) => {
+                const seconds = roundSeconds(parsed.seconds[index] || defaultSeconds);
+                return `【第${index + 1}段｜${seconds}秒】\n${body.trim()}`;
+            }).join("\n\n");
+        }
+        writeWidget(node, "text", optimized);
+        notify(`已优化 ${parsed.prompts.length} 段提示词。`, "success");
+        scheduleAutoFill(node);
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    } catch (error) {
+        notify(error?.message || error || "提示词优化失败。", "error");
+    } finally {
+        if (button) {
+            button.name = oldLabel;
+            button.disabled = false;
+        }
+    }
+}
+
 /* ------------------------------------------------------------- 装到节点上 */
 
 function install(node) {
@@ -538,6 +604,30 @@ function install(node) {
     if (button) {
         button.serialize = false;
         button.tooltip = "按画布顺序写入每段提示词、秒数和连续种子；顺序种子会固定为 fixed，运行后不再自动变。";
+    }
+
+    const optimizeButton = node.addWidget("button", "✦ 优化提示词", null, () => {
+        optimizePromptScript(node, optimizeButton);
+    });
+    if (optimizeButton) {
+        optimizeButton.serialize = false;
+        optimizeButton.tooltip = "复用全局「提示词优化设置」，优化当前分段文本并保持原段数和时长。";
+    }
+
+    const labels = {
+        mode: "解析方式",
+        custom_regex: "自定义正则",
+        keep_header: "保留段标题",
+        seconds_mode: "时长模式",
+        default_seconds: "默认时长（秒）",
+        auto_fill: "自动填入段落",
+        max_segments: "最大分段数",
+        randomize_seed: "顺序写入种子",
+        seed_start: "起始种子（0=随机）",
+    };
+    for (const [name, label] of Object.entries(labels)) {
+        const widget = findWidget(node, name);
+        if (widget) widget.label = label;
     }
 
     const seedToggle = findWidget(node, "randomize_seed");

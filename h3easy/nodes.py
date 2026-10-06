@@ -232,6 +232,8 @@ SEGMENT_CONTEXT_GUIDE_FRAME_GRID = (5, 22, 39, 56, 73)
 SEGMENT_CONTEXT_AV_FRAME_GRID = (39, 90, 141)
 SEGMENT_CONTEXT_FRAME_GRID = SEGMENT_CONTEXT_GUIDE_FRAME_GRID
 SEGMENT_FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
+#: Director Motion Context baseline: 22 video frames carry 40 audio ticks (~24 frames @ 24fps).
+SEGMENT_MOTION_CONTEXT_AUDIO_FRAMES = 24
 # The validated H3 Motion Context latent-taper recipe.  These values are
 # intentionally internal: context noise is applied only when a segment has a
 # visual reference, so ordinary text-only continuation remains untouched.
@@ -3930,6 +3932,12 @@ class MiniMaxH3EasyLoader:
             non_h3_policy=str(kwargs.get("non_h3_policy") or NON_H3_POLICY_FALLBACK),
             accel=accel_config,
         )
+        print(
+            "[MiniMax H3 Aicg] 模型槽位："
+            f"FL2VA={fl2va_model or NONE_MODEL}；"
+            f"REF2VA={ref2va_model or NONE_MODEL}。"
+            "多参考任务优先使用 REF2VA；REF2VA 留空时才回退 FL2VA。"
+        )
         return bundle, _LazyH3Model(bundle, "ref2va")
 
 
@@ -5236,6 +5244,8 @@ def _segment_context_audio_reference(
         for index in range(int(video.shape[2]))
     )
     requested_frames = max(1, int(context_frames))
+    if requested_frames == 22:
+        requested_frames = int(SEGMENT_MOTION_CONTEXT_AUDIO_FRAMES)
     audio_steps_per_frame = 40.0 / float(h3.FPS)
     requested_steps = max(1, round(requested_frames * audio_steps_per_frame))
     total_steps = int(audio.shape[-1])
@@ -10702,11 +10712,21 @@ SEQUENCE_EXPOSURE_BOUNDARY_MAX_GAIN = 1.25
 SEQUENCE_SEAM_GRADE_FRAMES = 12
 SEQUENCE_SEAM_GRADE_WEIGHT = 0.70
 SEQUENCE_SEAM_GRADE_BLUR = 64
-SEQUENCE_SEAM_ADD_LUMA_FRAMES = 24
+SEQUENCE_SEAM_ADD_LUMA_FRAMES = 12
 SEQUENCE_SEAM_ADD_LUMA_MAX = 0.10
-SEQUENCE_SEGMENT_LUMA_MAX = 0.12
+SEQUENCE_SEGMENT_LUMA_MAX = 0.04
 SEQUENCE_SEGMENT_LUMA_EPSILON = 0.002
 SEQUENCE_SEAM_LUMA_EPSILON = 0.008
+
+#: Only soften a one-frame seam jump when the two views are still the same
+#: shot. Hard cuts are intentionally left alone, because blending across them
+#: looks like a dissolve instead of a cut.
+SEQUENCE_SEAM_BRIDGE_RATIO = 1.75
+SEQUENCE_SEAM_BRIDGE_MIN_STEP = 0.025
+SEQUENCE_SEAM_BRIDGE_MAX_STEP = 0.090
+SEQUENCE_SEAM_BRIDGE_CUT_DIFF = 0.045
+SEQUENCE_SEAM_BRIDGE_MIN_WEIGHT = 0.10
+SEQUENCE_SEAM_BRIDGE_MAX_WEIGHT = 0.45
 
 SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
 
@@ -10897,6 +10917,95 @@ def _sequence_additive_opening_luma(
     return out, seam_gap, opening_spike
 
 
+def _sequence_frame_mae(left: torch.Tensor, right: torch.Tensor) -> float:
+    """Mean absolute RGB error used to tell real motion from a seam jump."""
+    if left is None or right is None:
+        return 0.0
+    if left.dim() == 4:
+        left = left[0]
+    if right.dim() == 4:
+        right = right[0]
+    if tuple(left.shape) != tuple(right.shape):
+        right = _sequence_fit_frame(right, int(left.shape[1]), int(left.shape[0]))
+    return float((left.detach().float() - right.detach().float()).abs().mean().item())
+
+
+def _sequence_motion_bridge(
+    frames: torch.Tensor,
+    previous_tail: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, float] | None]:
+    """Soften a one-frame same-shot jump without touching hard cuts.
+
+    H3 can resume on a slightly different pose even when the low-frequency scene
+    is stable. The old sequence combiner repaired brightness only, so the first
+    delivered frame could jump while every following frame moved normally.
+    This bridge extrapolates the previous tail motion and blends only frame zero.
+    """
+    if (
+        not isinstance(frames, torch.Tensor)
+        or not isinstance(previous_tail, torch.Tensor)
+        or int(frames.shape[0]) < 2
+        or int(previous_tail.shape[0]) < 2
+    ):
+        return frames, None
+
+    prev_prev = _sequence_fit_frame(previous_tail[-2], int(frames.shape[2]), int(frames.shape[1]))
+    prev_last = _sequence_fit_frame(previous_tail[-1], int(frames.shape[2]), int(frames.shape[1]))
+    body0 = _sequence_fit_frame(frames[0], int(frames.shape[2]), int(frames.shape[1]))
+    body1 = _sequence_fit_frame(frames[1], int(frames.shape[2]), int(frames.shape[1]))
+
+    previous_step = _sequence_frame_mae(prev_prev, prev_last)
+    seam_step = _sequence_frame_mae(prev_last, body0)
+    following_step = _sequence_frame_mae(body0, body1)
+    regular_step = max(previous_step, following_step, 1e-6)
+    jump_ratio = seam_step / regular_step
+    if (
+        seam_step < SEQUENCE_SEAM_BRIDGE_MIN_STEP
+        or seam_step > SEQUENCE_SEAM_BRIDGE_MAX_STEP
+        or jump_ratio < SEQUENCE_SEAM_BRIDGE_RATIO
+    ):
+        return frames, None
+
+    # A hard cut has a large low-frequency difference. Blending across it would
+    # turn the intended cut into a one-frame ghost, so leave it untouched.
+    lowfreq_diff = _sequence_frame_mae(
+        _sequence_box_blur(prev_last.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0],
+        _sequence_box_blur(body0.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0],
+    )
+    if lowfreq_diff > SEQUENCE_SEAM_BRIDGE_CUT_DIFF:
+        return frames, None
+
+    step_severity = (
+        (seam_step - SEQUENCE_SEAM_BRIDGE_MIN_STEP)
+        / max(1e-6, SEQUENCE_SEAM_BRIDGE_MAX_STEP - SEQUENCE_SEAM_BRIDGE_MIN_STEP)
+    )
+    ratio_severity = (
+        (jump_ratio - SEQUENCE_SEAM_BRIDGE_RATIO)
+        / max(1e-6, 5.0 - SEQUENCE_SEAM_BRIDGE_RATIO)
+    )
+    severity = max(0.0, min(1.0, max(step_severity, ratio_severity)))
+    weight = (
+        SEQUENCE_SEAM_BRIDGE_MIN_WEIGHT
+        + (SEQUENCE_SEAM_BRIDGE_MAX_WEIGHT - SEQUENCE_SEAM_BRIDGE_MIN_WEIGHT) * severity
+    )
+
+    # Linear extrapolation of the previous motion gives a pose that continues
+    # the outgoing clip; mix it with the last real frame to avoid overshoot.
+    predicted = (prev_last.float() * 2.0 - prev_prev.float()).clamp_(0.0, 1.0)
+    bridge_frame = predicted * 0.65 + prev_last.float() * 0.35
+    frames[0] = (
+        body0.float() * (1.0 - weight) + bridge_frame * weight
+    ).clamp_(0.0, 1.0).to(dtype=frames.dtype)
+    return frames, {
+        "weight": float(weight),
+        "previous_step": float(previous_step),
+        "seam_step": float(seam_step),
+        "following_step": float(following_step),
+        "jump_ratio": float(jump_ratio),
+        "lowfreq_diff": float(lowfreq_diff),
+    }
+
+
 class _SequenceSeamMatcher:
     """Director-style seam repair for the streaming sequence combiner."""
 
@@ -10910,21 +11019,30 @@ class _SequenceSeamMatcher:
             return frames
         repaired = frames
         if self.previous_tail is not None:
-            repaired = _sequence_match_opening_grade(frames, self.previous_tail)
+            repaired, bridge = _sequence_motion_bridge(repaired, self.previous_tail)
+            repaired = _sequence_match_opening_grade(repaired, self.previous_tail)
             repaired, global_offset = _sequence_match_segment_luma(
                 repaired, self.previous_segment_luma
             )
             repaired, seam_gap, opening_spike = _sequence_additive_opening_luma(
                 repaired, self.previous_tail
             )
+            bridge_note = ""
+            if bridge is not None:
+                bridge_note = (
+                    f"，运动桥 {bridge['weight']:.2f}"
+                    f"（步进 {bridge['previous_step']:.3f}→{bridge['seam_step']:.3f}→{bridge['following_step']:.3f}，"
+                    f"跳变 {bridge['jump_ratio']:.1f}×，低频差 {bridge['lowfreq_diff']:.3f}）"
+                )
             print(
                 f"[MiniMax H3 Aicg] 视频段落 {index}：接缝亮度匹配已应用"
                 f"（低频 {min(SEQUENCE_SEAM_GRADE_FRAMES, int(frames.shape[0]))} 帧 +"
                 f" 加性亮度 {min(SEQUENCE_SEAM_ADD_LUMA_FRAMES, max(0, int(frames.shape[0]) - 1))} 帧，"
                 f"整段校正 {global_offset:+.3f}，接缝差 {seam_gap:.3f}，"
                 f"开头波动 {opening_spike:.3f}）。"
+                f"{bridge_note}"
             )
-        self.previous_tail = repaired[-1:].detach().to("cpu").contiguous()
+        self.previous_tail = repaired[-min(3, int(repaired.shape[0])):].detach().to("cpu").contiguous()
         self.previous_segment_luma = _sequence_robust_luma(repaired)
         return repaired
 
@@ -11219,8 +11337,11 @@ class MiniMaxH3SequenceConfig:
     audio_mode: str = CONTEXT_AUDIO_GENERATED
     #: 显存档位（见 MiniMaxH3VramProfile）：8G / 12G / 16G 各有一套显存策略。
     vram: Optional[MiniMaxH3VramProfile] = None
-    #: 接缝亮度匹配：低频色光对齐 + 24 帧加性过渡 + 有上限的整段直流亮度对齐。
+    #: 接缝亮度匹配：低频色光对齐 + 12 帧加性过渡 + 很有限的整段亮度对齐。
+    #: 同镜头的一帧接缝跳变还会做轻微运动桥接，硬切镜头保持不动。
     exposure_lock: str = SEQUENCE_EXPOSURE_LOCK_ON
+    #: 对应导演台「保完整」：RGB 引导时保留 17k+5 对齐余帧，避免句尾/接缝被裁掉。
+    keep_full: bool = True
     #: 可选的外部 MODEL 补丁链；未连接时继续使用 bundle 里的权重。
     model: Any = None
 
@@ -11439,8 +11560,19 @@ class MiniMaxH3EasySequenceGlobal:
                     {
                         "default": SEQUENCE_EXPOSURE_LOCK_ON,
                         "tooltip": (
-                            "接缝亮度匹配：开头 12 帧匹配上一段尾帧的低频色光，24 帧加性亮度平滑过渡，"
-                            "再对有上限的整段直流亮度做对齐，保留局部明暗变化。关闭则完全按原采样结果输出。"
+                            "接缝亮度匹配：开头 12 帧匹配上一段尾帧的低频色光，12 帧加性亮度平滑过渡，"
+                            "整段校正限制在 ±0.04；同镜头的一帧接缝跳变会做轻微运动桥接，硬切镜头保持不动。"
+                            "关闭则完全按原采样结果输出。"
+                        ),
+                    },
+                ),
+                "keep_full": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": (
+                            "对应导演台「保完整」。尾帧画面（RGB）引导时，每段会保留对齐网格多出的约 12 帧，"
+                            "成片会略长于界面秒数，但句尾和接缝更稳；关闭则严格裁齐界面时长。"
                         ),
                     },
                 ),
@@ -11459,6 +11591,7 @@ class MiniMaxH3EasySequenceGlobal:
             "vram_policy", "sample_preview", "preview_interval",
             "audio_mode", "vram_tier",
             "exposure_lock",
+            "keep_full",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -11483,6 +11616,7 @@ class MiniMaxH3EasySequenceGlobal:
         audio_mode=SEQUENCE_AUDIO_GENERATED,
         vram_tier=VRAM_TIER_AUTO,
         exposure_lock=SEQUENCE_EXPOSURE_LOCK_ON,
+        keep_full=True,
         model=None,
     ):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
@@ -11531,6 +11665,7 @@ class MiniMaxH3EasySequenceGlobal:
                 if str(exposure_lock or SEQUENCE_EXPOSURE_LOCK_ON) == SEQUENCE_EXPOSURE_LOCK_OFF
                 else SEQUENCE_EXPOSURE_LOCK_ON
             ),
+            keep_full=bool(keep_full),
             model=model,
         )
         print(
@@ -11540,6 +11675,7 @@ class MiniMaxH3EasySequenceGlobal:
             f"音频「{SEQUENCE_AUDIO_DIGITAL_HUMAN if resolved_audio_mode == CONTEXT_AUDIO_DIGITAL_HUMAN else SEQUENCE_AUDIO_GENERATED}」，"
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
             f"接缝处理「{config.exposure_lock}」；"
+            f"保完整「{'开' if config.keep_full else '关'}」；"
         )
         return (config,)
 
@@ -11682,13 +11818,22 @@ class MiniMaxH3EasySequenceSegment:
         context_length = _segment_context_frame_count_for_mode(config.context_frames, continuity_mode)
 
         # 第一段从时间轴原点开始，用原生 17k+5 长度；后续段用 17k，加上衔接头正好又是一条原生长度。
-        if continuity_mode == CONTEXT_CONTINUITY_LATENT:
-            delivery_frames = _motion_context_output_frame_length(seconds, fps, position)
-        else:
-            delivery_frames = _frame_length(seconds, fps)
+        # Director Motion Context layout: every visible body starts on the 17k+5 grid.
+        delivery_frames = _frame_length(seconds, fps)
         delivery_frames = max(5, int(delivery_frames))
         head_frames = context_length if position else 0
         sample_length = _segment_target_length(delivery_frames, head_frames)
+        requested_frames = max(5, int(delivery_frames))
+        # 导演台「保完整」：guide / latent 的 sample_length 会保留 17k+5 对齐余帧。
+        # Head is still trimmed; the remainder is exported so the next pin sees a complete tail.
+        if (
+            bool(getattr(config, "keep_full", False))
+            and head_frames > 0
+            and continuity_mode in (CONTEXT_CONTINUITY_GUIDE, CONTEXT_CONTINUITY_LATENT)
+        ):
+            delivery_frames = max(requested_frames, int(sample_length) - int(head_frames))
+        else:
+            delivery_frames = requested_frames
 
         connected_items = MiniMaxH3Easy._collect_media(kwargs, SEGMENT_MAX_MEDIA)
         inline_state = str(kwargs.pop("inline_media_state", "") or "").strip()
@@ -11753,8 +11898,6 @@ class MiniMaxH3EasySequenceSegment:
         guides: list[dict[str, Any]] = []
         if motion_tail_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
             guide_latent = motion_tail_latent
-            if _segment_has_visual_reference(items):
-                guide_latent = _segment_apply_context_noise(guide_latent, context_length, int(seed) or 0)
             guides, _covered = _segment_context_keyframes_from_latent(guide_latent, context_length)
         elif tail_frames is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
             guides, _covered = _segment_context_keyframes(
@@ -11854,6 +11997,11 @@ class MiniMaxH3EasySequenceSegment:
                 f"[MiniMax H3 Aicg] 视频段落 {index} 完成：{float(seconds):g}s -> {delivery_frames} 帧"
                 f"（衔接头 {head_frames} 帧，共采样 {sample_length} 帧）。"
             )
+            if delivery_frames != requested_frames:
+                print(
+                    f"[MiniMax H3 Aicg] 视频段落 {index}：已启用保完整，保留对齐尾帧 "
+                    f"{delivery_frames - requested_frames} 帧（{requested_frames} → {delivery_frames}）。"
+                )
             return (MiniMaxH3SequenceSegment(
                 config=config,
                 sample=sample,

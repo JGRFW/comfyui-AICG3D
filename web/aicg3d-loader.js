@@ -29,11 +29,11 @@ function h3ClassName(name) {
 const SLOT_COUNT = 9;
 const NONE_VALUES = new Set(["", "none", "无"]);
 
-// ref2va_model 面板上已移除，但仍保留在此列表中隐藏，以维持旧工作流的 widget 顺序。
+// 原生模型控件仍隐藏，由 AICG3D 自定义面板显示；保留在列表中可维持旧工作流的 widget 顺序。
 const MODEL_WIDGETS = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae"];
 
-// 面板建不起来时必须让节点退回原生控件，所以只有这 4 个控件算硬要求。
-const REQUIRED_WIDGETS = ["fl2va_model", "text_encoder", "video_vae", "audio_vae"];
+// 面板建不起来时必须让节点退回原生控件，所以模型 / VAE 控件都算硬要求。
+const REQUIRED_WIDGETS = ["fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae"];
 
 function isNone(value) {
     return NONE_VALUES.has(String(value ?? "").trim().toLowerCase());
@@ -336,29 +336,52 @@ function buildPanel(node) {
     const ioSection = el("div", "a3-section");
     const ioSelects = [];
 
-    const modelWidget = widgetOf(node, "fl2va_model");
+    const modelRows = [
+        ["fl2va_model", "FL2VA 模型", "无参考 / 首尾帧主模型"],
+        ["ref2va_model", "REF2VA 模型", "多参考生视频主模型；留空则回退 FL2VA"],
+    ];
+    const modelSelects = [];
     const modelHint = el("span", "a3-hint");
 
-    const modelRow = el("div", "a3-row a3-row--wide");
-    modelRow.append(el("span", "a3-label", "模型"));
-    const modelField = el("div", "a3-field");
-    const modelSelect = createSelect({
-        options: comboOptions(modelWidget, { noneLabel: "未选择" }),
-        value: String(modelWidget?.value ?? ""),
-        placeholder: "选择 H3 模型",
-        recentKey: "h3-model",
-        onChange: (value) => {
-            if (modelWidget) {
-                modelWidget.value = value;
-                modelWidget.callback?.(value, app.canvas, node, [0, 0], null);
-            }
-            modelHint.textContent = isNone(value) ? "必须选择一个 H3 transformer" : "";
-            refreshLayout(node);
-        },
-    });
-    modelField.append(modelSelect.element);
-    modelRow.append(modelField);
-    ioSection.append(modelRow, modelHint);
+    const updateModelHint = () => {
+        const fl = String(widgetOf(node, "fl2va_model")?.value ?? "");
+        const ref = String(widgetOf(node, "ref2va_model")?.value ?? "");
+        if (isNone(fl) && isNone(ref)) {
+            modelHint.textContent = "至少选择一个 H3 主模型";
+        } else if (isNone(ref)) {
+            modelHint.textContent = "REF2VA 留空：多参考任务将回退使用 FL2VA 模型";
+        } else {
+            modelHint.textContent = "多参考任务使用 REF2VA；无参考 / 首尾帧任务使用 FL2VA";
+        }
+    };
+
+    for (const [name, label, placeholder] of modelRows) {
+        const widget = widgetOf(node, name);
+        const row = el("div", "a3-row a3-row--wide");
+        row.append(el("span", "a3-label", label));
+        const field = el("div", "a3-field");
+        const select = createSelect({
+            options: comboOptions(widget, { noneLabel: name === "ref2va_model" ? "无（回退 FL2VA）" : "未选择" }),
+            value: String(widget?.value ?? ""),
+            placeholder,
+            recentKey: name,
+            onChange: (value) => {
+                if (widget) {
+                    widget.value = value;
+                    widget.callback?.(value, app.canvas, node, [0, 0], null);
+                }
+                updateModelHint();
+                refreshLayout(node);
+            },
+        });
+        field.append(select.element);
+        row.append(field);
+        ioSection.append(row);
+        modelSelects.push({ widget, select });
+        ioSelects.push({ widget, select });
+    }
+    ioSection.append(modelHint);
+    updateModelHint();
 
     for (const [name, label, placeholder] of [
         ["text_encoder", "文本编码器", "选择文本编码器"],
@@ -491,8 +514,13 @@ function buildPanel(node) {
 
     function syncAll() {
         for (const { widget, select } of ioSelects) select.setValue(String(widget?.value ?? ""));
-        modelSelect.setOptions(comboOptions(modelWidget, { noneLabel: "未选择" }));
-        modelSelect.setValue(String(modelWidget?.value ?? ""));
+        for (const { widget, select } of modelSelects) {
+            select.setOptions(comboOptions(widget, {
+                noneLabel: widget?.name === "ref2va_model" ? "无（回退 FL2VA）" : "未选择",
+            }));
+            select.setValue(String(widget?.value ?? ""));
+        }
+        updateModelHint();
         // 载入工作流时展开已写入的槽位，避免把已启用的 LoRA 藏在面板外。
         loraCount = Math.max(loraCount, requiredLoraCount());
         applyRows();

@@ -435,6 +435,26 @@ PROMPT_OPTIMIZER_LANGUAGE_SECTIONS = {
 }
 
 
+def _optimizer_final_language_lock(output_language: Any) -> str:
+    """Put the language contract last so small local models cannot ignore it."""
+    key = _prompt_optimizer_language_key({"output_language": output_language})
+    if key == "en":
+        return (
+            "\n\n=== FINAL OUTPUT LANGUAGE LOCK (HIGHEST PRIORITY) ===\n"
+            "The user selected English. Every narration, description, summary, shot note, soundscape note, and music note "
+            "must be written in English. Do not leave Chinese descriptive sentences. Do not copy the source draft's Chinese "
+            "wording into the result. Only supplied dialogue, lyrics, and visible text keep their original language. "
+            "Before returning, silently rewrite any Chinese narration into English. A response containing Chinese narration is invalid."
+        )
+    if key == "zh":
+        return (
+            "\n\n=== FINAL OUTPUT LANGUAGE LOCK (HIGHEST PRIORITY) ===\n"
+            "用户选择中文。所有叙述、画面描述、摘要、镜头说明、声音说明和音乐说明必须使用简体中文。"
+            "只有用户提供的对白、歌词和画面文字保留原语言。返回前检查并改写不符合要求的叙述。"
+        )
+    return ""
+
+
 def _reference_aligned_size(image_w: int, image_h: int, scale: float) -> tuple[int, int]:
     """Choose H3-aligned dimensions near the scaled area without stretching refs."""
     multiple = h3.CANVAS_MULTIPLE
@@ -480,6 +500,8 @@ def _original_reference_size(image_w: int, image_h: int) -> tuple[int, int]:
 
 
 _PROMPT_OPTIMIZER_CONFIG_LOCK = threading.RLock()
+_PROMPT_OPTIMIZER_CANCEL_LOCK = threading.RLock()
+_PROMPT_OPTIMIZER_CANCEL_EVENTS: dict[str, set[threading.Event]] = {}
 _SEQUENCE_RUN_LOCK = threading.RLock()
 _SEQUENCE_ACTIVE_RUN_LOCKS: dict[str, threading.Lock] = {}
 _SEQUENCE_ACTIVE_RUN_LOCKS_GUARD = threading.RLock()
@@ -874,6 +896,35 @@ def _prompt_optimizer_language_key(settings: Mapping[str, Any] | None) -> str:
     if value in {"中文", "chinese", "zh"}:
         return "zh"
     return ""
+
+
+def _register_prompt_optimizer_cancel(request_id: str, event: threading.Event) -> None:
+    if not request_id:
+        return
+    with _PROMPT_OPTIMIZER_CANCEL_LOCK:
+        _PROMPT_OPTIMIZER_CANCEL_EVENTS.setdefault(request_id, set()).add(event)
+
+
+def _unregister_prompt_optimizer_cancel(request_id: str, event: threading.Event) -> None:
+    if not request_id:
+        return
+    with _PROMPT_OPTIMIZER_CANCEL_LOCK:
+        events = _PROMPT_OPTIMIZER_CANCEL_EVENTS.get(request_id)
+        if not events:
+            return
+        events.discard(event)
+        if not events:
+            _PROMPT_OPTIMIZER_CANCEL_EVENTS.pop(request_id, None)
+
+
+def _cancel_prompt_optimizer_requests(request_id: str) -> bool:
+    if not request_id:
+        return False
+    with _PROMPT_OPTIMIZER_CANCEL_LOCK:
+        events = list(_PROMPT_OPTIMIZER_CANCEL_EVENTS.pop(request_id, set()))
+    for event in events:
+        event.set()
+    return bool(events)
 
 
 def _prompt_optimizer_ready(settings: Mapping[str, Any] | None) -> bool:
@@ -1529,6 +1580,7 @@ def _optimizer_local_generate(
     user_prompt: str,
     resources: list[Mapping[str, Any]] | None = None,
     maximum: int = MAX_MEDIA,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Run one request on the local vision engine owned by the Goohai module."""
     try:
@@ -1552,7 +1604,7 @@ def _optimizer_local_generate(
         "media": _optimizer_local_media(list(resources or []), maximum),
         "task": "",
         "duration": 0.0,
-        "_cancel_event": threading.Event(),
+        "_cancel_event": cancel_event or threading.Event(),
     }
     return goohai_optimizer.generate_local_prompt(config, payload)
 
@@ -1571,10 +1623,11 @@ def _optimizer_request(
     timeout_seconds: float = PROMPT_OPTIMIZER_TIMEOUT_SECONDS,
     max_output_tokens: int = PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS,
     maximum: int = MAX_MEDIA,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Send one optimization request through the engine selected in the settings."""
     if _prompt_optimizer_mode(settings) == "local":
-        return _optimizer_local_generate(settings, system, user_prompt, resources, maximum)
+        return _optimizer_local_generate(settings, system, user_prompt, resources, maximum, cancel_event)
     return _optimizer_http_json(
         api_url,
         api_key,
@@ -2167,6 +2220,7 @@ def _optimizer_context_segment_call(
     unload_ollama_after_optimize: bool,
     settings: Mapping[str, Any] | None = None,
     language: str = PROMPT_OPTIMIZER_LANGUAGE_EN,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     resolved_prompt, selected_resources = _optimizer_segment_resources(
         current_prompt, resources, items or []
@@ -2207,6 +2261,7 @@ def _optimizer_context_segment_call(
     system += _optimizer_single_segment_rules(segment_index, segment_count, seconds, language)
     if mode == MODE_DIGITAL_HUMAN:
         system += _optimizer_digital_human_rules()
+    system += _optimizer_final_language_lock(engine_settings.get("output_language"))
     optimized = _optimizer_request(
         engine_settings,
         api_url=api_url,
@@ -2220,6 +2275,7 @@ def _optimizer_context_segment_call(
         timeout_seconds=PROMPT_OPTIMIZER_ON_RUN_TIMEOUT_SECONDS,
         max_output_tokens=CONTEXT_PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS,
         maximum=CONTEXT_PROMPT_OPTIMIZER_MEDIA_MAX_RESOURCES,
+        cancel_event=cancel_event,
     )
     return _normalize_optimized_single_segment(optimized)
 
@@ -2412,6 +2468,7 @@ def _optimize_prompt_on_run(
             )
         if str(mode or "") == MODE_DIGITAL_HUMAN:
             system += _optimizer_digital_human_rules()
+        system += _optimizer_final_language_lock(settings.get("output_language"))
         optimized = _optimizer_request(
             settings,
             api_url=api_url,
@@ -2572,8 +2629,12 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.post("/minimax_h3_easy/prompt_optimize")
     async def _prompt_optimize(request):
+        request_id = ""
+        cancel_event = threading.Event()
         try:
             payload = await request.json()
+            request_id = str(payload.get("request_id") or "")
+            _register_prompt_optimizer_cancel(request_id, cancel_event)
             prompt = str(payload.get("prompt") or "")
             settings = _read_prompt_optimizer_config()
             api_key = str(settings.get("api_key") or "")
@@ -2629,7 +2690,10 @@ def _register_prompt_optimizer_route() -> bool:
                     read_media=bool(settings.get("read_media")),
                     unload_ollama_after_optimize=bool(settings.get("unload_ollama_after_optimize", True)),
                     settings=settings,
+                    cancel_event=cancel_event,
                 )
+                if cancel_event.is_set():
+                    return web.json_response({"ok": False, "error": "prompt optimization cancelled"}, status=499)
                 return web.json_response({"ok": True, "prompt": result, "segment_index": segment_index})
 
             read_media = bool(settings.get("read_media"))
@@ -2668,6 +2732,7 @@ def _register_prompt_optimizer_route() -> bool:
                 )
             if optimizer_mode == MODE_DIGITAL_HUMAN:
                 system += _optimizer_digital_human_rules()
+            system += _optimizer_final_language_lock(settings.get("output_language"))
             result = await asyncio.to_thread(
                 _optimizer_request,
                 settings,
@@ -2685,7 +2750,10 @@ def _register_prompt_optimizer_route() -> bool:
                     else PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS
                 ),
                 maximum=resource_limit,
+                cancel_event=cancel_event,
             )
+            if cancel_event.is_set():
+                return web.json_response({"ok": False, "error": "prompt optimization cancelled"}, status=499)
             if expected_segments >= 2:
                 expected_count = max(2, int(expected_segments))
 
@@ -2695,7 +2763,9 @@ def _register_prompt_optimizer_route() -> bool:
                         api_key,
                         model,
                         api_format,
-                        system + _optimizer_segment_format_correction_rules(expected_count),
+                        system
+                        + _optimizer_segment_format_correction_rules(expected_count)
+                        + _optimizer_final_language_lock(settings.get("output_language")),
                         _optimizer_segment_format_correction_prompt(prompt, expected_count),
                         media_parts,
                         unload_ollama_after_optimize=bool(settings.get("unload_ollama_after_optimize", True)),
@@ -2708,6 +2778,20 @@ def _register_prompt_optimizer_route() -> bool:
                     retry=retry_segment_format,
                 )
             return web.json_response({"ok": True, "prompt": result})
+        except Exception as exc:
+            if cancel_event.is_set():
+                return web.json_response({"ok": False, "error": "prompt optimization cancelled"}, status=499)
+            return web.json_response({"ok": False, "error": str(exc)}, status=500)
+        finally:
+            _unregister_prompt_optimizer_cancel(request_id, cancel_event)
+
+    @routes.post("/minimax_h3_easy/prompt_optimize/cancel")
+    async def _prompt_optimize_cancel(request):
+        try:
+            payload = await request.json()
+            request_id = str(payload.get("request_id") or "")
+            cancelled = _cancel_prompt_optimizer_requests(request_id)
+            return web.json_response({"ok": True, "cancelled": cancelled})
         except Exception as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=500)
 

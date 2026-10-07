@@ -680,6 +680,8 @@ def _local_generate_impl(config: dict, payload: dict) -> str:
         )
         if device == "cpu":
             model.to("cpu")
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeError("提示词优化已取消")
         user_prompt = str(payload.get("prompt") or "")
         media = payload.get("media") if isinstance(payload.get("media"), list) else []
         content = [{"type": "text", "text": "User prompt:\n" + user_prompt}]
@@ -783,6 +785,26 @@ def _gguf_generate(config: dict, payload: dict) -> str:
         raise ValueError("当前GGUF视觉模型类型暂不支持")
     cancel_event = payload.get("_cancel_event")
     target_config = (str(model_path), str(mmproj_path), handler_name)
+    def run_chat(messages):
+        kwargs = {"max_tokens": 4096, "temperature": 0.2, "top_p": 0.9}
+        if cancel_event is None:
+            return _GGUF_MODEL.create_chat_completion(messages=messages, stream=False, **kwargs)
+        parts: list[str] = []
+        stream = _GGUF_MODEL.create_chat_completion(messages=messages, stream=True, **kwargs)
+        for chunk in stream:
+            if cancel_event.is_set():
+                raise RuntimeError("提示词优化已取消")
+            choices = chunk.get("choices") if isinstance(chunk, dict) else None
+            choice = choices[0] if choices else {}
+            delta = choice.get("delta") if isinstance(choice, dict) else {}
+            piece = delta.get("content") if isinstance(delta, dict) else None
+            if isinstance(piece, list):
+                piece = "".join(str(item.get("text") or "") for item in piece if isinstance(item, dict))
+            if piece:
+                parts.append(str(piece))
+        if cancel_event.is_set():
+            raise RuntimeError("提示词优化已取消")
+        return {"choices": [{"message": {"content": "".join(parts)}}]}
     try:
         with _GGUF_LOCK:
             if _GGUF_MODEL is None or _GGUF_CONFIG != target_config:
@@ -819,10 +841,7 @@ def _gguf_generate(config: dict, payload: dict) -> str:
             raise RuntimeError("提示词优化已取消")
         try:
             with _GGUF_LOCK:
-                result = _GGUF_MODEL.create_chat_completion(
-                    messages=[{"role": "system", "content": system}, {"role": "user", "content": content}],
-                    max_tokens=4096, temperature=0.2, top_p=0.9,
-                )
+                result = run_chat([{"role": "system", "content": system}, {"role": "user", "content": content}])
         except Exception as error:
             if not attached_images or not _is_media_evaluation_error(error):
                 raise
@@ -834,13 +853,10 @@ def _gguf_generate(config: dict, payload: dict) -> str:
                 _unload_gguf_model()
                 _GGUF_MODEL, _GGUF_HANDLER = _create_gguf_model(model_path, mmproj_path, handler_name)
                 _GGUF_CONFIG = target_config
-                result = _GGUF_MODEL.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": system + _MEDIA_FALLBACK_NOTE},
-                        {"role": "user", "content": labels_only},
-                    ],
-                    max_tokens=4096, temperature=0.2, top_p=0.9,
-                )
+                result = run_chat([
+                    {"role": "system", "content": system + _MEDIA_FALLBACK_NOTE},
+                    {"role": "user", "content": labels_only},
+                ])
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("提示词优化已取消")
         return str(result["choices"][0]["message"]["content"] or "").removeprefix(": ").strip()

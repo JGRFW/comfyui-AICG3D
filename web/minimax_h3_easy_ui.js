@@ -25,6 +25,7 @@ const SEGMENT_COLLECT_CLASS = "MiniMaxH3EasySegmentCollect";
 const SEGMENT_DECODE_CLASS = "MiniMaxH3EasySegmentDecode";
 const OUTPUT_CLASS = "MiniMaxH3EasyOutput";
 const RENDER_CLASS = "MiniMaxH3EasyRenderAdvanced";
+const RENDER_ACCEL_CLASS = "MiniMaxH3EasyRenderAdvancedWithModel";
 /* AICG-渲染器（一采）：只跑一采，出成片，并顺手递一条「一采数据」给二采放大。 */
 const RENDER_PASS1_CLASS = "MiniMaxH3EasyRenderPass1";
 /* AICG-渲染器（二采放大）：接「一采数据」跑 Latent 放大 + 二采，面板和进度条与高级渲染器共用。 */
@@ -347,6 +348,7 @@ const TEXT = {
     denoiseLabel: ZH_BROWSER ? "\u964d\u566a" : "Denoise",
     cleanupLabel: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
     renderTitle: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u9ad8\u7ea7\uff09" : "AICG Render (Advanced)",
+    renderAccelTitle: ZH_BROWSER ? "AICG-渲染器（高级·加速）" : "AICG Render (Advanced Accelerated)",
     renderVideo: ZH_BROWSER ? "\u6210\u7247\u89c6\u9891" : "Video",
     renderPass1Title: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u4e00\u91c7\uff09" : "AICG Render (Pass 1)",
     renderPass1Data: ZH_BROWSER ? "\u4e00\u91c7\u6570\u636e" : "Pass-1 data",
@@ -1234,8 +1236,9 @@ function localizeNodeInstance(node) {
     if (!node) return;
     const isPass1 = nodeMatchesClass(node, RENDER_PASS1_CLASS, TEXT.renderPass1Title, "__h3RenderPass1NodeInstalled");
     const isPass2 = nodeMatchesClass(node, RENDER_PASS2_CLASS, TEXT.renderPass2Title, "__h3RenderPass2NodeInstalled");
-    if (isPass1 || isPass2 || nodeMatchesClass(node, RENDER_CLASS, TEXT.renderTitle, "__h3RenderNodeInstalled")) {
-        node.title = isPass1 ? TEXT.renderPass1Title : isPass2 ? TEXT.renderPass2Title : TEXT.renderTitle;
+    const isRenderAccel = nodeMatchesClass(node, RENDER_ACCEL_CLASS, TEXT.renderAccelTitle, "__h3RenderNodeInstalled");
+    if (isPass1 || isPass2 || isRenderAccel || nodeMatchesClass(node, RENDER_CLASS, TEXT.renderTitle, "__h3RenderNodeInstalled")) {
+        node.title = isPass1 ? TEXT.renderPass1Title : isPass2 ? TEXT.renderPass2Title : isRenderAccel ? TEXT.renderAccelTitle : TEXT.renderTitle;
         const widgetLabels = {
             noise_seed: TEXT.seedLabel,
             sampler_name: TEXT.samplerName,
@@ -1266,6 +1269,8 @@ function localizeNodeInstance(node) {
         for (const input of node.inputs || []) {
             if (input.name === "h3_context") setLocalizedSlotLabel(input, TEXT.outputContext);
             if (input.name === "pass1") setLocalizedSlotLabel(input, TEXT.renderPass1Data);
+            if (input.name === "sampler") setLocalizedSlotLabel(input, TEXT.externalSampler);
+            if (input.name === "sigmas") setLocalizedSlotLabel(input, TEXT.externalSigmas);
         }
         for (const output of node.outputs || []) {
             const outputName = String(output.name || "").toLowerCase();
@@ -3609,7 +3614,7 @@ function getNodeVideoSrc(node) {
 
 function refreshMentionPreviews() {
     for (const node of app.graph?._nodes || []) {
-        if (!isTarget(node) && !isSequenceSegmentNode(node)) continue;
+        if (!isTarget(node) && !isSequenceSegmentNode(node) && !isSequenceGlobalNode(node)) continue;
         normalizeLinks(node);
         if (!canUseMediaMentions(node)) {
             closeMentionMenu(node);
@@ -5039,6 +5044,7 @@ function syncEditorThemes(force = false) {
         if (!isTarget(node) && !isSequenceSegmentNode(node)) continue;
         applyNativeEditorTheme(node.__h3EditorWrap);
         applyNativeEditorTheme(node.__h3MentionMenu?.element);
+        configurePromptOptimizerEntryWidget(node);
     }
     app.graph?.setDirtyCanvas?.(true, true);
 }
@@ -6056,6 +6062,27 @@ function resolvePromptOptimizerToggleHit(target) {
         if (switchEl || element.children.length <= 3) return { row: element, toggle: switchEl };
     }
     return null;
+}
+
+function configurePromptOptimizerEntryWidget(node) {
+    const widget = getWidget(node, "prompt_optimizer_settings");
+    if (!widget) return false;
+    if (!Object.prototype.hasOwnProperty.call(widget, "__h3OptimizerEntryOriginalType")) {
+        widget.__h3OptimizerEntryOriginalType = widget.type || "toggle";
+        widget.__h3OptimizerEntryOriginalLabel = widget.label;
+    }
+    if (isVueNodesMode()) {
+        widget.type = widget.__h3OptimizerEntryOriginalType || "toggle";
+        widget.label = widget.__h3OptimizerEntryOriginalLabel
+            || `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`;
+    } else {
+        // 经典画布不会为 toggle 生成 DOM 行，现有 DOM 点击桥接抓不到它。
+        widget.type = "button";
+        widget.label = "打开提示词优化设置";
+    }
+    bindPromptOptimizerWidgetCallbacks(node);
+    node.setDirtyCanvas?.(true, true);
+    return true;
 }
 
 function handlePromptOptimizerToggleDomEvent(event) {
@@ -8058,6 +8085,10 @@ function bindPromptOptimizerWidgetCallbacks(node) {
         const original = widget.callback;
         widget.callback = (value) => {
             if (name === "prompt_optimizer_settings") {
+                if (widget.type === "button") {
+                    openPromptOptimizerSettings(node);
+                    return;
+                }
                 // 开关即入口：打开时保持选中作为反馈，关闭时收起设置面板。
                 const wantsOpen = asBoolean(value, false);
                 if (!wantsOpen && promptOptimizerSettingsJustOpened()) {
@@ -9191,6 +9222,7 @@ function installSequenceGlobalNode(nodeType, nodeData) {
         if (!node) return;
         localizeNodeInstance(node);
         localizeSequenceWidgets(node, SEQUENCE_GLOBAL_WIDGET_LABELS);
+        configurePromptOptimizerEntryWidget(node);
         for (const input of node.inputs || []) {
             if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
             if (input.name === "sampler") setLocalizedSlotLabel(input, TEXT.externalSampler);
@@ -11373,7 +11405,8 @@ function installRenderNode(nodeType, nodeData) {
     const className = h3ClassName(nodeData?.name);
     const isPass1 = className === RENDER_PASS1_CLASS;
     const isPass2 = className === RENDER_PASS2_CLASS;
-    if (!isPass1 && !isPass2 && className !== RENDER_CLASS) return;
+    const isRenderAccel = className === RENDER_ACCEL_CLASS;
+    if (!isPass1 && !isPass2 && !isRenderAccel && className !== RENDER_CLASS) return;
     const installedMarker = isPass1
         ? "__h3RenderPass1NodeInstalled"
         : isPass2

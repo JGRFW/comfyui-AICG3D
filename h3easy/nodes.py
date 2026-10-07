@@ -7166,12 +7166,20 @@ class MiniMaxH3EasyRenderAdvanced:
             "optional": {
                 # MODEL 补丁链显式连线优先；未连接时继续使用 h3_context 自带模型。
                 "model": ("MODEL",),
+                "sampler": (
+                    "SAMPLER",
+                    {"tooltip": "可选外部采样器，例如 DMAD Sampler。连接后覆盖 sampler_name。"},
+                ),
+                "sigmas": (
+                    "SIGMAS",
+                    {"tooltip": "可选外部 Sigmas，例如 DMAD Sigmas。连接后覆盖 scheduler、steps 和 denoise 截断。"},
+                ),
             },
         }
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise")
+        keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise", "sampler", "sigmas")
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
     @staticmethod
@@ -7220,6 +7228,8 @@ class MiniMaxH3EasyRenderAdvanced:
         denoise,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
         model=None,
+        sampler=None,
+        sigmas=None,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
@@ -7242,7 +7252,8 @@ class MiniMaxH3EasyRenderAdvanced:
             on_preview = lambda x0, *_info: reporter.update_preview(preview.decode(x0))
         done = False
         try:
-            reporter.begin_sample(steps)
+            sampling_steps = _external_sampling_steps(sigmas, steps)
+            reporter.begin_sample(sampling_steps)
             (sampled,) = AICG3DSamplerAdvanced().sample(
                 model,
                 h3_context.conditioning,
@@ -7252,6 +7263,8 @@ class MiniMaxH3EasyRenderAdvanced:
                 scheduler,
                 steps,
                 denoise,
+                sampler=sampler,
+                sigmas=sigmas,
                 on_step=reporter.update_sample,
                 on_preview=on_preview,
             )
@@ -7322,6 +7335,15 @@ RENDER_PREVIEW_CHOICES = (RENDER_PREVIEW_OFF, RENDER_PREVIEW_ON)
 RENDER_PREVIEW_INTERVAL = 1
 
 
+def _external_sampling_steps(sigmas: Any, fallback: Any) -> int:
+    try:
+        if sigmas is not None and hasattr(sigmas, "shape") and len(sigmas.shape):
+            return max(1, int(sigmas.shape[-1]) - 1)
+    except Exception:
+        pass
+    return max(1, int(fallback or 1))
+
+
 def _preview_step_filter(interval: Any):
     """按「预览间隔」筛采样步：返回 ``should_push(step, total) -> bool``。
 
@@ -7372,7 +7394,9 @@ class MiniMaxH3EasyRenderAdvancedWithModel(MiniMaxH3EasyRenderAdvanced):
         base = super().INPUT_TYPES()
         required = {"model": ("MODEL",)}
         required.update(base["required"])
-        return {"required": required}
+        optional = dict(base.get("optional", {}))
+        optional.pop("model", None)
+        return {"required": required, "optional": optional}
 
 
 class _StageAbsoluteProgress:
@@ -7496,12 +7520,20 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
             },
             "optional": {
                 "model": ("MODEL",),
+                "sampler": (
+                    "SAMPLER",
+                    {"tooltip": "可选外部采样器，例如 DMAD Sampler。连接后覆盖 sampler_name。"},
+                ),
+                "sigmas": (
+                    "SIGMAS",
+                    {"tooltip": "可选外部 Sigmas，例如 DMAD Sigmas。连接后覆盖 scheduler、steps 和 denoise 截断。"},
+                ),
             },
         }
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise",
+        keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise", "sampler", "sigmas",
                 "sample_preview", "preview_interval")
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -7517,6 +7549,8 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         preview_interval=RENDER_PREVIEW_INTERVAL,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
         model=None,
+        sampler=None,
+        sigmas=None,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
@@ -7551,7 +7585,8 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         done = False
         try:
             # ---- 一采：和 AICG-渲染器（高级）完全同一套采样 ----
-            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, steps)
+            sampling_steps = _external_sampling_steps(sigmas, steps)
+            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, sampling_steps)
             (first_latent,) = AICG3DSamplerAdvanced().sample(
                 model,
                 h3_context.conditioning,
@@ -7561,6 +7596,8 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
                 scheduler,
                 steps,
                 denoise,
+                sampler=sampler,
+                sigmas=sigmas,
                 on_step=reporter.update_stage,
                 on_preview=on_preview,
             )
@@ -7762,6 +7799,16 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                     },
                 ),
             },
+            "optional": {
+                "sampler": (
+                    "SAMPLER",
+                    {"tooltip": "可选外部采样器，例如 DMAD Sampler。连接后覆盖 sampler_name。"},
+                ),
+                "sigmas": (
+                    "SIGMAS",
+                    {"tooltip": "可选外部 Sigmas，例如 DMAD Sigmas。连接后覆盖 scheduler、steps 和 denoise 截断。"},
+                ),
+            },
         }
 
     @classmethod
@@ -7772,6 +7819,7 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
             "upscale_scale", "upscale_device", "upscale_precision", "upscale_chunking",
             "output_first_pass", "tiled_sampling", "tile_width", "tile_height",
             "tile_overlap", "tile_fade", "sample_preview", "preview_interval",
+            "sampler", "sigmas",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -7838,6 +7886,8 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         tile_fade,
         progress,
         on_preview=None,
+        sampler=None,
+        sigmas=None,
     ):
         """二采分块采样：把放大后的 latent 按空间切块逐块采，显存只跟单块有关。
 
@@ -7863,7 +7913,14 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced, _roll_inference_seed
 
         # 和整幅二采同一套 sigma 截断：denoise 同样作用在分块路径上。
-        sigmas = AICG3DSamplerAdvanced.calculate_sigmas(model, scheduler, steps, denoise)
+        if sigmas is None:
+            sigmas = AICG3DSamplerAdvanced.calculate_sigmas(model, scheduler, steps, denoise)
+        else:
+            if not torch.is_tensor(sigmas):
+                sigmas = torch.as_tensor(sigmas, dtype=torch.float32)
+            sigmas = sigmas.detach().to(device="cpu", dtype=torch.float32).flatten().contiguous()
+            if sigmas.numel() < 2:
+                raise ValueError("外部 SIGMAS 至少需要包含两个 sigma 值")
         step_count = max(1, int(sigmas.shape[-1]) - 1)
         passes = MiniMaxH3EasySegmentRefine._tiled_pass_count(
             int(video_latent.shape[-1]) * 16,
@@ -7880,7 +7937,7 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
             model,
             conditioning,
             latent,
-            comfy.samplers.sampler_object(str(sampler_name)),
+            sampler if sampler is not None else comfy.samplers.sampler_object(str(sampler_name)),
             sigmas,
             seed_value,
             progress,
@@ -7915,6 +7972,8 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         preview_interval=RENDER_PREVIEW_INTERVAL,
         output_first_pass=PASS2_FIRST_PASS_OFF,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+        sampler=None,
+        sigmas=None,
     ):
         # 一采在上游节点里已经跑完，这里只从它递过来的「一采数据」里取 AV latent 与上下文。
         first_latent, h3_context = _unpack_pass1(pass1)
@@ -7939,7 +7998,7 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
             RenderProgressReporter,
         )
 
-        sampler = AICG3DSamplerAdvanced()
+        sampler_helper = AICG3DSamplerAdvanced()
         # 进度条把后半程摊成一条：放大 12% -> 二采 78% -> 解码合成 10%。
         reporter = RenderProgressReporter()
         # 采样预览看节点上的开关；模块级 SAMPLE_PREVIEW_ENABLED 仍然能把所有渲染节点强制打开。
@@ -7976,7 +8035,8 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
 
             # ---- 二采：吃「放大后的视频 + 原音频」拼回来的 AV latent ----
             second_input = _segment_pack_latent(video_latent, audio_latent)
-            reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS2_UPSCALE_END, SAMPLE_SHARE, steps)
+            sampling_steps = _external_sampling_steps(sigmas, steps)
+            reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS2_UPSCALE_END, SAMPLE_SHARE, sampling_steps)
             if str(tiled_sampling or "").strip() == PASS2_TILED_ON:
                 # 分块二采：显存占用只跟单块有关，长片 / 放大后不容易爆显存。
                 second_latent = self._tiled_second_pass(
@@ -7995,9 +8055,11 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                     tile_fade,
                     _StageAbsoluteProgress(reporter),
                     on_preview,
+                    sampler=sampler,
+                    sigmas=sigmas,
                 )
             else:
-                (second_latent,) = sampler.sample(
+                (second_latent,) = sampler_helper.sample(
                     model,
                     second_conditioning,
                     second_input,
@@ -8006,6 +8068,8 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                     scheduler,
                     steps,
                     second_pass_denoise,
+                    sampler=sampler,
+                    sigmas=sigmas,
                     on_step=reporter.update_stage,
                     on_preview=on_preview,
                 )

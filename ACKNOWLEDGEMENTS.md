@@ -85,6 +85,8 @@ FL2VA / L2VA / Ref2VA）的结构定义，以及官方风格技能，都来自 M
 
 ## 三、所依赖的生态
 
+- **DMAD（Yzmblog）** —— 提供 MiniMax H3 四步加速 LoRA 的官方 re-noise 采样器与 Sigma 调度节点。
+  本仓库不复制它的代码，只提供 SAMPLER / SIGMAS 外部接口。插件来源：https://github.com/Yzmblog/DMAD（Apache-2.0）。
 - **ComfyUI** 与 **Comfy Org** —— 没有这个平台，这些节点无处安放
   https://github.com/comfyanonymous/ComfyUI
 - **ComfyUI-Manager** —— 插件分发与依赖管理

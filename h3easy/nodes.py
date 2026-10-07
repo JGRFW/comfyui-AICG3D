@@ -11344,6 +11344,9 @@ class MiniMaxH3SequenceConfig:
     keep_full: bool = True
     #: 可选的外部 MODEL 补丁链；未连接时继续使用 bundle 里的权重。
     model: Any = None
+    #: 可选的外部采样器 / sigma 调度；连接后优先于 sampler_name / scheduler / steps。
+    sampler: Any = None
+    sigmas: Any = None
 
 
 @dataclass(frozen=True)
@@ -11579,6 +11582,22 @@ class MiniMaxH3EasySequenceGlobal:
             },
             "optional": {
                 "model": ("MODEL",),
+                "sampler": (
+                    "SAMPLER",
+                    {
+                        "tooltip": (
+                            "可选的外部采样器，例如 DMAD Sampler（re-noise）。连接后覆盖下面的采样器名称。"
+                        ),
+                    },
+                ),
+                "sigmas": (
+                    "SIGMAS",
+                    {
+                        "tooltip": (
+                            "可选的外部 Sigma 调度，例如 DMAD Sigmas。连接后覆盖调度器名称、步数与 denoise 截断。"
+                        ),
+                    },
+                ),
             },
         }
 
@@ -11592,6 +11611,7 @@ class MiniMaxH3EasySequenceGlobal:
             "audio_mode", "vram_tier",
             "exposure_lock",
             "keep_full",
+            "sampler", "sigmas",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -11618,6 +11638,8 @@ class MiniMaxH3EasySequenceGlobal:
         exposure_lock=SEQUENCE_EXPOSURE_LOCK_ON,
         keep_full=True,
         model=None,
+        sampler=None,
+        sigmas=None,
     ):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("请把 MiniMax H3 Aicg 加载器的「模型组合」接到 h3_bundle")
@@ -11667,6 +11689,8 @@ class MiniMaxH3EasySequenceGlobal:
             ),
             keep_full=bool(keep_full),
             model=model,
+            sampler=sampler,
+            sigmas=sigmas,
         )
         print(
             f"[MiniMax H3 Aicg] 顺序生成全局设置：{config.width}x{config.height}"
@@ -11676,6 +11700,8 @@ class MiniMaxH3EasySequenceGlobal:
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
             f"接缝处理「{config.exposure_lock}」；"
             f"保完整「{'开' if config.keep_full else '关'}」；"
+            f"外部采样器「{'已连接' if config.sampler is not None else '未连接'}」；"
+            f"外部 Sigmas「{'已连接' if config.sigmas is not None else '未连接'}」。"
         )
         return (config,)
 
@@ -11962,7 +11988,16 @@ class MiniMaxH3EasySequenceSegment:
 
         done = False
         try:
-            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, max(1, int(config.steps)))
+            sampling_steps = max(1, int(config.steps))
+            if config.sigmas is not None and hasattr(config.sigmas, "shape") and len(config.sigmas.shape):
+                sampling_steps = max(1, int(config.sigmas.shape[-1]) - 1)
+            if config.sampler is not None or config.sigmas is not None:
+                print(
+                    f"[MiniMax H3 Aicg] 视频段落 {index}：使用外部采样器"
+                    f"「{'已连接' if config.sampler is not None else '未连接'}」和外部 Sigma"
+                    f"「{'已连接' if config.sigmas is not None else '未连接'}」，实际 {sampling_steps} 步。"
+                )
+            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, sampling_steps)
             (sampled,) = AICG3DSamplerAdvanced().sample(
                 model,
                 conditioning,
@@ -11972,6 +12007,8 @@ class MiniMaxH3EasySequenceSegment:
                 config.scheduler,
                 config.steps,
                 config.denoise,
+                sampler=config.sampler,
+                sigmas=config.sigmas,
                 on_step=reporter.update_stage,
                 on_preview=on_preview,
             )

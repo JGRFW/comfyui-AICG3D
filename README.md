@@ -21,7 +21,17 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.3 更新摘要
+## 🆕 v1.1.4 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.4.md](RELEASE_NOTES_v1.1.4.md)。
+
+- **外部采样器接口**：无限段落顺序生成（全局设置）新增“外部采样器”和“外部调度器（Sigmas）”输入，连接后自动覆盖内置采样器、调度器、步数和 denoise 截断。
+- **DMAD 官方四步加速**：支持 `DMAD Sampler (re-noise)` + `DMAD Sigmas`，官方推荐参数为 LoRA 强度 1.0、步数 4、shift 12。
+- **音频偏移修正**：工作流加入 `MiniMaxH3SigmaShift`，推荐 `shift_video=12`、`shift_audio=2`。
+- **13 号 1.2 工作流已接线**：DMAD Sampler、DMAD Sigmas、MiniMaxH3SigmaShift 已连接到全局设置，打开即可使用。
+- **兼容原采样方式**：不连接外部采样器和 Sigmas 时，继续使用原来的 sampler_name、scheduler、steps 和 denoise。
+
+## v1.1.3 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.3.md](RELEASE_NOTES_v1.1.3.md)。
 
@@ -30,6 +40,7 @@
 - **资源库开关修复**：展开、收起、再次展开可以正常循环，修掉收起后无法重新打开、节点空白区和按钮失效问题。
 - **移除抽卡与锁定入口**：多段拼接工作流不再提供容易破坏接缝一致性的局部重抽功能，保留添加下一段、打开下一段和删除这一段。
 - **13 号 1.2 工作流同步**：节点布局、按钮文案和操作说明已与 v1.1.3 插件同步。
+
 
 ## v1.1.2 更新摘要
 

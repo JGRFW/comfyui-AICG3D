@@ -341,6 +341,8 @@ const TEXT = {
     seedLabel: "Seed",
     samplerName: ZH_BROWSER ? "\u91c7\u6837\u5668" : "Sampler",
     schedulerLabel: ZH_BROWSER ? "\u8c03\u5ea6\u5668" : "Scheduler",
+    externalSampler: ZH_BROWSER ? "外部采样器" : "External sampler",
+    externalSigmas: ZH_BROWSER ? "外部调度器（Sigmas）" : "External sigmas",
     stepsLabel: ZH_BROWSER ? "\u6b65\u6570" : "Steps",
     denoiseLabel: ZH_BROWSER ? "\u964d\u566a" : "Denoise",
     cleanupLabel: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
@@ -9191,6 +9193,8 @@ function installSequenceGlobalNode(nodeType, nodeData) {
         localizeSequenceWidgets(node, SEQUENCE_GLOBAL_WIDGET_LABELS);
         for (const input of node.inputs || []) {
             if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
+            if (input.name === "sampler") setLocalizedSlotLabel(input, TEXT.externalSampler);
+            if (input.name === "sigmas") setLocalizedSlotLabel(input, TEXT.externalSigmas);
         }
         const configOutput = (node.outputs || [])[0];
         if (String(configOutput?.name || "") === "sequence_config") {

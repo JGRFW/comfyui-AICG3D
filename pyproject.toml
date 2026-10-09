@@ -3,7 +3,7 @@ name = "aicg3d-h3-suite"
 description = "把 MiniMax H3 Easy 与 Goohai-MiniMax-H3_Integration 合并成一个 ComfyUI 插件，并补上统一的素材、技能与加载器界面。"
 readme = "README.md"
 keywords = ["短剧工作台", "无限时长视频", "MiniMax H3 工作流", "ComfyUI", "无限长视频", "无限分段生视频", "AI 短剧", "DMAD", "四步加速"]
-version = "1.1.6"
+version = "1.1.5"
 license = {text = "GPL-3.0-or-later"}
 dependencies = []
 

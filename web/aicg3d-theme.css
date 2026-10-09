@@ -646,6 +646,19 @@
 
 .a3-lora-row:not(.is-on) .a3-lora-body { opacity: .45; }
 
+.a3-lora-toggle {
+    justify-self: end;
+    align-self: center;
+    padding: 0;
+}
+
+.a3-lora-toggle:disabled {
+    opacity: .28;
+    cursor: not-allowed;
+}
+
+.a3-lora-row:not(.is-on) .a3-lora-toggle:not(:disabled) { opacity: .78; }
+
 .a3-lora-rows {
     display: flex;
     flex-direction: column;

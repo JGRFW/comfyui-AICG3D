@@ -39,6 +39,36 @@ function isNone(value) {
     return NONE_VALUES.has(String(value ?? "").trim().toLowerCase());
 }
 
+const LORA_STATE_PROP = "aicg3d_lora_state";
+
+function loraStateStore(node, create = true) {
+    const current = node?.properties?.[LORA_STATE_PROP];
+    if (current && typeof current === "object" && !Array.isArray(current)) return current;
+    if (!create) return null;
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    const next = {};
+    node.properties[LORA_STATE_PROP] = next;
+    return next;
+}
+
+function readLoraState(node, index) {
+    const state = loraStateStore(node, false)?.[String(index)];
+    return state && typeof state === "object" && !Array.isArray(state) ? state : null;
+}
+
+function loraStateOf(node, index) {
+    const store = loraStateStore(node, true);
+    const key = String(index);
+    const current = store[key];
+    if (!current || typeof current !== "object" || Array.isArray(current)) store[key] = {};
+    return store[key];
+}
+
+function clearLoraState(node, index) {
+    const store = loraStateStore(node, false);
+    if (store) delete store[String(index)];
+}
+
 // 与 h3easy/nodes.py 的 LORA_SLOT_COUNT_LEGACY 保持一致。
 const LEGACY_SLOT_COUNT = 4;
 
@@ -61,6 +91,10 @@ function repairLoraFromArchive(node, values) {
         if (!widget || !isNone(widget.value)) continue;
         const options = Array.isArray(widget.options?.values) ? widget.options.values : null;
         if (options && !options.some((item) => String(item) === String(saved))) continue;
+        const state = loraStateOf(node, index);
+        if (state.enabled === false) continue;
+        state.selected = String(saved);
+        state.enabled = true;
         setWidgetValue(node, `lora_${index}`, saved);
         const strength = Number(values[slot + 1]);
         if (Number.isFinite(strength)) setWidgetValue(node, `lora_${index}_strength`, strength);
@@ -223,7 +257,7 @@ function withLoraMeta(options, metas) {
     });
 }
 
-function buildLoraRow(node, index, loraMeta) {
+function buildLoraRow(node, index, loraMeta, onChange = () => {}) {
     const nameWidget = widgetOf(node, `lora_${index}`);
     const strengthWidget = widgetOf(node, `lora_${index}_strength`);
     const row = el("div", "a3-lora-row");
@@ -231,25 +265,65 @@ function buildLoraRow(node, index, loraMeta) {
     const body = el("div", "a3-lora-body");
     const nameLine = el("div", "a3-lora-name");
     const strengthLine = el("div", "a3-lora-strength");
+    const state = loraStateOf(node, index);
 
-    let enabled = !isNone(nameWidget?.value);
+    let selectedValue = !isNone(state.selected) ? String(state.selected) : String(nameWidget?.value ?? "none");
+    let enabled = state.enabled !== false && !isNone(selectedValue);
+    let syncing = false;
 
     const preview = el("img", "a3-lora-preview");
     preview.alt = "";
 
+    function optionExists(value) {
+        const target = String(value ?? "");
+        return optionValuesOf(nameWidget).some((item) => item === target);
+    }
+
+    function persist() {
+        state.selected = isNone(selectedValue) ? "" : String(selectedValue);
+        state.enabled = !!enabled && !isNone(selectedValue);
+    }
+
+    function setActual(value) {
+        if (!nameWidget || syncing) return;
+        const next = String(value ?? "none");
+        if (String(nameWidget.value ?? "none") === next) return;
+        syncing = true;
+        nameWidget.value = next;
+        try {
+            nameWidget.callback?.(next, app.canvas, node, [0, 0], null);
+        } finally {
+            syncing = false;
+        }
+    }
+
+    const toggle = el("button", "a3-switch a3-lora-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-label", "启用或停用此 LoRA");
+    toggle.addEventListener("pointerdown", (event) => event.stopPropagation());
+    toggle.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isNone(selectedValue)) return;
+        enabled = !enabled;
+        persist();
+        setActual(enabled ? selectedValue : "none");
+        syncRow();
+        onChange();
+    });
+
     const select = createSelect({
         options: withLoraMeta(comboOptions(nameWidget), loraMeta),
-        value: String(nameWidget?.value ?? "none"),
+        value: isNone(selectedValue) ? "none" : selectedValue,
         placeholder: "不使用",
         recentKey: "lora",
         onChange: (value) => {
-            if (nameWidget) {
-                nameWidget.value = value;
-                nameWidget.callback?.(value, app.canvas, node, [0, 0], null);
-            }
-            enabled = !isNone(value);
+            selectedValue = String(value ?? "none");
+            if (enabled && !isNone(selectedValue)) setActual(selectedValue);
+            else setActual("none");
+            persist();
             syncRow();
-            refreshLayout(node);
+            onChange();
         },
     });
 
@@ -272,7 +346,7 @@ function buildLoraRow(node, index, loraMeta) {
             strengthWidget.value = next;
             strengthWidget.callback?.(next, app.canvas, node, [0, 0], null);
         }
-        refreshLayout(node);
+        onChange();
     };
 
     slider.addEventListener("input", () => writeStrength(slider.value));
@@ -293,12 +367,40 @@ function buildLoraRow(node, index, loraMeta) {
     }
 
     function syncRow() {
-        const current = String(nameWidget?.value ?? "none");
-        enabled = !isNone(current);
-        row.classList.toggle("is-on", enabled);
-        select.setValue(current);
+        const actual = String(nameWidget?.value ?? "none");
+        const saved = !isNone(state.selected) ? String(state.selected) : "";
+        if (!isNone(saved)) selectedValue = saved;
+        else if (!isNone(actual)) selectedValue = actual;
+
+        if (state.enabled === false) enabled = false;
+        else if (state.enabled === true) enabled = !isNone(selectedValue);
+        else enabled = !isNone(actual);
+
+        if (!isNone(actual) && !saved) {
+            selectedValue = actual;
+            enabled = true;
+            persist();
+        }
+
+        if (enabled && !isNone(selectedValue) && optionExists(selectedValue) && actual !== selectedValue) {
+            setActual(selectedValue);
+        } else if (!enabled && actual !== "none") {
+            setActual("none");
+        } else if (enabled && !isNone(selectedValue) && !optionExists(selectedValue)) {
+            enabled = false;
+            persist();
+            setActual("none");
+        }
+
+        const shown = isNone(selectedValue) ? "none" : selectedValue;
+        const visibleOn = enabled && !isNone(selectedValue);
+        row.classList.toggle("is-on", visibleOn);
+        toggle.classList.toggle("is-on", visibleOn);
+        toggle.disabled = isNone(selectedValue);
+        toggle.title = isNone(selectedValue) ? "请先选择一个 LoRA" : (visibleOn ? "已启用；点击暂时停用" : "已停用；点击重新启用");
+        select.setValue(shown);
         syncStrength();
-        const meta = loraMeta.find((item) => item.name === current);
+        const meta = loraMeta.find((item) => item.name === selectedValue);
         if (meta?.preview) {
             preview.src = meta.preview;
             preview.hidden = false;
@@ -312,7 +414,7 @@ function buildLoraRow(node, index, loraMeta) {
     nameLine.append(select.element, preview);
     strengthLine.append(slider, number);
     body.append(nameLine, strengthLine);
-    row.append(badge, body);
+    row.append(badge, body, toggle);
     syncRow();
 
     return { row, sync: () => { select.setOptions(withLoraMeta(comboOptions(nameWidget), loraMeta)); syncRow(); } };
@@ -423,6 +525,7 @@ function buildPanel(node) {
         for (let index = 1; index <= SLOT_COUNT; index += 1) {
             setWidgetValue(node, `lora_${index}`, "none");
             setWidgetValue(node, `lora_${index}_strength`, 1);
+            clearLoraState(node, index);
         }
         setCount(1);
     });
@@ -461,14 +564,18 @@ function buildPanel(node) {
     /** 已启用槽位中最靠后的一位，最少为 1；用于载入工作流后展开需要的行。 */
     function requiredLoraCount() {
         for (let index = SLOT_COUNT; index >= 1; index -= 1) {
-            if (!isNone(widgetOf(node, `lora_${index}`)?.value)) return index;
+            const state = readLoraState(node, index);
+            if (!isNone(widgetOf(node, `lora_${index}`)?.value) || !isNone(state?.selected)) return index;
         }
         return 1;
     }
 
     function applyRows() {
         while (loraRows.length < loraCount) {
-            const entry = buildLoraRow(node, loraRows.length + 1, loraMeta);
+            const entry = buildLoraRow(node, loraRows.length + 1, loraMeta, () => {
+                updateSummary();
+                refreshLayout(node);
+            });
             loraRows.push(entry);
             rowsWrap.append(entry.row);
         }
@@ -490,6 +597,7 @@ function buildPanel(node) {
             for (let index = clamped + 1; index <= loraCount; index += 1) {
                 setWidgetValue(node, `lora_${index}`, "none");
                 setWidgetValue(node, `lora_${index}_strength`, 1);
+                clearLoraState(node, index);
             }
         }
         loraCount = clamped;

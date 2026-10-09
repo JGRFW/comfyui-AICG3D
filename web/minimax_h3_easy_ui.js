@@ -6444,13 +6444,6 @@ function contextSegmentDurations(node, count) {
     return Array.from({ length: count }, () => fallback);
 }
 
-function createPromptOptimizerRequestId() {
-    const uuid = globalThis.crypto?.randomUUID?.();
-    return uuid
-        ? `h3-prompt-${uuid}`
-        : `h3-prompt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
 async function requestPromptOptimization(payload, signal) {
     const response = await api.fetchApi("/minimax_h3_easy/prompt_optimize", {
         method: "POST",
@@ -6486,7 +6479,6 @@ async function optimizeContextSegmentsIndividually({ node, sourcePrompt, commonP
                 segment_index: index,
                 segment_count: segments.length,
                 previous_prompts: segments.slice(0, index),
-                request_id: commonPayload.request_id,
                 optimizer_mode: "per_segment",
             }, signal);
             results[index] = String(data.prompt || "").trim();
@@ -6555,24 +6547,14 @@ function clearPromptOptimizerStatusTimers(node) {
     node.__h3OptimizerStatusHideTimer = null;
 }
 
-
 function cancelPromptOptimization(node) {
-    if (!node?.__h3OptimizerPending) return false;
-    const requestId = String(node.__h3OptimizerRequestId || "");
+    if (!node?.__h3OptimizerPending) return;
     node.__h3OptimizerRequestId = null;
     node.__h3OptimizerAbortController?.abort?.();
     node.__h3OptimizerAbortController = null;
     node.__h3OptimizerPending = false;
     setPromptOptimizerStatus(node, "idle");
     syncPromptOptimizerButton(node);
-    if (requestId) {
-        void api.fetchApi("/minimax_h3_easy/prompt_optimize/cancel", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ request_id: requestId }),
-        }).catch(() => null);
-    }
-    return true;
 }
 
 function setPromptOptimizerStatus(node, state = "idle", progress = null) {
@@ -6841,7 +6823,7 @@ async function optimizePromptFromEditor(node) {
     resources.forEach((item) => { mediaCounts[item.type] = (mediaCounts[item.type] || 0) + 1; });
     const requestMode = canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE));
     const segmentMode = requestMode === MODE_SEGMENTS;
-    const requestId = createPromptOptimizerRequestId();
+    const requestId = Symbol("h3-prompt-optimizer");
     const abortController = new AbortController();
     node.__h3OptimizerRequestId = requestId;
     node.__h3OptimizerAbortController = abortController;
@@ -6867,7 +6849,6 @@ async function optimizePromptFromEditor(node) {
             segment_seconds: segmentMode ? String(getWidgetValue(node, "segment_seconds", "") || "") : "",
             media_counts: mediaCounts,
             resources,
-            request_id: requestId,
             optimizer_mode: optimizerMode,
         };
         let optimizedPrompt = "";
@@ -11650,55 +11631,21 @@ globalThis.AICG3D_H3 = {
                     : TEXT.optimizerMissing,
             };
         }
-        const targetNode = options.node || null;
-        if (targetNode?.__h3OptimizerPending) {
-            return { ok: false, cancelled: true, error: "提示词优化已取消" };
-        }
-        const requestId = createPromptOptimizerRequestId();
-        const abortController = new AbortController();
-        if (targetNode) {
-            targetNode.__h3OptimizerRequestId = requestId;
-            targetNode.__h3OptimizerAbortController = abortController;
-            targetNode.__h3OptimizerPending = true;
-            targetNode.__h3OptimizerStartedAt = globalThis.performance?.now?.() || Date.now();
-            setPromptOptimizerStatus(targetNode, "loading");
-            syncPromptOptimizerButton(targetNode);
-        }
-        try {
-            const data = await requestPromptOptimization({
-                request_id: requestId,
-                prompt: source,
-                scene_guide: state.scene_guide,
-                prompt_optimizer_language: state.language,
-                mode: String(options.mode || MODE_SEGMENTS),
-                audio_mode: "",
-                seconds: Number(options.seconds || 5) || 5,
-                segment_seconds: String(options.segment_seconds || ""),
-                media_counts: { image: 0, video: 0, audio: 0 },
-                resources: [],
-                optimizer_mode: "whole_sequence",
-            }, abortController.signal);
-            return { ok: true, prompt: String(data?.prompt || "").trim() };
-        } catch (error) {
-            if (abortController.signal.aborted || error?.name === "AbortError") {
-                return { ok: false, cancelled: true, error: "提示词优化已取消" };
-            }
-            throw error;
-        } finally {
-            if (targetNode?.__h3OptimizerRequestId === requestId) {
-                targetNode.__h3OptimizerRequestId = null;
-                targetNode.__h3OptimizerAbortController = null;
-                targetNode.__h3OptimizerPending = false;
-                setPromptOptimizerStatus(targetNode, "idle");
-                syncPromptOptimizerButton(targetNode);
-            }
-        }
+        const data = await requestPromptOptimization({
+            prompt: source,
+            scene_guide: state.scene_guide,
+            prompt_optimizer_language: state.language,
+            mode: String(options.mode || MODE_SEGMENTS),
+            audio_mode: "",
+            seconds: Number(options.seconds || 5) || 5,
+            segment_seconds: String(options.segment_seconds || ""),
+            media_counts: { image: 0, video: 0, audio: 0 },
+            resources: [],
+            optimizer_mode: "whole_sequence",
+        });
+        return { ok: true, prompt: String(data?.prompt || "").trim() };
     },
 
-    /** 停止由其它节点发起的文本优化，并同步中断后端本地模型生成。 */
-    cancelTextOptimization(node) {
-        return cancelPromptOptimization(node);
-    },
     openPromptOptimizerSettings,
 
     /** 用整段文本覆盖某一段的提示词：结构化编辑器、prompt 控件、存档属性一起刷新。 */

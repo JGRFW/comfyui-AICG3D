@@ -529,14 +529,6 @@ function scheduleAutoFill(node) {
 
 async function optimizePromptScript(node, button) {
     const bridge = globalThis.AICG3D_H3;
-    if (node.__aicg3dPromptOptimizePending) {
-        const cancelled = typeof bridge?.cancelTextOptimization === "function"
-            ? bridge.cancelTextOptimization(node)
-            : false;
-        if (button && cancelled) button.name = "■ 正在停止...";
-        if (cancelled) notify("正在停止提示词优化...", "warn");
-        return;
-    }
     const text = String(readWidget(node, "text", "") || "");
     if (!text.trim()) {
         notify("提示词为空。", "warn");
@@ -563,11 +555,9 @@ async function optimizePromptScript(node, button) {
     }
     const oldLabel = button?.name || "✦ 优化提示词";
     if (button) {
-        button.name = "■ 停止优化";
-        button.disabled = false;
-        button.tooltip = "提示词正在优化，点击这里可停止本地模型生成。";
+        button.name = "✦ 正在优化...";
+        button.disabled = true;
     }
-    node.__aicg3dPromptOptimizePending = true;
     try {
         const result = await bridge.optimizeText(text, {
             node,
@@ -575,10 +565,6 @@ async function optimizePromptScript(node, button) {
             seconds: parsed.seconds[0] || defaultSeconds,
             segment_seconds: parsed.seconds.map((value) => String(roundSeconds(value))).join(","),
         });
-        if (result?.cancelled) {
-            notify("已停止提示词优化。", "warn");
-            return;
-        }
         if (!result?.ok || !String(result.prompt || "").trim()) {
             notify(result?.error || "提示词优化失败。", "error");
             return;
@@ -597,18 +583,12 @@ async function optimizePromptScript(node, button) {
         node.setDirtyCanvas?.(true, true);
         app.graph?.setDirtyCanvas?.(true, true);
     } catch (error) {
-        if (error?.name === "AbortError") {
-            notify("已停止提示词优化。", "warn");
-            return;
-        }
         notify(error?.message || error || "提示词优化失败。", "error");
     } finally {
         if (button) {
             button.name = oldLabel;
             button.disabled = false;
-            button.tooltip = "复用全局「提示词优化设置」，优化当前分段文本并保持原段数和时长。";
         }
-        node.__aicg3dPromptOptimizePending = false;
     }
 }
 

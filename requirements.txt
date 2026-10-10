@@ -1,2 +1,3 @@
 # AICG3D 只依赖 ComfyUI 本体与各节点自身的可选依赖（torch / torchaudio / psutil / requests / llama-cpp-python）。
-
+# 13 号无限长视频工作流的最终合成节点需要 FFmpeg；优先使用 imageio-ffmpeg 提供的便携可执行文件。
+imageio-ffmpeg

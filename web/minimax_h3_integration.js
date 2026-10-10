@@ -459,6 +459,8 @@ function createPanel(node) {
     let promptReadOnly = false;
     let promptComposing = false;
     let pendingPromptSnapshot = null;
+    // Media cards steal focus before insertion; keep the editor's last caret.
+    let savedPromptSelection = null;
     const promptHistory = {
         text_keyframes: { undo: [], redo: [] },
         all_reference: { undo: [], redo: [] },
@@ -500,11 +502,25 @@ function createPanel(node) {
         return result.length;
     };
     const selectionOffsets = () => {
+        const limit = promptPlainText.length;
+        const clamp = value => {
+            const number = Number(value);
+            return Math.max(0, Math.min(limit, Number.isFinite(number) ? number : limit));
+        };
         const selection = window.getSelection();
-        if (!selection?.rangeCount || !prompt.contains(selection.anchorNode)) return [promptPlainText.length, promptPlainText.length];
+        if (!selection?.rangeCount || !prompt.contains(selection.anchorNode)) {
+            const fallback = savedPromptSelection || [limit, limit];
+            const start = clamp(Math.min(fallback[0], fallback[1]));
+            const end = clamp(Math.max(fallback[0], fallback[1]));
+            savedPromptSelection = [start, end];
+            return [start, end];
+        }
         const anchor = textOffsetTo(selection.anchorNode, selection.anchorOffset);
         const focus = textOffsetTo(selection.focusNode, selection.focusOffset);
-        return [Math.min(anchor, focus), Math.max(anchor, focus)];
+        const start = clamp(Math.min(anchor, focus));
+        const end = clamp(Math.max(anchor, focus));
+        savedPromptSelection = [start, end];
+        return [start, end];
     };
     const promptSnapshot = () => {
         const [start, end] = selectionOffsets();
@@ -568,6 +584,9 @@ function createPanel(node) {
         const [startNode, startOffset] = locate(start), [endNode, endOffset] = locate(end);
         const range = document.createRange(); range.setStart(startNode, startOffset); range.setEnd(endNode, endOffset);
         selection.removeAllRanges(); selection.addRange(range);
+        const normalizedStart = Math.max(0, Number(start) || 0);
+        const normalizedEnd = Math.max(normalizedStart, Number(end) || normalizedStart);
+        savedPromptSelection = [normalizedStart, normalizedEnd];
     };
     Object.defineProperties(prompt, {
         value: {
@@ -1042,6 +1061,9 @@ function nodeColorToCss(value) {
     prompt.addEventListener("compositionstart", () => { pendingPromptSnapshot ||= promptSnapshot(); promptComposing = true; });
     prompt.addEventListener("compositionend", () => { promptComposing = false; commitPromptEditorInput(); });
     prompt.addEventListener("input", () => { if (!promptComposing) commitPromptEditorInput(); });
+    document.addEventListener("selectionchange", () => {
+        if (document.activeElement === prompt) selectionOffsets();
+    });
     prompt.addEventListener("beforeinput", event => {
         if (prompt.readOnly) return;
         if (["historyUndo", "historyRedo"].includes(event.inputType)) {
@@ -1472,8 +1494,7 @@ function nodeColorToCss(value) {
                 : raw.startsWith("audio ") ? `<Audio ${raw.slice(6)}>`
                 : `<${raw}>`;
         }
-        const a = document.activeElement === prompt ? prompt.selectionStart : prompt.value.length;
-        const b = document.activeElement === prompt ? prompt.selectionEnd : a;
+        const [a, b] = selectionOffsets();
         prompt.setRangeText(tag, a, b, "end");
         renderPromptHighlights();
         promptByMode[state.mode] = prompt.value;
@@ -1484,8 +1505,7 @@ function nodeColorToCss(value) {
         if (upstreamConnected()) return;
         const ordinal = audioOrdinalFor(slot);
         if (media.get(slot)?.muted || !ordinal) return;
-        const a = document.activeElement === prompt ? prompt.selectionStart : prompt.value.length;
-        const b = document.activeElement === prompt ? prompt.selectionEnd : a;
+        const [a, b] = selectionOffsets();
         prompt.setRangeText(`<Audio ${ordinal}>`, a, b, "end"); renderPromptHighlights(); promptByMode[state.mode] = prompt.value; setPromptWidget(node, prompt.value); persistState();
     }
     function ensureReferenceTags() {
@@ -2342,7 +2362,7 @@ function nodeColorToCss(value) {
         item.appendChild(make("div", {}, `${labelFor(slot, entry.kind)}: ${entry.name}`)).className = "ghh3-card-name";
         const remove = make("button", {}, "×"); remove.className = "ghh3-remove"; remove.onclick = e => { e.stopPropagation(); const removed = media.get(slot); media.delete(slot); setMediaWidget(node, slot, ""); syncAudioModeAfterMediaChange(slot); refreshPromptMediaPreviews(removed); persistState(); render(); }; item.appendChild(remove);
         let clickTimer;
-        item.onpointerdown = e => { if (e.target.closest("button")) return; e.preventDefault(); e.stopPropagation(); };
+        item.onpointerdown = e => { if (e.target.closest("button")) return; if (document.activeElement === prompt) selectionOffsets(); e.preventDefault(); e.stopPropagation(); };
         item.onclick = e => { if (e.target.closest("button")) return; e.stopPropagation(); clearTimeout(clickTimer); clickTimer = setTimeout(() => insertTag(entry.kind, slot), 220); };
         item.ondblclick = e => { if (e.target.closest("button")) return; e.stopPropagation(); clearTimeout(clickTimer); if (entry.kind === "video") insertVideoAudioTag(slot); };
         item.onpointerenter = () => { hoverPasteSlot = slot; };
@@ -2475,6 +2495,7 @@ function nodeColorToCss(value) {
     window.addEventListener("drop", captureMaterialDrop, true);
     function switchMode(nextMode) {
         promptByMode[state.mode] = prompt.value;
+        savedPromptSelection = null;
         state.mode = nextMode;
         optimizerBefore = optimizerBeforeByMode[state.mode] ?? null;
         prompt.value = cleanPrompt(promptByMode[state.mode]);

@@ -21,6 +21,14 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
+## 🆕 v1.1.7 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.7.md](RELEASE_NOTES_v1.1.7.md)。
+
+- **资源库点击引用严格跟随光标**：图片、视频和音频标签现在插入到用户最后操作的位置，不再追加到提示词末尾。
+- **兼容隐藏与可见 textarea**：优先使用用户实际点击的编辑框，同时保留原提示词编辑器的选区恢复。
+- **前端入口版本化**：`minimax_h3_easy_ui_v3.js` 强制浏览器重新加载修复后的脚本，避免旧模块缓存。
+
 ## 🆕 v1.1.6 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.6.md](RELEASE_NOTES_v1.1.6.md)。

@@ -709,6 +709,7 @@ let quickCreateCaptureCanvas = null;
 let quickCreateCaptureCleanup = null;
 let activePromptNode = null;
 let activePromptRange = null;
+let lastNativePromptControl = null;
 let lastCapturedDropAt = 0;
 let deferredCreateMenuPending = false;
 let deferredCreateMenuToken = 0;
@@ -719,6 +720,25 @@ let nativeSearchSuppressStyle = null;
 let releaseCreateMenuLinkHold = null;
 let nativeThemeWatcherInstalled = false;
 let lastVueNodesMode = null;
+
+function installNativePromptControlTracking() {
+    if (typeof document === "undefined" || document.__h3NativePromptTrackingInstalled) return;
+    document.__h3NativePromptTrackingInstalled = true;
+    const remember = (event) => {
+        const target = event?.target;
+        const control = target?.matches?.("textarea, input")
+            ? target
+            : target?.closest?.("textarea, input") || null;
+        if (control && typeof control.selectionStart === "number") lastNativePromptControl = control;
+    };
+    document.addEventListener("focusin", remember, true);
+    document.addEventListener("pointerdown", remember, true);
+    document.addEventListener("input", remember, true);
+    document.addEventListener("selectionchange", () => {
+        const active = document.activeElement;
+        if (active && typeof active.selectionStart === "number") lastNativePromptControl = active;
+    }, true);
+}
 
 function nodeMatchesClass(node, className, displayName, installedMarker) {
     if (!node) return false;
@@ -4882,15 +4902,71 @@ function placeCaretAtEditorEnd(editor) {
     selection.addRange(range);
 }
 
+function nativeTextControl(widget) {
+    const direct = [widget?.inputEl, widget?.element];
+    const nested = direct.flatMap((element) => [
+        element?.matches?.("textarea, input") ? element : null,
+        element?.querySelector?.("textarea, input") || null,
+    ]);
+    return [...direct, ...nested].find((element) =>
+        element && typeof element.selectionStart === "number" && typeof element.setSelectionRange === "function"
+    ) || null;
+}
+
+function bindNativeTextSelection(node, widget, control) {
+    if (!widget || !control || widget.__a3NativeSelectionControl === control) return;
+    const capture = () => {
+        if (node) activePromptNode = node;
+        const limit = String(widget.value || "").length;
+        const start = Math.max(0, Math.min(limit, Number(control.selectionStart) || 0));
+        const end = Math.max(start, Math.min(limit, Number(control.selectionEnd) || start));
+        widget.__a3NativeSelection = [start, end];
+    };
+    for (const eventName of ["focus", "click", "select", "mouseup", "keyup", "input"]) {
+        control.addEventListener(eventName, capture, true);
+    }
+    widget.__a3NativeSelectionControl = control;
+    capture();
+}
+
 /* 没有富编辑器的节点（例如「视频段落」）把素材引用按官方标签写进 prompt 控件。 */
 function appendMentionTagToWidget(node, option) {
     const widget = getWidget(node, "prompt") || getWidget(node, "创意描述");
     if (!widget) return false;
     const tag = String(option.tag || option.token || "").trim();
     if (!tag) return false;
-    const current = String(widget.value || "");
-    const spacer = current && !/\s$/.test(current) ? " " : "";
-    widget.value = `${current}${spacer}${tag} `;
+    const expected = String(widget.value || "");
+    const direct = nativeTextControl(widget);
+    const last = lastNativePromptControl?.isConnected !== false ? lastNativePromptControl : null;
+    let control = last && String(last.value ?? expected) === expected ? last : null;
+    if (!control && direct && String(direct.value ?? expected) === expected) control = direct;
+    if (!control) control = direct || last;
+    const current = String(control?.value ?? expected);
+    let start = current.length;
+    let end = start;
+    if (control) {
+        bindNativeTextSelection(node, widget, control);
+        const remembered = widget.__a3NativeSelection;
+        const focused = document.activeElement === control;
+        if (!focused && remembered) {
+            start = Math.max(0, Math.min(current.length, Number(remembered[0]) || 0));
+            end = Math.max(start, Math.min(current.length, Number(remembered[1]) || start));
+        } else if (focused) {
+            start = Math.max(0, Math.min(current.length, Number(control.selectionStart) || 0));
+            end = Math.max(start, Math.min(current.length, Number(control.selectionEnd) || start));
+        }
+    }
+    const needsLeadingSpace = start > 0 && !/\s$/.test(current.slice(0, start));
+    const needsTrailingSpace = end < current.length ? !/^\s/.test(current.slice(end)) : true;
+    const insertion = `${needsLeadingSpace ? " " : ""}${tag}${needsTrailingSpace ? " " : ""}`;
+    const next = current.slice(0, start) + insertion + current.slice(end);
+    const caret = start + insertion.length;
+    widget.value = next;
+    if (control) {
+        control.value = next;
+        control.setSelectionRange(caret, caret);
+        widget.__a3NativeSelection = [caret, caret];
+    }
     if (widget._state) widget._state.value = widget.value;
     pushPromptHistory(node);
     node.setDirtyCanvas?.(true, true);
@@ -4900,8 +4976,9 @@ function appendMentionTagToWidget(node, option) {
 }
 
 /**
- * 把一个素材引用写进节点的提示词编辑器。range 为空时写在光标处，
- * 编辑器没有焦点时追加到末尾。原始提示词模式下写入官方标签文本。
+ * 把一个素材引用写进节点的提示词编辑器。range 为空时优先使用实时光标，
+ * 编辑器失焦时使用最后一次光标；没有记录才追加到末尾。
+ * 原始提示词和原生 textarea 都写入官方标签文本。
  */
 function insertMentionOption(node, option, range = null) {
     if (!node || !option) return false;
@@ -10988,6 +11065,7 @@ function install() {
     patchCanvas();
     patchGraphToPrompt();
     patchEditorKeyHandling();
+    installNativePromptControlTracking();
     installNativeThemeWatcher();
     installRenderProgressListener();
     installMediaLoaderClipboardPaste();
@@ -11776,3 +11854,4 @@ globalThis.AICG3D_H3 = {
         return added.length;
     },
 };
+/* cache-bust: v3 prefer the visible textarea caret */

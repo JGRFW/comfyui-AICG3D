@@ -103,9 +103,24 @@ from h3easy import accel as accel_lib
 
 
 MODE_IMAGE = "image"
+MODE_T2VA = "T2VA"
+MODE_I2VA = "I2VA"
+MODE_FL2VA = "FL2VA"
+MODE_L2VA = "L2VA"
 MODE_REFERENCE = "reference"
 MODE_DIGITAL_HUMAN = "digital_human"
 MODE_SEGMENTS = "context_segments"
+KEYFRAME_GENERATION_MODES = (MODE_IMAGE, MODE_I2VA, MODE_FL2VA, MODE_L2VA)
+REFERENCE_GENERATION_MODES = (MODE_REFERENCE, MODE_DIGITAL_HUMAN)
+GENERATION_MODE_CHOICES = [
+    MODE_REFERENCE,
+    MODE_T2VA,
+    MODE_I2VA,
+    MODE_FL2VA,
+    MODE_L2VA,
+    MODE_IMAGE,
+    MODE_DIGITAL_HUMAN,
+]
 CONTEXT_AUDIO_GENERATED = "generated"
 CONTEXT_AUDIO_DIGITAL_HUMAN = MODE_DIGITAL_HUMAN
 KEYFRAME_FIRST = "first"
@@ -739,6 +754,36 @@ def _prompt_guide_manifest() -> dict[str, Any]:
     return prompt_guide_lib.manifest()
 
 
+def _normalize_generation_mode(mode: Any) -> str:
+    raw = str(mode or MODE_IMAGE).strip()
+    key = raw.casefold()
+    aliases = {
+        "t2va": MODE_T2VA,
+        "t2va 纯文本": MODE_T2VA,
+        "text to video": MODE_T2VA,
+        "i2va": MODE_I2VA,
+        "i2va 首帧参考": MODE_I2VA,
+        "image to video": MODE_I2VA,
+        "fl2va": MODE_FL2VA,
+        "fl2va 首尾帧参考": MODE_FL2VA,
+        "first and last frame": MODE_FL2VA,
+        "l2va": MODE_L2VA,
+        "l2va 尾帧参考": MODE_L2VA,
+        "last frame": MODE_L2VA,
+        "image": MODE_IMAGE,
+        "图生或首尾帧": MODE_IMAGE,
+        "reference": MODE_REFERENCE,
+        "ref2va": MODE_REFERENCE,
+        "ref2va 全能参考（推荐）": MODE_REFERENCE,
+        "ref2va 全能参考(推荐)": MODE_REFERENCE,
+        "参考生视频": MODE_REFERENCE,
+        "digital_human": MODE_DIGITAL_HUMAN,
+        "数字人": MODE_DIGITAL_HUMAN,
+        "context_segments": MODE_SEGMENTS,
+    }
+    return aliases.get(key, raw)
+
+
 def _prompt_guide_bundle(
     scene_guide: str,
     mode: str,
@@ -750,6 +795,7 @@ def _prompt_guide_bundle(
 ) -> str:
     general = prompt_guide_lib.general_entry()
     language = _normalize_optimizer_language(language)
+    mode = _normalize_generation_mode(mode)
     scene_guide = prompt_guide_lib.resolve(scene_guide)
     if not _prompt_scene_guide_allowed(scene_guide, language):
         scene_guide = prompt_guide_lib.GENERAL_ONLY_ID
@@ -784,7 +830,7 @@ def _prompt_guide_bundle(
         title = "H3 GENERAL PROMPT GUIDE" if language == PROMPT_OPTIMIZER_LANGUAGE_EN else "H3 中文通用提示词规则"
         blocks.append(f"=== {title} ===\n" + _read_prompt_guide_text(general_path))
     # 提示词没有引用素材时改用基础指南，避免模型把素材包里的东西写成引用。
-    reference_selected = mode in (MODE_REFERENCE, MODE_DIGITAL_HUMAN) and reference_mode
+    reference_selected = mode in REFERENCE_GENERATION_MODES and reference_mode
     base_paths = general.get("base_reference_by_language") if isinstance(general.get("base_reference_by_language"), dict) else {}
     ref_paths = general.get("ref_reference_by_language") if isinstance(general.get("ref_reference_by_language"), dict) else {}
     base_path = str(base_paths.get(language) or general.get("base_reference") or "").strip()
@@ -1722,6 +1768,54 @@ def _media_counts_from_kwargs(kwargs: Mapping[str, Any]) -> dict[str, int]:
     return counts
 
 
+def _optimizer_generation_mode_rules(mode: str, media_counts: Mapping[str, int]) -> str:
+    mode = _normalize_generation_mode(mode)
+    image_count = max(0, int(media_counts.get("image", 0) or 0))
+
+    if mode == MODE_T2VA:
+        return (
+            "\n\n=== ACTIVE H3 TASK MODE: T2VA (TEXT-ONLY) ===\n"
+            "This request is text-to-video. Do not output first-frame, last-frame, or media-alignment sentences. "
+            "Do not use <Picture N>, <Video N>, or <Audio N> tags. Build the complete audiovisual timeline only from the user's text."
+        )
+    if mode == MODE_I2VA:
+        return (
+            "\n\n=== ACTIVE H3 TASK MODE: I2VA (FIRST FRAME) ===\n"
+            f"The connected image guide count is {image_count}. Treat the image as the target video's first frame, not as a numbered reference asset. "
+            "Begin the action and composition from that image state, then develop forward. "
+            "Do not add reference-analysis fields unless the user explicitly supplied <Picture N> tags."
+        )
+    if mode == MODE_FL2VA:
+        return (
+            "\n\n=== ACTIVE H3 TASK MODE: FL2VA (FIRST AND LAST FRAME) ===\n"
+            f"The connected image guide count is {image_count}. Treat image 1 as the first frame and image 2 as the last frame. "
+            "Describe one continuous, physically credible path from the first frame to the last frame. "
+            "The final generated moment must land on the last-frame state. Do not use reference-analysis fields unless the user explicitly supplied <Picture N> tags."
+        )
+    if mode == MODE_L2VA:
+        return (
+            "\n\n=== ACTIVE H3 TASK MODE: L2VA (LAST FRAME) ===\n"
+            f"The connected image guide count is {image_count}. Treat the image as the target video's last frame, not as a numbered reference asset. "
+            "Infer a plausible opening state and build a path that converges exactly to that image at the end. "
+            "Do not add reference-analysis fields unless the user explicitly supplied <Picture N> tags."
+        )
+    if mode == MODE_IMAGE:
+        return (
+            "\n\n=== ACTIVE H3 TASK MODE: LEGACY IMAGE / FIRST-LAST FRAME ===\n"
+            f"The connected image guide count is {image_count}. Use keyframe semantics: one image follows the selected first/last role; "
+            "two images are first frame then last frame. Do not treat keyframes as numbered reference assets unless the user explicitly supplied reference tags."
+        )
+    if mode == MODE_REFERENCE:
+        return (
+            "\n\n=== ACTIVE H3 TASK MODE: Ref2VA (FULL REFERENCE) ===\n"
+            "Use the full-reference contract: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music, in that order when reference media is actually used. "
+            "Keep every <Picture N>, <Video N>, and <Audio N> label resolvable and purposeful. If no media is actually bound, fall back to a normal text-to-video prompt instead of inventing references."
+        )
+    if mode == MODE_DIGITAL_HUMAN:
+        return "\n\n=== ACTIVE H3 TASK MODE: DIGITAL HUMAN ===\nThe connected audio is the locked performance track; describe visual performance and lip sync without adding a second soundtrack."
+    return ""
+
+
 def _optimizer_system_prompt(
     scene_guide: str,
     mode: str,
@@ -1733,6 +1827,7 @@ def _optimizer_system_prompt(
     output_language: str = "",
     user_prompt: str = "",
 ) -> str:
+    mode = _normalize_generation_mode(mode)
     has_media_references = _optimizer_prompt_has_references(user_prompt)
     prompt = _prompt_guide_bundle(
         scene_guide,
@@ -1768,6 +1863,13 @@ def _optimizer_system_prompt(
             "Never add a reference label, a subject_definitions entry, or a retention_analysis item for an attached asset that the user's original prompt does not mention. "
             "Runtime media binding follows the reference labels of the optimized prompt, so inventing a label changes which assets the render actually uses."
         )
+    elif mode in KEYFRAME_GENERATION_MODES and int(media_counts.get("image", 0) or 0) > 0:
+        prompt += (
+            "\n\n=== KEYFRAME INPUT RULE (HIGHEST PRIORITY) ===\n"
+            "The connected image is a first-frame, last-frame, or first-and-last-frame guide, not a numbered reference asset. "
+            "Do not add <Picture N> tags, subject_definitions, or retention_analysis unless the user explicitly wrote media reference tags. "
+            "Describe how the visible action proceeds from or converges to the keyframe, using only details that are explicit in the user's request."
+        )
     else:
         prompt += (
             "\n\n=== NO-REFERENCE OUTPUT RULE (HIGHEST PRIORITY) ===\n"
@@ -1777,6 +1879,7 @@ def _optimizer_system_prompt(
             "no reference numbering, and never claim that a reference image, video, audio, or asset is used. "
             "Keep every shot, camera, lighting, timing, sound, dialogue, and style detail from the user's own words."
         )
+    prompt += _optimizer_generation_mode_rules(mode, media_counts)
     language_section = PROMPT_OPTIMIZER_LANGUAGE_SECTIONS.get(
         _prompt_optimizer_language_key({"output_language": output_language})
     )
@@ -2496,7 +2599,7 @@ class MiniMaxH3PromptOptimizer:
         return {
             "required": {
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
-                "mode": ([MODE_IMAGE, MODE_REFERENCE, MODE_DIGITAL_HUMAN], {"default": MODE_IMAGE}),
+                "mode": (GENERATION_MODE_CHOICES, {"default": MODE_REFERENCE, "tooltip": "Ref2VA 综合参考；T2VA 纯文本；I2VA 单张首帧；FL2VA 首尾两帧；L2VA 单张尾帧；数字人锁定素材音频。"}),
                 "seconds": ("FLOAT", {"default": 5.0, "min": MIN_SECONDS, "max": MAX_SECONDS, "step": 0.1}),
                 "scene_guide": (choices, {"default": "none"}),
                 "api_format": (["openai", "responses", "gemini", "ollama"], {"default": "openai"}),
@@ -5899,7 +6002,7 @@ class MiniMaxH3Easy:
     FUNCTION = "generate"
     RETURN_TYPES = ("MODEL", "MINIMAX_H3_CONTEXT")
     RETURN_NAMES = ("model", "h3_context")
-    DESCRIPTION = "One MiniMax H3 node for text, image, reference-video, and digital-human workflows."
+    DESCRIPTION = "One MiniMax H3 node for T2VA, I2VA, FL2VA, L2VA, Ref2VA, and digital-human workflows."
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -5920,7 +6023,7 @@ class MiniMaxH3Easy:
         return {
             "required": {
                 "h3_bundle": ("MINIMAX_H3_BUNDLE",),
-                "mode": ([MODE_IMAGE, MODE_REFERENCE, MODE_DIGITAL_HUMAN], {"default": MODE_IMAGE}),
+                "mode": (GENERATION_MODE_CHOICES, {"default": MODE_REFERENCE, "tooltip": "Ref2VA 综合参考；T2VA 纯文本；I2VA 单张首帧；FL2VA 首尾两帧；L2VA 单张尾帧；数字人锁定素材音频。"}),
                 "prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": ""}),
                 "resolution": (list(RESOLUTIONS), {"default": RESOLUTION_480}),
                 "aspect_ratio": (list(ASPECT_RATIOS), {"default": ASPECT_WIDESCREEN}),
@@ -5969,10 +6072,27 @@ class MiniMaxH3Easy:
         return False
 
     @staticmethod
-    def _keyframes(items, role):
+    def _keyframes(items, role, mode=MODE_IMAGE):
+        mode = _normalize_generation_mode(mode)
         images = [item.value for item in items if item.media_type == "image"]
         if any(item.media_type != "image" for item in items):
-            raise ValueError("Image mode accepts image resources only")
+            raise ValueError(f"{mode} accepts image resources only")
+        if mode == MODE_T2VA:
+            if images:
+                raise ValueError("T2VA is text-only; disconnect image, video, and audio media or choose a keyframe/reference mode")
+            return None, None
+        if mode == MODE_I2VA:
+            if len(images) != 1:
+                raise ValueError("I2VA needs exactly one first-frame image")
+            return images[0], None
+        if mode == MODE_FL2VA:
+            if len(images) != 2:
+                raise ValueError("FL2VA needs exactly two images: first frame then last frame")
+            return images[0], images[1]
+        if mode == MODE_L2VA:
+            if len(images) != 1:
+                raise ValueError("L2VA needs exactly one last-frame image")
+            return None, images[0]
         if len(images) > 2:
             raise ValueError("Image mode accepts at most two images")
         if not images:
@@ -5989,7 +6109,7 @@ class MiniMaxH3Easy:
     def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a MiniMax H3 Aicg Loader bundle")
-        mode = str(mode)
+        mode = _normalize_generation_mode(mode)
         keyframe_role = KEYFRAME_LAST if str(keyframe_role) == KEYFRAME_LAST else KEYFRAME_FIRST
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
         seconds = min(MAX_SECONDS, max(MIN_SECONDS, float(seconds)))
@@ -6034,7 +6154,7 @@ class MiniMaxH3Easy:
             conditioning, latent = _reference_conditioning(h3_bundle, prompt, width, height, length, ref_image_size, items)
             keyframe_sources = ()
         else:
-            first_frame, last_frame = cls._keyframes(items, keyframe_role)
+            first_frame, last_frame = cls._keyframes(items, keyframe_role, mode)
             model = h3_bundle.model_for("fl2va")
             conditioning, latent, keyframe_sources = _empty_image_conditioning(
                 h3_bundle,

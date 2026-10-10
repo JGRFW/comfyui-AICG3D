@@ -12,6 +12,9 @@ import { isOwnH3NodeData, isUpstreamH3NodeId } from "./aicg3d-core.js";
 const NODE_CLASS = "MiniMaxH3Easy";
 const CONTEXT_SEGMENTS_CLASS = "MiniMaxH3EasyContextSegments";
 const SELECTED_VIDEO_CONTEXT_CLASS = "MiniMaxH3EasySelectedVideoContext";
+/* comfyui-AICG3D-SKILLS 主节点：支持从资源库点击素材后插入 创意描述。 */
+const AICG3D_SKILLS_PROMPT_CLASS = "AICG3D_SKILLS_PromptExpander";
+const AICG3D_SKILLS_PROMPT_TITLE = "H3 多参考提示词推理";
 const LOADER_CLASS = "MiniMaxH3EasyLoader";
 const ADAPTER_CLASS = "MiniMaxH3EasyModelAdapter";
 const MEDIA_LOADER_CLASS = "MiniMaxH3EasyMediaLoader";
@@ -112,8 +115,14 @@ const BUILTIN_PROMPT_GUIDES = [
 ];
 const PROMPT_GUIDES = [...BUILTIN_PROMPT_GUIDES];
 const MODE_IMAGE = "image";
+const MODE_T2VA = "T2VA";
+const MODE_I2VA = "I2VA";
+const MODE_FL2VA = "FL2VA";
+const MODE_L2VA = "L2VA";
 const MODE_REFERENCE = "reference";
 const MODE_DIGITAL_HUMAN = "digital_human";
+const KEYFRAME_MODES = new Set([MODE_IMAGE, MODE_I2VA, MODE_FL2VA, MODE_L2VA]);
+const REFERENCE_MODES = new Set([MODE_REFERENCE, MODE_DIGITAL_HUMAN]);
 const MODE_SEGMENTS = "context_segments";
 const CONTEXT_AUDIO_GENERATED = "generated";
 const CONTINUITY_GUIDE = "guide";
@@ -409,10 +418,14 @@ const TEXT = {
 };
 const OPTION_DEFS = {
     mode: {
-        [MODE_IMAGE]: ZH_BROWSER ? "\u56fe\u751f\u6216\u9996\u5c3e\u5e27" : "I2V or First/Last Frame",
-        [MODE_REFERENCE]: ZH_BROWSER ? "\u53c2\u8003\u751f\u89c6\u9891" : "Reference-to-video",
-        [MODE_DIGITAL_HUMAN]: ZH_BROWSER ? "\u6570\u5b57\u4eba" : "Digital Human",
-        [MODE_SEGMENTS]: ZH_BROWSER ? "\u4e0a\u4e0b\u6587\u5206\u6bb5" : "Context Segments",
+        [MODE_REFERENCE]: ZH_BROWSER ? "Ref2VA 全能参考（推荐）" : "Ref2VA Full Reference (Recommended)",
+        [MODE_T2VA]: ZH_BROWSER ? "T2VA 纯文本" : "T2VA Text-only",
+        [MODE_I2VA]: ZH_BROWSER ? "I2VA 首帧参考" : "I2VA First-frame Reference",
+        [MODE_FL2VA]: ZH_BROWSER ? "FL2VA 首尾帧参考" : "FL2VA First/Last-frame Reference",
+        [MODE_L2VA]: ZH_BROWSER ? "L2VA 尾帧参考" : "L2VA Last-frame Reference",
+        [MODE_IMAGE]: ZH_BROWSER ? "图生或首尾帧（兼容）" : "I2V or First/Last Frame (Legacy)",
+        [MODE_DIGITAL_HUMAN]: ZH_BROWSER ? "数字人" : "Digital Human",
+        [MODE_SEGMENTS]: ZH_BROWSER ? "上下文分段" : "Context Segments",
     },
     audio_mode: {
         [CONTEXT_AUDIO_GENERATED]: ZH_BROWSER ? "\u9ed8\u8ba4" : "Default",
@@ -518,18 +531,35 @@ const OPTION_DEFS = {
 };
 const OPTION_ALIASES = {
     mode: {
-        [MODE_IMAGE]: MODE_IMAGE,
-        "\u56fe\u751f\u6216\u9996\u5c3e\u5e27": MODE_IMAGE,
-        "\u56fe\u751f\u6216\u9996\u5c3e\u5e27\u89c6\u9891": MODE_IMAGE,
-        "I2V or First/Last Frame": MODE_IMAGE,
         [MODE_REFERENCE]: MODE_REFERENCE,
-        "\u53c2\u8003\u751f\u89c6\u9891": MODE_REFERENCE,
+        "Ref2VA 全能参考（推荐）": MODE_REFERENCE,
+        "Ref2VA 全能参考(推荐)": MODE_REFERENCE,
+        "Ref2VA Full Reference (Recommended)": MODE_REFERENCE,
+        "参考生视频": MODE_REFERENCE,
         "Reference-to-video": MODE_REFERENCE,
+        [MODE_T2VA]: MODE_T2VA,
+        "T2VA 纯文本": MODE_T2VA,
+        "T2VA Text-only": MODE_T2VA,
+        [MODE_I2VA]: MODE_I2VA,
+        "I2VA 首帧参考": MODE_I2VA,
+        "I2VA First-frame Reference": MODE_I2VA,
+        [MODE_FL2VA]: MODE_FL2VA,
+        "FL2VA 首尾帧参考": MODE_FL2VA,
+        "FL2VA First/Last-frame Reference": MODE_FL2VA,
+        [MODE_L2VA]: MODE_L2VA,
+        "L2VA 尾帧参考": MODE_L2VA,
+        "L2VA Last-frame Reference": MODE_L2VA,
+        [MODE_IMAGE]: MODE_IMAGE,
+        "图生或首尾帧": MODE_IMAGE,
+        "图生或首尾帧视频": MODE_IMAGE,
+        "图生或首尾帧（兼容）": MODE_IMAGE,
+        "I2V or First/Last Frame": MODE_IMAGE,
+        "I2V or First/Last Frame (Legacy)": MODE_IMAGE,
         [MODE_DIGITAL_HUMAN]: MODE_DIGITAL_HUMAN,
-        "\u6570\u5b57\u4eba": MODE_DIGITAL_HUMAN,
+        "数字人": MODE_DIGITAL_HUMAN,
         "Digital Human": MODE_DIGITAL_HUMAN,
         [MODE_SEGMENTS]: MODE_SEGMENTS,
-        "\u4e0a\u4e0b\u6587\u5206\u6bb5": MODE_SEGMENTS,
+        "上下文分段": MODE_SEGMENTS,
         "Context Segments": MODE_SEGMENTS,
     },
     audio_mode: {
@@ -708,6 +738,12 @@ function nodeMatchesClass(node, className, displayName, installedMarker) {
     ];
     return candidates.some((value) => value != null && [className, displayName].includes(String(value)));
 }
+
+function isAICG3DSkillsPromptNode(node) {
+    const rawClass = String(node?.comfyClass ?? node?.type ?? node?.constructor?.comfyClass ?? node?.constructor?.type ?? "");
+    return rawClass === AICG3D_SKILLS_PROMPT_CLASS || String(node?.title || "").includes(AICG3D_SKILLS_PROMPT_TITLE);
+}
+
 
 function isTarget(node) {
     return nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__h3EasyNodeInstalled")
@@ -1200,8 +1236,12 @@ function localizeComboWidget(widget, node = null) {
         definition = isContextSegmentsNode(node)
             ? { [MODE_SEGMENTS]: OPTION_DEFS.mode[MODE_SEGMENTS] }
             : {
-                [MODE_IMAGE]: OPTION_DEFS.mode[MODE_IMAGE],
                 [MODE_REFERENCE]: OPTION_DEFS.mode[MODE_REFERENCE],
+                [MODE_T2VA]: OPTION_DEFS.mode[MODE_T2VA],
+                [MODE_I2VA]: OPTION_DEFS.mode[MODE_I2VA],
+                [MODE_FL2VA]: OPTION_DEFS.mode[MODE_FL2VA],
+                [MODE_L2VA]: OPTION_DEFS.mode[MODE_L2VA],
+                [MODE_IMAGE]: OPTION_DEFS.mode[MODE_IMAGE],
                 [MODE_DIGITAL_HUMAN]: OPTION_DEFS.mode[MODE_DIGITAL_HUMAN],
             };
     }
@@ -1677,13 +1717,20 @@ function playOptimizerDoneSound() {
     } catch {}
 }
 
+function generationMode(node) {
+    return canonicalOption("mode", getWidgetValue(node, "mode", MODE_REFERENCE));
+}
+
 function isReferenceMode(node) {
-    const mode = canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE));
-    return mode === MODE_REFERENCE || mode === MODE_DIGITAL_HUMAN;
+    return REFERENCE_MODES.has(generationMode(node));
 }
 
 function isImageMode(node) {
-    return canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)) === MODE_IMAGE;
+    return KEYFRAME_MODES.has(generationMode(node));
+}
+
+function isTextOnlyMode(node) {
+    return generationMode(node) === MODE_T2VA;
 }
 
 function mediaSplitterGroupForOutput(name) {
@@ -1892,6 +1939,7 @@ function mediaReferenceMode(node) {
 function canUseMediaMentions(node) {
     // 「视频段落」没有 mode 之类的模式控件，写提示词就是在引用素材库里的素材。
     if (isSequenceSegmentNode(node)) return true;
+    if (isAICG3DSkillsPromptNode(node)) return true;
     if (!isTarget(node)) return false;
     return isReferenceMode(node) || isImageMode(node) || isSegmentMode(node)
         || isContextSegmentsNode(node) || isSelectedVideoContextNode(node);
@@ -2002,13 +2050,16 @@ function mediaLimits(node) {
     if (isSelectedVideoContextNode(node)) {
         return { image: MAX_IMAGES, video: MAX_VIDEOS, audio: MAX_AUDIOS, total: MAX_MEDIA };
     }
-    if (canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)) === MODE_DIGITAL_HUMAN) {
+    const mode = generationMode(node);
+    if (mode === MODE_T2VA) return { image: 0, video: 0, audio: 0, total: 0 };
+    if (mode === MODE_I2VA || mode === MODE_L2VA) return { image: 1, video: 0, audio: 0, total: 1 };
+    if (mode === MODE_FL2VA) return { image: 2, video: 0, audio: 0, total: 2 };
+    if (mode === MODE_IMAGE) return { image: 2, video: 0, audio: 0, total: 2 };
+    if (mode === MODE_DIGITAL_HUMAN) {
         return { image: MAX_IMAGES, video: MAX_VIDEOS, audio: 1, total: MAX_MEDIA };
     }
-    if (!isReferenceMode(node)) {
-        return { image: MAX_IMAGES, video: MAX_VIDEOS, audio: MAX_AUDIOS, total: MAX_MEDIA };
-    }
-    return { image: 9, video: 3, audio: 3, total: MAX_MEDIA };
+    if (mode === MODE_REFERENCE) return { image: 9, video: 3, audio: 3, total: MAX_MEDIA };
+    return { image: MAX_IMAGES, video: MAX_VIDEOS, audio: MAX_AUDIOS, total: MAX_MEDIA };
 }
 
 function transportMediaLimit(node) {
@@ -2020,6 +2071,7 @@ function hasVirtualMediaLinks(node) {
 }
 
 function canCreateMediaLoaderFor(node) {
+    if (isTextOnlyMode(node)) return false;
     return isTarget(node) && !hasVirtualMediaLinks(node) && !getNativeMediaBridgeLink(node);
 }
 
@@ -2048,7 +2100,7 @@ function pruneLinksForMode(node) {
 }
 
 function getMediaInputIndex(node) {
-    return node?.inputs?.findIndex((input) => String(input?.name || "") === "media") ?? -1;
+return node?.inputs?.findIndex((input) => ["media", "AICG3D资源库"].includes(String(input?.name || ""))) ?? -1;
 }
 
 function getConnectionPosition(node, isInput, slotIndex) {
@@ -2316,7 +2368,7 @@ function scheduleNativeInputLinkReindex(node) {
 function getNativeMediaBridgeLink(node) {
     // 「视频段落」不是主节点（没有 mode / 虚拟素材线），但它的 media 输入同样是直接接
     // AICG3D 资源库的，所以这里一并放行：素材库点选才能把引用写进段落提示词。
-    if (!isTarget(node) && !isSequenceSegmentNode(node)) return null;
+    if (!isTarget(node) && !isSequenceSegmentNode(node) && !isAICG3DSkillsPromptNode(node)) return null;
     const inputIndex = getMediaInputIndex(node);
     const input = inputIndex >= 0 ? node.inputs?.[inputIndex] : null;
     if (input?.link == null) return null;
@@ -2973,7 +3025,10 @@ function installQuickCreateCapture(canvas) {
             closeNativeNodeSearchSoon();
             return;
         }
-        const allowed = mediaReferenceMode(pending.targetNode) ? ["image", "video", "audio"] : ["image"];
+        const allowed = isTextOnlyMode(pending.targetNode)
+            ? []
+            : mediaReferenceMode(pending.targetNode) ? ["image", "video", "audio"] : ["image"];
+        if (!allowed.length) return;
         if (scheduleDeferredInputCreateMenu(canvas, event, pending, allowed)) {
             lastCapturedDropAt = performance.now();
         }
@@ -4213,7 +4268,7 @@ function appendTextWithBreaks(container, value) {
 
 function renderEditorFromNode(node, force = false) {
     const editor = node?.__h3Editor;
-    const widget = getWidget(node, "prompt");
+    const widget = getWidget(node, "prompt") || getWidget(node, "创意描述");
     if (!editor || !widget || (document.activeElement === editor && !force)) return;
     const doc = node.properties?.[PROMPT_DOC_PROP];
     editor.textContent = "";
@@ -4829,7 +4884,7 @@ function placeCaretAtEditorEnd(editor) {
 
 /* 没有富编辑器的节点（例如「视频段落」）把素材引用按官方标签写进 prompt 控件。 */
 function appendMentionTagToWidget(node, option) {
-    const widget = getWidget(node, "prompt");
+    const widget = getWidget(node, "prompt") || getWidget(node, "创意描述");
     if (!widget) return false;
     const tag = String(option.tag || option.token || "").trim();
     if (!tag) return false;
@@ -5398,6 +5453,7 @@ function syncContextLengthWidget(node) {
 
 function syncModeWidgets(node, { adjustHeight = true } = {}) {
     const advanced = isAdvancedEnabled(node);
+    const activeMode = generationMode(node);
     const contextOptimizerMode = canonicalOption(
         "context_prompt_optimizer_mode",
         getWidgetValue(node, "context_prompt_optimizer_mode", "whole_sequence"),
@@ -5453,9 +5509,9 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "mode"), !contextNode, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "audio_mode"), contextNode, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "fps"), advanced && !segmentContextNode, { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "keyframe_role"), advanced && !isReferenceMode(node) && !segmentContextNode, { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced, { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && isReferenceMode(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "keyframe_role"), advanced && activeMode === MODE_IMAGE && !segmentContextNode, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced && (REFERENCE_MODES.has(activeMode) || KEYFRAME_MODES.has(activeMode)), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && REFERENCE_MODES.has(activeMode), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "aspect_ratio"), !isCustomResolution(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "width"), isCustomResolution(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "height"), isCustomResolution(node), { adjustHeight }),

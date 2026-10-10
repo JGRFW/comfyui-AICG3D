@@ -21,6 +21,17 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
+## 🆕 v1.1.6 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.6.md](RELEASE_NOTES_v1.1.6.md)。
+
+- **五种 H3 任务模式已接入执行链**：`Ref2VA 全能参考（推荐）`、`T2VA 纯文本`、`I2VA 首帧参考`、`FL2VA 首尾帧参考`、`L2VA 尾帧参考`。
+- **模式会真实改变生成行为**：素材数量校验、首尾帧条件、模型角色和提示词优化规则都会随模式切换。
+- **本地模型扩展**：增加 Gemma3 / Gemma4 GGUF 视觉处理器支持，并自动过滤 MTP、draft、assistant 等辅助模型。
+- **本地设置面板重排**：输出语言移到右侧，新增 llama.cpp 依赖提示和协助联系方式。
+- **资源库点击引用**：图片、音频、视频可直接写入 `comfyui-AICG3D-SKILLS` 的“创意描述”提示词框。
+- **提示词优化修复**：支持停止优化、本地模型真正中断，并强化英文输出锁定。
+
 ## 🆕 v1.1.5 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.5.md](RELEASE_NOTES_v1.1.5.md)。

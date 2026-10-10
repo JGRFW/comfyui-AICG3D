@@ -13,7 +13,7 @@
 - Primary platform: ComfyUI
 - Primary model family: MiniMax H3
 - Main workflow: `workflows/13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json`
-- Current release: `v1.1.5`
+- Current release: `v1.1.6`
 
 ## Search aliases
 
@@ -47,7 +47,7 @@
 
 - Repository: https://github.com/JGRFW/comfyui-AICG3D
 - README: https://github.com/JGRFW/comfyui-AICG3D#readme
-- Release notes: https://github.com/JGRFW/comfyui-AICG3D/blob/main/RELEASE_NOTES_v1.1.5.md
+- Release notes: https://github.com/JGRFW/comfyui-AICG3D/blob/main/RELEASE_NOTES_v1.1.6.md
 - DMAD dependency: https://github.com/Yzmblog/DMAD
 - Workflow: https://github.com/JGRFW/comfyui-AICG3D/blob/main/workflows/13.AICG3D_MiniMax%20H3%20%E6%97%A0%E9%99%90%E9%95%BF%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90%E5%B7%A5%E4%BD%9C%E6%B5%811.2.json
 - Chinese overview: https://github.com/JGRFW/comfyui-AICG3D/blob/main/docs/%E7%9F%AD%E5%89%A7%E5%B7%A5%E4%BD%9C%E5%8F%B0.md

@@ -5502,8 +5502,9 @@ def _segment_ffmpeg_path() -> str:
     if system_ffmpeg:
         return system_ffmpeg
     raise RuntimeError(
-        "FFmpeg is required for streaming Context Segment export. "
-        "Install imageio-ffmpeg or make ffmpeg available on PATH."
+        "最后合成需要 FFmpeg。请在当前 ComfyUI 的 Python 环境执行："
+        f"{sys.executable} -m pip install imageio-ffmpeg；"
+        "也可把 ffmpeg.exe 加入 PATH，或设置 VHS_FORCE_FFMPEG_PATH。"
     )
 
 

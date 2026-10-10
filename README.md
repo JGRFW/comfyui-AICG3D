@@ -118,6 +118,18 @@
 2.  **启动服务**：重启 ComfyUI。
 3.  **定位节点**：在右键菜单中找到 **AICG3D** 分类即可开始创作。
 
+### FFmpeg 运行依赖（13 号工作流最后合成必需）
+
+13 号无限长视频工作流的「最终合成视频」需要 FFmpeg。插件会优先使用 `imageio-ffmpeg`，其次查找系统 `PATH` 中的 `ffmpeg.exe`，也可通过 `VHS_FORCE_FFMPEG_PATH` 指定路径。
+
+如果安装后仍提示缺少 FFmpeg，请在当前 ComfyUI 使用的 Python 环境执行：
+
+```powershell
+python.exe -m pip install imageio-ffmpeg
+```
+
+然后重启 ComfyUI。请勿安装到系统 Python 或其他虚拟环境，否则节点仍可能找不到。
+
 > **💡 迁移指南**：由于采用了强制前缀，若您迁移旧版工作流，请将原有的 MiniMaxH3Easy 节点手动替换为对应的 AICG3D_H3_ 节点。
 
 ## 🤝 核心贡献者与致谢 (Core Contributors & Acknowledgements)

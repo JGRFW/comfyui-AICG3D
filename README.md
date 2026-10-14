@@ -21,6 +21,21 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
+## 🆕 v1.1.9 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.9.md](RELEASE_NOTES_v1.1.9.md)。
+
+- **修复资源库白板**：`mediaLoaderResize` 测量后不再恢复旧的隐藏状态，面板会稳定保持可见。
+- **同步可见状态**：同时修复 `hidden`、`type`、`options.hidden`、`options.canvasOnly` 与 `_state`，避免工作流重载后只恢复一半。
+- **强制刷新前端**：入口提升为 `minimax_h3_easy_ui_v4.js`，避免浏览器继续加载旧模块。
+
+## 🆕 v1.1.8 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.8.md](RELEASE_NOTES_v1.1.8.md)。
+
+- 为 13 号无限长视频工作流最终合成补齐 `imageio-ffmpeg` 运行依赖。
+- 缺少 FFmpeg 时给出中文安装提示和 ComfyUI Python 安装命令。
+
 ## 🆕 v1.1.7 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.7.md](RELEASE_NOTES_v1.1.7.md)。

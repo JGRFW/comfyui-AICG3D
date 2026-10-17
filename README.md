@@ -21,7 +21,15 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.10 更新摘要
+## 🆕 v1.1.11 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.11.md](RELEASE_NOTES_v1.1.11.md)。
+
+- **接入 Comfy Registry**：补齐官方节点管理器要求的项目名称、Publisher、显示名称、图标、关键词、仓库和问题反馈地址。
+- **官方管理器可检索**：发布后可搜索 `AICG3D`、`短剧工作台` 或 `MiniMax H3` 找到本插件。
+- **自动发布流程**：配置 Registry API Key 后，更新 `pyproject.toml` 版本即可通过 GitHub Actions 自动发布新版本。
+
+## v1.1.10 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.10.md](RELEASE_NOTES_v1.1.10.md)。
 

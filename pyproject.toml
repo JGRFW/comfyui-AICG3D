@@ -1,20 +1,21 @@
 [project]
 name = "aicg3d-h3-suite"
-description = "把 MiniMax H3 Easy 与 Goohai-MiniMax-H3_Integration 合并成一个 ComfyUI 插件，并补上统一的素材、技能与加载器界面。"
+description = "AICG3D 短剧工作台：面向 MiniMax H3 的无限时长视频、智能分段、独立素材库与无缝合成 ComfyUI 工作流。"
 readme = "README.md"
-keywords = ["短剧工作台", "无限时长视频", "MiniMax H3 工作流", "ComfyUI", "无限长视频", "无限分段生视频", "AI 短剧", "DMAD", "四步加速"]
-version = "1.1.10"
+keywords = ["AICG3D", "短剧工作台", "MiniMax H3", "ComfyUI", "无限时长视频", "无限长视频", "无限分段生视频", "AI 短剧", "AI video", "infinite video", "storyboard", "DMAD", "四步加速"]
+version = "1.1.11"
 license = {text = "GPL-3.0-or-later"}
 dependencies = ["imageio-ffmpeg"]
 
 [project.urls]
 Repository = "https://github.com/JGRFW/comfyui-AICG3D"
 Documentation = "https://github.com/JGRFW/comfyui-AICG3D#readme"
+"Bug Tracker" = "https://github.com/JGRFW/comfyui-AICG3D/issues"
 
 [tool.comfy]
 PublisherId = "aicg3d"
-DisplayName = "AICG3D H3 Suite"
-Icon = ""
+DisplayName = "AICG3D 短剧工作台 - MiniMax H3 无限视频"
+Icon = "https://raw.githubusercontent.com/JGRFW/comfyui-AICG3D/main/assets/aicg3d-icon.svg"
 
 [project.license-files]
 include = ["LICENSE", "THIRD_PARTY_NOTICES.md", "third_party/*.txt"]

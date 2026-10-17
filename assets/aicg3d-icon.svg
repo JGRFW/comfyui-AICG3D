@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="AICG3D">
+  <defs>
+    <linearGradient id="bg" x1="40" y1="24" x2="360" y2="376" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101827"/>
+      <stop offset="1" stop-color="#071018"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="92" y1="82" x2="318" y2="318" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#34e0ff"/>
+      <stop offset="0.52" stop-color="#47f0c1"/>
+      <stop offset="1" stop-color="#ffb13b"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="400" rx="88" fill="url(#bg)"/>
+  <rect x="18" y="18" width="364" height="364" rx="72" fill="none" stroke="#27374a" stroke-width="4"/>
+  <path d="M84 290 162 104h62l78 186h-58l-15-40h-74l-15 40H84Zm70-88h42l-21-58-21 58Z" fill="url(#accent)"/>
+  <path d="M270 116h-58l78 186h42l16-40h-44l-34-82v-64Z" fill="#ffb13b" opacity=".9"/>
+  <path d="m178 238 52 30-52 30v-60Z" fill="#071018"/>
+  <circle cx="323" cy="78" r="19" fill="#34e0ff"/>
+  <path d="M73 326h254" stroke="#2d4056" stroke-width="6" stroke-linecap="round"/>
+</svg>

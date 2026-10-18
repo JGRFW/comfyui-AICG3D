@@ -20,7 +20,7 @@ from aiohttp import web
 
 import aicg3d.prompt_guides as guide_lib, aicg3d.skills as skill_lib
 
-VERSION = "1.1.11"
+VERSION = "1.1.12"
 PROJECT_NAME = "短剧工作台"
 PROJECT_DESCRIPTION = "无限时长视频的 MiniMax H3 ComfyUI 工作流与插件"
 REPOSITORY_URL = "https://github.com/JGRFW/comfyui-AICG3D"
@@ -194,6 +194,31 @@ def list_media(kind: str = "", limit: int = 400) -> list[dict[str, Any]]:
     return entries
 
 
+def _normalized_media_reference(value: Any) -> str:
+    filename = str(value or "").replace("\\", "/").strip().lstrip("/")
+    if not filename or "\x00" in filename:
+        return ""
+    parts = [part for part in filename.split("/") if part and part != "."]
+    if not parts or any(part == ".." for part in parts):
+        return ""
+    return "/".join(parts)
+
+
+def media_reference_exists(filename: str) -> bool:
+    normalized = _normalized_media_reference(filename)
+    if not normalized:
+        return False
+    try:
+        input_root = os.path.realpath(folder_paths.get_input_directory())
+        path = os.path.realpath(
+            folder_paths.get_annotated_filepath(normalized, input_root)
+        )
+        if os.path.commonpath((input_root, path)) != input_root:
+            return False
+        return os.path.isfile(path)
+    except (OSError, ValueError):
+        return False
+
 def _skill_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": item["id"],
@@ -293,6 +318,45 @@ def register_routes() -> bool:
             "files": list_media(request.query.get("kind", ""), limit),
         })
 
+    @routes.post("/aicg3d/api/media/validate")
+    async def aicg3d_media_validate(request):
+        try:
+            payload = await request.json()
+        except (TypeError, ValueError):
+            return web.json_response({"error": "请求内容不是有效 JSON"}, status=400)
+        raw_files = payload.get("files") if isinstance(payload, dict) else None
+        if not isinstance(raw_files, list):
+            return web.json_response({"error": "files 必须是数组"}, status=400)
+
+        checked = []
+        missing = []
+        seen = set()
+        for item in raw_files[:1000]:
+            if not isinstance(item, dict):
+                continue
+            filename = _normalized_media_reference(item.get("filename"))
+            if not filename:
+                continue
+            owner_id = str(item.get("owner_id") or "")
+            kind = str(item.get("kind") or "")
+            key = (owner_id, kind, filename)
+            if key in seen:
+                continue
+            seen.add(key)
+            exists = media_reference_exists(filename)
+            entry = {
+                "owner_id": owner_id,
+                "kind": kind,
+                "filename": filename,
+                "exists": exists,
+            }
+            checked.append(entry)
+            if not exists:
+                missing.append(entry)
+        return web.json_response({
+            "checked": len(checked),
+            "missing": missing,
+        })
     _REGISTERED = True
     return True
 

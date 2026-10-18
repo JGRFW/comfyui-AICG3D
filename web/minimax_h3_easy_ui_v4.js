@@ -272,6 +272,10 @@ const TEXT = {
     mediaLoaderPlay: ZH_BROWSER ? "\u64ad\u653e" : "Play",
     mediaLoaderPause: ZH_BROWSER ? "\u6682\u505c" : "Pause",
     mediaLoaderEmpty: ZH_BROWSER ? "\u6682\u65e0\u5a92\u4f53" : "No media",
+    mediaLoaderMissing: ZH_BROWSER ? "\u7d20\u6750\u7f3a\u5931" : "Missing media",
+    mediaLoaderMissingShort: ZH_BROWSER ? "\u7f3a\u5931" : "Missing",
+    mediaLoaderMissingCheck: ZH_BROWSER ? "\u68c0\u6d4b\u7d20\u6750\u662f\u5426\u7f3a\u5931" : "Check missing media",
+    mediaLoaderCleanMissing: ZH_BROWSER ? "\u6e05\u7406\u7f3a\u5931\u7d20\u6750" : "Remove missing media",
     mediaLoaderLimit: ZH_BROWSER ? "\u5df2\u8fbe\u8be5\u5206\u533a\u4e0a\u9650" : "This section is full",
     mediaLoaderUnsupported: ZH_BROWSER ? "\u53ea\u652f\u6301\u56fe\u7247\u3001\u97f3\u9891\u6216\u89c6\u9891\u6587\u4ef6" : "Only image, audio, and video files are supported",
     outputTitle: ZH_BROWSER ? "MiniMax H3 Aicg \u8f93\u51fa" : "MiniMax H3 Aicg Output",
@@ -8902,6 +8906,7 @@ function openSequenceMediaPopup(node) {
     }
     panel.append(toolbar, groups);
     node.__h3MediaLoaderPanel = panel;
+    node.__h3MediaLoaderTitle = title;
     node.__h3MediaLoaderCount = count;
     const domWidget = node.addDOMWidget("h3_sequence_inline_media", "h3_sequence_inline_media", panel, {
         serialize: false,
@@ -9143,10 +9148,11 @@ function installSequenceActionRow(node) {
         row.append(button);
         return button;
     };
-    makeButton("添加资源库", "neutral", () => addSequenceResourceLibrary(node));
+    node.__h3SequenceResourceButton = makeButton("添加资源库", "neutral", () => addSequenceResourceLibrary(node));
     const nextButton = makeButton("添加下一段", "primary", () => addSequenceNextSegment(node));
     node.__h3SequenceNextButton = nextButton;
     refreshSequenceNextButton(node);
+    refreshSequenceMissingMediaIndicator(node);
     makeButton("删除这一段", "danger", () => deleteSequenceSegment(node));
     let domWidget = null;
     const applyHeight = () => {
@@ -9217,6 +9223,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         mediaLoaderHideStateWidget(getWidget(node, "inline_media_state"));
         installSequenceActionRow(node);
         scheduleSequenceSegmentPromptLayout(node);
+        scheduleMissingMediaValidation({ prompt: false, delay: 1400 });
         scheduleSequenceResourcePropagation(node);
     };
     const originalCreated = nodeType.prototype.onNodeCreated;
@@ -9247,6 +9254,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         const input = this.inputs?.[Number(index)];
         if (input?.name === "media" || input?.name === "previous_segment") {
             scheduleSequenceResourcePropagation(this);
+            scheduleMissingMediaValidation({ prompt: false, delay: 1200 });
         }
         if (input?.name === "previous_segment") refreshSequenceNextButton(previousSequenceSegment(this));
         return result;
@@ -9975,6 +9983,7 @@ function mediaLoaderWriteState(node, state, options = {}) {
     if (options.notify !== false) app.graph?.change?.();
     requestMentionPreviewRefresh();
     if (options.propagate !== false) scheduleSequenceResourcePropagation(node);
+    scheduleMissingMediaValidation({ prompt: false, delay: 1200 });
 }
 
 function mediaStateHasItems(state) {
@@ -9999,6 +10008,228 @@ function sequenceSegmentEffectiveMediaState(node, seen = new Set()) {
     return sequenceSegmentEffectiveMediaState(previousSequenceSegment(node), seen);
 }
 
+function sequenceSegmentOrdinal(node) {
+    let ordinal = 1;
+    const seen = new Set();
+    let current = node;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const previous = previousSequenceSegment(current);
+        if (!previous) break;
+        ordinal += 1;
+        current = previous;
+    }
+    return ordinal;
+}
+
+function sequenceSegmentEffectiveMediaSource(node, seen = new Set()) {
+    if (!isSequenceSegmentNode(node) || seen.has(node)) return null;
+    seen.add(node);
+    if (sequenceSegmentHasOwnMedia(node)) return node;
+    const native = getNativeMediaBridgeLink(node);
+    const loader = native ? app.graph?.getNodeById?.(Number(native.source_id)) : null;
+    if (loader && isMediaLoader(loader) && mediaStateHasItems(mediaLoaderState(loader))) return loader;
+    return sequenceSegmentEffectiveMediaSource(previousSequenceSegment(node), seen);
+}
+
+const MISSING_MEDIA_VALIDATE_ENDPOINT = "/aicg3d/api/media/validate";
+let missingMediaValidationTimer = null;
+let missingMediaValidationGeneration = 0;
+let missingMediaPromptSignature = "";
+
+function refreshMediaLoaderMissingIndicator(node) {
+    const count = Array.isArray(node?.__h3MissingMedia) ? node.__h3MissingMedia.length : 0;
+    if (node?.__h3MediaLoaderTitle) {
+        node.__h3MediaLoaderTitle.textContent = count ? `${TEXT.mediaLoaderAll} · ${TEXT.mediaLoaderMissing} ${count}` : TEXT.mediaLoaderAll;
+    }
+    node?.__h3MediaLoaderPanel?.classList?.toggle("has-missing", count > 0);
+}
+
+function refreshSequenceMissingMediaIndicator(node) {
+    const count = Array.isArray(node?.__h3MissingMedia) ? node.__h3MissingMedia.length : 0;
+    const button = node?.__h3SequenceResourceButton;
+    if (button) {
+        button.textContent = count ? `${TEXT.mediaLoaderMissing} ${count}` : "添加资源库";
+        button.title = count
+            ? node.__h3MissingMedia.map((item) => `${item.kind}: ${item.filename}`).join("\n")
+            : "添加资源库";
+        button.style.borderColor = count ? "#a45151" : "#56657a";
+        button.style.background = count ? "#5b2b2b" : "#273244";
+    }
+    refreshMediaLoaderMissingIndicator(node);
+}
+
+function missingMediaEntryKey(entry) {
+    return `${String(entry?.kind || "")}\u0000${String(entry?.filename || "")}`;
+}
+
+function mediaMissingEntriesForNode(node) {
+    const entries = [];
+    const state = mediaLoaderReadState(node);
+    for (const group of MEDIA_LOADER_GROUPS) {
+        for (const filename of state[group.key] || []) entries.push({ kind: group.type, filename });
+    }
+    return entries;
+}
+
+function clearMissingMediaMarks(nodes) {
+    for (const node of nodes) {
+        delete node.__h3MissingMedia;
+        if (isSequenceSegmentNode(node)) refreshSequenceMissingMediaIndicator(node);
+        if (isMediaLoader(node)) refreshMediaLoaderMissingIndicator(node);
+    }
+}
+
+function removeMissingMediaFromOwner(owner, missing) {
+    if (!owner || !Array.isArray(missing) || !missing.length) return 0;
+    const missingKeys = new Set(missing.map(missingMediaEntryKey));
+    const state = mediaLoaderReadState(owner);
+    let removed = 0;
+    for (const group of MEDIA_LOADER_GROUPS) {
+        state[group.key] = (state[group.key] || []).filter((filename) => {
+            const drop = missingKeys.has(missingMediaEntryKey({ kind: group.type, filename }));
+            if (drop) removed += 1;
+            return !drop;
+        });
+    }
+    if (!removed) return 0;
+    mediaLoaderWriteState(owner, state, isSequenceSegmentNode(owner) ? { inherited: false } : {});
+    if (owner.__h3MediaLoaderPanel) mediaLoaderRender(owner);
+    return removed;
+}
+
+function affectedSequenceOrdinals(owner, segments) {
+    const result = new Set();
+    const ownerId = String(owner?.id ?? "");
+    for (const segment of segments) {
+        let current = segment;
+        const seen = new Set();
+        while (current && !seen.has(current)) {
+            seen.add(current);
+            if (isSequenceSegmentNode(owner) && String(current.id) === ownerId) {
+                result.add(sequenceSegmentOrdinal(segment));
+                break;
+            }
+            if (isMediaLoader(owner) && sequenceSegmentHasOwnMedia(current)) break;
+            const native = getNativeMediaBridgeLink(current);
+            if (isMediaLoader(owner) && String(native?.source_id ?? "") === ownerId) {
+                result.add(sequenceSegmentOrdinal(segment));
+                break;
+            }
+            current = previousSequenceSegment(current);
+        }
+    }
+    return result;
+}
+
+function missingMediaReport(owner, affected, missing) {
+
+    const ordinals = [...new Set(affected)].sort((left, right) => left - right);
+    const scope = isMediaLoader(owner)
+        ? (ordinals.length ? `素材资源库（视频段落 ${ordinals.join("、")}）` : "素材资源库")
+        : `视频段落 ${(ordinals.length ? ordinals : [sequenceSegmentOrdinal(owner)]).join("、")}`;
+    const details = missing.slice(0, 8).map((item) => {
+        const basename = String(item.filename || "").split("/").pop() || item.filename;
+        return `${item.kind === "image" ? TEXT.image : item.kind === "video" ? TEXT.video : TEXT.audio} ${basename}`;
+    });
+    if (missing.length > details.length) details.push(`等 ${missing.length} 个`);
+    return `${scope}：${details.join("、")}`;
+}
+
+async function validateMissingMediaNow({ prompt = true } = {}) {
+    const graph = app.graph;
+    const nodes = graph?._nodes || graph?.nodes || [];
+    const segments = nodes.filter(isSequenceSegmentNode);
+    const ownerMap = new Map();
+    for (const node of nodes) {
+        if (!isMediaLoader(node)) continue;
+        if (mediaStateHasItems(mediaLoaderState(node))) ownerMap.set(String(node.id), node);
+    }
+    for (const node of segments) {
+        if (sequenceSegmentHasOwnMedia(node)) ownerMap.set(String(node.id), node);
+    }
+
+    const files = [];
+    for (const [ownerId, owner] of ownerMap) {
+        for (const entry of mediaMissingEntriesForNode(owner)) files.push({ owner_id: ownerId, ...entry });
+    }
+    if (!files.length) {
+        clearMissingMediaMarks(nodes);
+        missingMediaPromptSignature = "";
+        return [];
+    }
+
+    const generation = ++missingMediaValidationGeneration;
+    let response;
+    try {
+        response = await api.fetchApi(MISSING_MEDIA_VALIDATE_ENDPOINT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ files }),
+        });
+    } catch (error) {
+        console.warn("[AICG3D] 素材缺失检查失败", error);
+        return [];
+    }
+    if (!response?.ok || generation !== missingMediaValidationGeneration) return [];
+    const payload = await response.json().catch(() => ({}));
+    const missing = Array.isArray(payload.missing) ? payload.missing : [];
+
+    clearMissingMediaMarks(nodes);
+    if (!missing.length) {
+        missingMediaPromptSignature = "";
+        return [];
+    }
+
+    const byOwner = new Map();
+    for (const item of missing) {
+        const ownerId = String(item.owner_id || "");
+        if (!byOwner.has(ownerId)) byOwner.set(ownerId, []);
+        byOwner.get(ownerId).push(item);
+    }
+
+    const reports = [];
+    for (const [ownerIdText, ownerMissing] of byOwner) {
+        const owner = ownerMap.get(ownerIdText);
+        if (!owner) continue;
+        const affected = affectedSequenceOrdinals(owner, segments);
+        owner.__h3MissingMedia = ownerMissing;
+        if (isSequenceSegmentNode(owner)) refreshSequenceMissingMediaIndicator(owner);
+        if (isMediaLoader(owner)) refreshMediaLoaderMissingIndicator(owner);
+        if (owner.__h3MediaLoaderPanel) mediaLoaderRender(owner);
+        for (const segment of segments) {
+            if (sequenceSegmentEffectiveMediaSource(segment) === owner) {
+                segment.__h3MissingMedia = ownerMissing;
+                refreshSequenceMissingMediaIndicator(segment);
+                if (segment.__h3MediaLoaderPanel) mediaLoaderRender(segment);
+            }
+        }
+        reports.push({ owner, affected, missing: ownerMissing, text: missingMediaReport(owner, affected, ownerMissing) });
+    }
+
+    const signature = reports.map((item) => item.text).join("\n");
+    if (prompt && signature !== missingMediaPromptSignature) {
+        missingMediaPromptSignature = signature;
+        const message = `检测到工作流里有无法加载的素材：\n\n${reports.map((item) => `• ${item.text}`).join("\n")}\n\n点“确定”会自动移除这些缺失素材；点“取消”则保留红色标记，便于手动替换。`;
+        if (globalThis.confirm?.(message)) {
+            let removed = 0;
+            for (const report of reports) removed += removeMissingMediaFromOwner(report.owner, report.missing);
+            toast(`已清理 ${removed} 个缺失素材引用`, removed ? "ok" : "warn");
+            setTimeout(() => scheduleMissingMediaValidation({ prompt: false }), 500);
+            return missing;
+        }
+    }
+    toast(`素材缺失：${reports.map((item) => item.text).join("；")}`, "warn");
+    return missing;
+}
+
+function scheduleMissingMediaValidation({ prompt = true, delay = 900 } = {}) {
+    if (missingMediaValidationTimer) clearTimeout(missingMediaValidationTimer);
+    missingMediaValidationTimer = setTimeout(() => {
+        missingMediaValidationTimer = null;
+        validateMissingMediaNow({ prompt }).catch((error) => console.warn("[AICG3D] 素材缺失检查异常", error));
+    }, Math.max(0, Number(delay) || 0));
+}
 function sequenceMediaStateValue(state) {
     const normalize = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
     return JSON.stringify({
@@ -10225,10 +10456,13 @@ function mediaLoaderItemPreview(filename, type) {
         thumb.append(duration);
     }
     media.addEventListener("error", () => {
+        const card = thumb.closest?.(".h3-media-loader-card");
+        card?.classList.add("is-missing");
+        if (card) card.dataset.missingLabel = TEXT.mediaLoaderMissing;
         thumb.replaceChildren();
         const fallback = document.createElement("span");
-        fallback.className = "h3-media-loader-preview-fallback";
-        fallback.textContent = type === "video" ? "Video" : "Image";
+        fallback.className = "h3-media-loader-preview-fallback is-missing";
+        fallback.textContent = TEXT.mediaLoaderMissing;
         thumb.append(fallback);
     }, { once: true });
     thumb.append(media);
@@ -10668,6 +10902,12 @@ function mediaLoaderSyncGroup(node, group, state = mediaLoaderReadState(node)) {
     entries.forEach((filename, index) => {
         const card = cards.get(filename) || mediaLoaderCreateCard(node, group, filename);
         mediaLoaderUpdateCard(card, group, filename, index);
+        const missing = (node.__h3MissingMedia || []).some(
+            (item) => String(item.kind || "") === group.type && String(item.filename || "") === filename,
+        );
+        card.classList.toggle("is-missing", missing);
+        if (missing) card.dataset.missingLabel = TEXT.mediaLoaderMissing;
+        else delete card.dataset.missingLabel;
         // Appending an existing card only moves it. Its image/video element stays
         // alive, so reordering another group cannot reload or flash previews.
         list.append(card);
@@ -10685,6 +10925,7 @@ function mediaLoaderRender(node) {
         ? String(total) + "/" + String(capacities.reduce((sum, capacity) => sum + capacity, 0))
         : String(total);
     for (const group of MEDIA_LOADER_GROUPS) mediaLoaderSyncGroup(node, group, state);
+    refreshMediaLoaderMissingIndicator(node);
     mediaLoaderResize(node);
 }
 
@@ -10805,6 +11046,7 @@ function installMediaLoaderStyles() {
     style.textContent = `
       .h3-media-loader-panel { position:relative; display:flex; flex-direction:column; gap:8px; width:100%; height:100%; min-height:0; max-height:100%; flex:1 1 auto; align-self:stretch; box-sizing:border-box; padding:8px; border:1px solid #111; border-radius:6px; background:#222; color:var(--h3-native-widget-text,#ddd); font-size:12px; overflow:hidden; transition:border-color .14s ease, box-shadow .14s ease; }
       .h3-media-loader-panel.is-file-drop-target { border-color:#718ca6; box-shadow:inset 0 0 0 1px rgba(113,140,166,.34); }
+      .h3-media-loader-panel.has-missing { border-color:#a45151; box-shadow:inset 0 0 0 1px rgba(164,81,81,.3); }
       .h3-media-loader-panel.is-file-drop-target::after { content:attr(data-drop-label); position:absolute; inset:8px; z-index:20; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:1px dashed rgba(146,177,207,.62); border-radius:5px; background:rgba(25,28,32,.9); color:#d7e2ec; font-size:12px; font-weight:600; letter-spacing:.01em; pointer-events:none; }
       .h3-media-loader-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:28px; padding-bottom:1px; }
       .h3-media-loader-heading { display:flex; align-items:baseline; gap:7px; min-width:0; }
@@ -10819,6 +11061,8 @@ function installMediaLoaderStyles() {
       .h3-media-loader-empty { display:flex; grid-column:1 / -1; align-items:center; min-height:26px; padding:0 5px; border:1px dashed #3c3c3c; border-radius:4px; color:#6f6f6f; font-size:10px; }
       .h3-media-loader-card { position:relative; display:block; min-width:0; aspect-ratio:1; overflow:visible; border:1px solid #393939; border-radius:5px; background:#161616; cursor:grab; outline:none; transition:border-color .14s ease, background .14s ease, transform .14s ease; }
       .h3-media-loader-card:hover, .h3-media-loader-card:focus-visible { border-color:#6b829b; background:#1a1d20; }
+      .h3-media-loader-card.is-missing { border-color:#c95b5b; background:#2a1515; box-shadow:inset 0 0 0 1px rgba(201,91,91,.35); }
+      .h3-media-loader-card.is-missing::after { content:attr(data-missing-label); position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; border-radius:4px; background:rgba(54,16,16,.82); color:#ffd9d9; font-size:11px; font-weight:700; pointer-events:none; }
       .h3-media-loader-card:active { cursor:grabbing; }
       .h3-media-loader-card.is-dragging { opacity:.4; transform:scale(.96); }
       .h3-media-loader-card.is-drop-target { border-color:#7ea6cb; box-shadow:0 0 0 1px rgba(126,166,203,.45); }
@@ -10830,6 +11074,7 @@ function installMediaLoaderStyles() {
       .h3-media-loader-audio-wave { position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:4px; width:48%; height:42%; }
       .h3-media-loader-audio-wave i { display:block; width:4px; height:var(--h3-audio-bar-height); border-radius:3px; background:#35cdb9; box-shadow:0 0 0 1px rgba(0,0,0,.08); }
       .h3-media-loader-preview-fallback { color:#777; font-size:10px; }
+      .h3-media-loader-preview-fallback.is-missing { color:#ffb4b4; font-weight:700; }
       .h3-media-loader-card.is-audio::after { content:""; position:absolute; inset:48% 0 0; border-radius:0 0 4px 4px; pointer-events:none; background:linear-gradient(180deg,transparent,rgba(0,0,0,.86)); }
       .h3-media-loader-tag { position:absolute; bottom:4px; left:4px; z-index:2; min-width:12px; padding:2px 4px; border-radius:3px; background:rgba(8,8,8,.7); color:#e7e7e7; font-size:9px; line-height:1.15; text-align:center; font-variant-numeric:tabular-nums; pointer-events:none; }
       .h3-media-loader-duration { position:absolute; top:4px; right:4px; z-index:3; padding:2px 4px; border-radius:3px; background:rgba(8,8,8,.72); color:#f1f1f1; font-size:9px; line-height:1.15; font-variant-numeric:tabular-nums; text-shadow:0 1px 2px rgba(0,0,0,.45); pointer-events:none; }
@@ -10922,6 +11167,7 @@ function installMediaLoaderNode(nodeType, nodeData) {
             groups.append(section);
         }
         node.__h3MediaLoaderPanel = panel;
+        node.__h3MediaLoaderTitle = title;
         const domWidget = node.addDOMWidget("h3_media_loader", "h3_media_loader", panel, {
             getValue: () => String(getWidget(node, "media_state")?.value || ""),
             setValue: (value) => { const widget = getWidget(node, "media_state"); if (widget) widget.value = String(value || ""); mediaLoaderRender(node); },
@@ -10937,6 +11183,7 @@ function installMediaLoaderNode(nodeType, nodeData) {
         mediaLoaderRender(node);
         mediaLoaderResize(node);
         repairNodeLayout(node);
+        scheduleMissingMediaValidation({ prompt: false, delay: 1400 });
     };
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3MediaLoader() {
@@ -11647,6 +11894,11 @@ app.registerExtension({
         installSequenceGlobalNode(nodeType, nodeData);
         installNode(nodeType, nodeData);
         installWidgetValueReconcileNode(nodeType, nodeData);
+    },
+    loadedGraphNode(node) {
+        if (isMediaLoader(node) || isSequenceSegmentNode(node)) {
+            scheduleMissingMediaValidation({ prompt: true, delay: 1400 });
+        }
     },
 });
 

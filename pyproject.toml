@@ -3,7 +3,7 @@ name = "aicg3d-h3-suite"
 description = "AICG3D 短剧工作台：面向 MiniMax H3 的无限时长视频、智能分段、独立素材库与无缝合成 ComfyUI 工作流。"
 readme = "README.md"
 keywords = ["AICG3D", "短剧工作台", "MiniMax H3", "ComfyUI", "无限时长视频", "无限长视频", "无限分段生视频", "AI 短剧", "AI video", "infinite video", "storyboard", "DMAD", "四步加速"]
-version = "1.1.11"
+version = "1.1.12"
 license = {text = "GPL-3.0-or-later"}
 dependencies = ["imageio-ffmpeg"]
 

@@ -12052,7 +12052,10 @@ class MiniMaxH3EasySequenceSegment:
         inline_state = str(kwargs.pop("inline_media_state", "") or "").strip()
         inline_items: list[_MediaInput] = []
         if inline_state:
-            inline_bundle = MiniMaxH3EasyMediaLoader().load(inline_state)[0]
+            try:
+                inline_bundle = MiniMaxH3EasyMediaLoader().load(inline_state)[0]
+            except ValueError as exc:
+                raise ValueError(f"视频段落 {index} 的内嵌素材缺失或无法读取：{exc}") from exc
             if not isinstance(inline_bundle, MiniMaxH3MediaBundle):
                 raise ValueError("视频段落的内嵌资源库状态无法解析")
             inline_items = list(inline_bundle.items)

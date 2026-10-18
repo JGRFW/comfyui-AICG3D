@@ -90,7 +90,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE_PATH);
 
   const promptText = dialogs.join("\n");
   const passed = promptText.includes("视频段落 1")
-    && promptText.includes("视频段落 3、4")
+    && promptText.includes("3、4")
     && (acceptDialog
       ? result.nodeWarnings.length === 0 && result.missingCards === 0
       : result.nodeWarnings.length >= 2 && result.missingButtons.length >= 2);

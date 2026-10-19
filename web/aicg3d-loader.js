@@ -230,9 +230,11 @@ function comboOptions(widget, { noneLabel = "不使用" } = {}) {
         : Array.isArray(widget?.options) ? widget.options : [];
     return values.map((value) => {
         const text = String(value);
+        const parts = text.replaceAll("\\", "/").split("/").filter(Boolean);
         return {
             value: text,
             label: isNone(text) ? noneLabel : text,
+            group: parts.length > 1 ? parts.slice(0, -1).join("/") : "",
             keywords: text,
             title: text,
         };

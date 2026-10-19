@@ -507,6 +507,19 @@
 
 .a3-menu-search { margin: 7px; }
 .a3-menu-list { display: flex; flex-direction: column; overflow-y: auto; padding: 0 5px 6px; }
+.a3-menu-section-title { padding: 7px 7px 4px; color: var(--a3-text-faint); font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.a3-folder { flex: 0 0 auto; }
+.a3-folder-summary { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 4px 7px; border-radius: 5px; color: var(--a3-text-dim); cursor: pointer; list-style: none; outline: none; }
+.a3-folder-summary::-webkit-details-marker { display: none; }
+.a3-folder-summary:hover { background: rgba(255,255,255,.045); color: var(--a3-text); }
+.a3-folder.has-active > .a3-folder-summary { color: #cfe0ff; }
+.a3-folder-icon { position: relative; flex: 0 0 auto; width: 14px; height: 10px; margin-top: 2px; border-radius: 2px; background: #d9ab4b; box-shadow: inset 0 -1px 0 rgba(0,0,0,.18); }
+.a3-folder-icon::before { content: ""; position: absolute; left: 1px; top: -3px; width: 6px; height: 4px; border-radius: 2px 2px 0 0; background: #e4bd69; }
+.a3-folder-name { min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.a3-folder-count { margin-left: auto; color: var(--a3-text-faint); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.a3-folder-caret { flex: 0 0 auto; width: 12px; color: var(--a3-text-faint); font-size: 15px; line-height: 1; text-align: center; transition: transform .12s ease; }
+.a3-folder[open] > .a3-folder-summary .a3-folder-caret { transform: rotate(90deg); }
+.a3-folder-children { display: flex; flex-direction: column; gap: 1px; margin-left: 9px; padding-left: 6px; border-left: 1px solid var(--a3-line); }
 
 .a3-option {
     display: flex;
@@ -522,6 +535,7 @@
 .a3-option:hover,
 .a3-option.is-active { background: var(--a3-accent-soft); color: #dbe6ff; }
 .a3-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a3-option-label { flex: 1 1 auto; min-width: 0; }
 .a3-option-img {
     flex: 0 0 auto;
     width: 26px;
@@ -530,7 +544,7 @@
     background: #0e1013;
     object-fit: contain;
 }
-.a3-option-meta { flex: 0 0 auto; margin-left: auto; color: var(--a3-text-faint); font-size: 9.5px; }
+.a3-option-meta { flex: 0 1 auto; max-width: 45%; margin-left: auto; overflow: hidden; color: var(--a3-text-faint); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- 提示条 ---------- */
 .a3-toast {

@@ -21,7 +21,16 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.12 更新摘要
+## 🆕 v1.1.13 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.13.md](RELEASE_NOTES_v1.1.13.md)。
+
+- **模型目录树**：加载器下拉按 `MiniMax`、`Krea2`、`Qwen`、`LTX2.5` 等文件夹分组显示。
+- **LoRA 多级目录**：支持 `Krea2/Krea2-风格` 这类多层文件夹展开选择。
+- **搜索与最近使用保留**：可直接跨目录搜索文件名，也可从最近使用快速选择。
+- **经典界面兼容**：关闭 Nodes 2.0 后同样使用文件夹式选择。
+
+## v1.1.12 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.12.md](RELEASE_NOTES_v1.1.12.md)。
 

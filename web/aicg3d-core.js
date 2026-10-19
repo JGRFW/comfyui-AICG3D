@@ -331,12 +331,152 @@ export function createSelect({ options = [], value = "", placeholder = "未选�
     let menu = null;
     let listBox = null;
 
-    function ordered() {
-        if (!recents.length) return items;
+    const expandedFolders = new Set();
+
+    function valuePathParts(value) {
+        return String(value || "")
+            .replaceAll("\\", "/")
+            .split("/")
+            .map((part) => part.trim())
+            .filter(Boolean);
+    }
+
+    function optionGroupPath(item) {
+        if (item?.group != null) return valuePathParts(item.group).join("/");
+        const parts = valuePathParts(item?.value);
+        return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+    }
+
+    function optionDisplayLabel(item) {
+        const parts = valuePathParts(item?.value);
+        const filename = parts[parts.length - 1] || String(item?.value || "");
+        const label = String(item?.label || filename);
+        const value = String(item?.value || "");
+        return label === value || /[\\/]/.test(label) ? filename : label;
+    }
+
+    function ensureCurrentFolderExpanded() {
+        const active = items.find((item) => String(item.value) === String(current));
+        const group = optionGroupPath(active);
+        if (!group) return;
+        const parts = group.split("/");
+        for (let index = 1; index <= parts.length; index += 1) {
+            expandedFolders.add(parts.slice(0, index).join("/"));
+        }
+    }
+
+    function itemMatches(item, needle) {
+        if (!needle) return true;
+        return `${item.label} ${item.value} ${item.keywords || ""} ${optionGroupPath(item)}`
+            .toLowerCase()
+            .includes(needle);
+    }
+
+    function renderOptionRow(container, item, pathHint = "") {
+        const row = el("div", "a3-option");
+        if (String(item.value) === String(current)) row.classList.add("is-active");
+        if (item.preview) {
+            const img = el("img", "a3-option-img");
+            img.src = item.preview;
+            img.alt = "";
+            img.loading = "lazy";
+            row.append(img);
+        }
+        const label = el("span", "a3-option-label", optionDisplayLabel(item));
+        label.title = item.title || item.label || String(item.value || "");
+        row.append(label);
+        const meta = [pathHint, item.meta].filter(Boolean).join(" · ");
+        if (meta) row.append(el("span", "a3-option-meta", meta));
+        row.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            pick(String(item.value));
+            closeMenus();
+        });
+        container.append(row);
+    }
+
+    function folderTree(source) {
+        const root = { folders: new Map(), files: [] };
+        for (const item of source) {
+            const group = optionGroupPath(item);
+            if (!group) { root.files.push(item); continue; }
+            let node = root;
+            for (const part of group.split("/")) {
+                if (!node.folders.has(part)) node.folders.set(part, { folders: new Map(), files: [] });
+                node = node.folders.get(part);
+            }
+            node.files.push(item);
+        }
+        return root;
+    }
+
+    function folderFileCount(node) {
+        let count = node.files.length;
+        for (const child of node.folders.values()) count += folderFileCount(child);
+        return count;
+    }
+
+    function renderFolder(container, name, node, parentPath) {
+        const path = parentPath ? `${parentPath}/${name}` : name;
+        const details = document.createElement("details");
+        details.className = "a3-folder";
+        details.open = expandedFolders.has(path);
+        const summary = document.createElement("summary");
+        summary.className = "a3-folder-summary";
+        const activeGroup = String(optionGroupPath(items.find((item) => String(item.value) === String(current))) || "");
+        const active = activeGroup === path || activeGroup.startsWith(`${path}/`);
+        if (active) details.classList.add("has-active");
+        summary.append(
+            el("span", "a3-folder-icon"),
+            el("span", "a3-folder-name", name),
+            el("span", "a3-folder-count", String(folderFileCount(node))),
+            el("span", "a3-folder-caret", "\u203a"),
+        );
+        const children = el("div", "a3-folder-children");
+        const folders = [...node.folders.entries()].sort(([left], [right]) => left.localeCompare(right, "zh-CN"));
+        for (const [childName, child] of folders) renderFolder(children, childName, child, path);
+        const files = [...node.files].sort((left, right) => optionDisplayLabel(left).localeCompare(optionDisplayLabel(right), "zh-CN"));
+        for (const item of files) renderOptionRow(children, item);
+        details.append(summary, children);
+        details.addEventListener("toggle", () => {
+            if (details.open) expandedFolders.add(path);
+            else expandedFolders.delete(path);
+            position();
+        });
+        container.append(details);
+    }
+
+    function renderList(query) {
+        if (!listBox) return;
+        const needle = String(query || "").trim().toLowerCase();
+        listBox.textContent = "";
         const pinned = recents
             .map((recent) => items.find((item) => String(item.value) === recent))
             .filter(Boolean);
-        return [...pinned, ...items.filter((item) => !pinned.includes(item))];
+        const filtered = items.filter((item) => itemMatches(item, needle));
+
+        if (needle) {
+            const shown = filtered.slice(0, 300);
+            if (!shown.length) {
+                listBox.append(el("div", "a3-empty", "没有匹配项"));
+                return;
+            }
+            for (const item of shown) renderOptionRow(listBox, item, optionGroupPath(item));
+            return;
+        }
+
+        if (pinned.length) {
+            listBox.append(el("div", "a3-menu-section-title", "最近使用"));
+            for (const item of pinned) renderOptionRow(listBox, item, optionGroupPath(item));
+        }
+        const pinnedSet = new Set(pinned.map((item) => String(item.value)));
+        const tree = folderTree(items.filter((item) => !pinnedSet.has(String(item.value))));
+        const folders = [...tree.folders.entries()].sort(([left], [right]) => left.localeCompare(right, "zh-CN"));
+        for (const [name, node] of folders) renderFolder(listBox, name, node, "");
+        const rootFiles = [...tree.files].sort((left, right) => optionDisplayLabel(left).localeCompare(optionDisplayLabel(right), "zh-CN"));
+        for (const item of rootFiles) renderOptionRow(listBox, item);
+        if (!listBox.childElementCount) listBox.append(el("div", "a3-empty", "没有匹配项"));
     }
 
     function buildMenu() {
@@ -350,47 +490,10 @@ export function createSelect({ options = [], value = "", placeholder = "未选�
         search.addEventListener("input", () => renderList(search.value));
         search.addEventListener("pointerdown", (event) => event.stopPropagation());
         menu.addEventListener("pointerdown", (event) => event.stopPropagation());
-        document.body.append(menu);
+        ensureCurrentFolderExpanded();
         renderList("");
         setTimeout(() => search.focus(), 0);
         return menu;
-    }
-
-    function renderList(query) {
-        if (!listBox) return;
-        const needle = String(query || "").trim().toLowerCase();
-        listBox.textContent = "";
-        const source = ordered();
-        const filtered = needle
-            ? source.filter((item) => `${item.label} ${item.value} ${item.keywords || ""}`.toLowerCase().includes(needle))
-            : source;
-        const shown = filtered.slice(0, 300);
-        if (!shown.length) {
-            listBox.append(el("div", "a3-empty", "没有匹配项"));
-            return;
-        }
-        for (const item of shown) {
-            const row = el("div", "a3-option");
-            if (String(item.value) === String(current)) row.classList.add("is-active");
-            if (item.preview) {
-                const img = el("img", "a3-option-img");
-                img.src = item.preview;
-                img.alt = "";
-                img.loading = "lazy";
-                row.append(img);
-            }
-            const label = el("span", "", item.label || String(item.value));
-            label.title = item.title || item.label || "";
-            row.append(label);
-            if (item.meta) row.append(el("span", "a3-option-meta", item.meta));
-            row.addEventListener("click", (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                pick(String(item.value));
-                closeMenus();
-            });
-            listBox.append(row);
-        }
     }
 
     /* 列表宽度跟着下拉框一起变：节点被拉宽之后菜单也要跟着变宽，否则 LoRA 那种

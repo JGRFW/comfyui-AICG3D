@@ -21,7 +21,15 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.13 更新摘要
+## 🆕 v1.1.14 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.14.md](RELEASE_NOTES_v1.1.14.md)。
+
+- **Registry 搜索修复**：修复安全扫描标记的 PyTorch 不安全反序列化。
+- **安全加载权重**：非 SafeTensors 的 latent 放大模型改用 `weights_only=True` 加载。
+- **公开管理器可检索**：新版本通过自动扫描后，其他电脑可直接在自定义节点管理器搜索安装。
+
+## v1.1.13 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.13.md](RELEASE_NOTES_v1.1.13.md)。
 

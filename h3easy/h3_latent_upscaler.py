@@ -276,7 +276,7 @@ def _load_state_dict(path: str) -> dict[str, torch.Tensor]:
         from safetensors.torch import load_file
         state = load_file(path, device="cpu")
     else:
-        state = torch.load(path, map_location="cpu", weights_only=False)
+        state = torch.load(path, map_location="cpu", weights_only=True)
     if isinstance(state, dict) and isinstance(state.get("model"), dict):
         state = state["model"]
     if not isinstance(state, dict):

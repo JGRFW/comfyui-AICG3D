@@ -9,6 +9,11 @@
 - 保留 SafeTensors 优先加载路径。
 - 保留对标准 `model` 状态字典和 `upscaler.` 前缀权重的兼容。
 - 版本号提升至 `1.1.14`。
+- 内部 Python 包统一改为 `aicg3d_h3easy` / `aicg3d_h3goohai`，避免与同源插件的通用包名互相抢占。
+- 所有新增 HTTP 路由和前端扩展名收进 AICG3D 唯一命名空间，避免路由覆盖和扩展重名。
+- 分段提示词解析改用正式 ID `AICG3D_H3PromptSegmentSplit`；仅在未检测到旧 PromptSplit 插件时注册旧 ID 兼容别名。
+- 提示词优化设置接口不再把已保存的 API Key 返回浏览器；留空保存会保留旧密钥，并支持显式清除。
+- 清理调试脚本、旧版前端备份和危险批量导入脚本，补齐 `psutil` / `requests` / `aiohttp` 基础依赖声明。
 
 ## 说明
 

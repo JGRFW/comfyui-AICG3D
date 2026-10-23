@@ -54,11 +54,13 @@ function h3NodeId(legacyName) {
     const prefixed = `AICG3D_H3${text.slice("MiniMaxH3Easy".length)}`;
     return globalThis.LiteGraph?.registered_node_types?.[prefixed] ? prefixed : text;
 }const LINKS_PROP = "minimax_h3_virtual_media_links";
+const TEXT_ONLY_MEDIA_LINK_PROP = "minimax_h3_text_only_media_link";
+const LEGACY_TEXT_ONLY_MEDIA_MODES_PROP = "minimax_h3_text_only_media_modes";
 const PROMPT_DOC_PROP = "minimax_h3_prompt_reference_doc";
 const PROMPT_VIEW_PROP = "minimax_h3_prompt_view_mode";
 const PROMPT_AUTO_MARKER_PROP = "minimax_h3_auto_prompt_marker";
-const PROMPT_OPTIMIZER_SETTINGS_ENDPOINT = "/minimax_h3_easy/prompt_optimizer_settings";
-const PROMPT_OPTIMIZER_LOCAL_MODELS_ENDPOINT = "/minimax_h3_easy/prompt_optimizer_local_models";
+const PROMPT_OPTIMIZER_SETTINGS_ENDPOINT = "/aicg3d/h3easy/prompt-optimizer/settings";
+const PROMPT_OPTIMIZER_LOCAL_MODELS_ENDPOINT = "/aicg3d/h3easy/prompt-optimizer/local-models";
 const PROMPT_OPTIMIZER_ENGINE_API = "api";
 const PROMPT_OPTIMIZER_ENGINE_LOCAL = "local";
 const PROMPT_OPTIMIZER_SETTINGS_DEFAULTS = Object.freeze({
@@ -66,6 +68,7 @@ const PROMPT_OPTIMIZER_SETTINGS_DEFAULTS = Object.freeze({
     api_format: "openai",
     api_url: "",
     api_key: "",
+    has_api_key: false,
     model: "",
     language: "en",
     read_media: false,
@@ -192,6 +195,8 @@ const MEDIA_LOADER_GROUPS = Object.freeze([
 const MEDIA_LOADER_INTERNAL_DRAG_TYPE = "application/x-h3-media-loader-type";
 let mediaLoaderInternalDrag = null;
 let mediaLoaderActiveAudio = null;
+let mediaLoaderActiveVideo = null;
+let mediaLoaderActiveTrimOverlay = null;
 const MIN_SECONDS = 0.2;
 const MAX_SECONDS = 30;
 const PROMPT_HISTORY_LIMIT = 120;
@@ -266,6 +271,16 @@ const TEXT = {
     mediaLoaderAudio: ZH_BROWSER ? "\u97f3\u9891" : "Audio",
     mediaLoaderVideos: ZH_BROWSER ? "\u89c6\u9891" : "Videos",
     mediaLoaderUpload: ZH_BROWSER ? "\u4e0a\u4f20\u5a92\u4f53" : "Upload media",
+    mediaLoaderClearAll: ZH_BROWSER ? "\u6e05\u7a7a\u6240\u6709" : "Clear all",
+    mediaLoaderTrim: ZH_BROWSER ? "\u622a\u53d6\u7247\u6bb5" : "Trim clip",
+    mediaLoaderTrimTitle: ZH_BROWSER ? "\u81ea\u7531\u622a\u53d6\u8981\u4f7f\u7528\u7684\u7247\u6bb5" : "Select the clip to use",
+    mediaLoaderTrimStart: ZH_BROWSER ? "\u5f00\u59cb" : "Start",
+    mediaLoaderTrimEnd: ZH_BROWSER ? "\u7ed3\u675f" : "End",
+    mediaLoaderTrimDuration: ZH_BROWSER ? "\u9009\u53d6\u65f6\u957f" : "Selected duration",
+    mediaLoaderTrimPreview: ZH_BROWSER ? "\u64ad\u653e\u9009\u533a" : "Play selection",
+    mediaLoaderTrimFull: ZH_BROWSER ? "\u4f7f\u7528\u5b8c\u6574\u7d20\u6750" : "Use full media",
+    mediaLoaderCancel: ZH_BROWSER ? "\u53d6\u6d88" : "Cancel",
+    mediaLoaderSave: ZH_BROWSER ? "\u4fdd\u5b58\u622a\u53d6" : "Save trim",
     mediaLoaderDrop: ZH_BROWSER ? "\u91ca\u653e\u4ee5\u6dfb\u52a0\u5a92\u4f53" : "Drop to add media",
     mediaLoaderReplace: ZH_BROWSER ? "\u66ff\u6362" : "Replace",
     mediaLoaderRemove: ZH_BROWSER ? "\u5220\u9664" : "Remove",
@@ -321,7 +336,7 @@ const TEXT = {
     audioVae: ZH_BROWSER ? "\u97f3\u9891 VAE" : "Audio VAE",
     nonH3Policy: ZH_BROWSER ? "\u975e H3 \u6743\u91cd\u5904\u7406" : "Non-H3 weight handling",
     noneModel: ZH_BROWSER ? "\u65e0" : "None",
-    outputModel: "Model",
+    outputModel: ZH_BROWSER ? "模型" : "Model",
     outputConditioning: "Conditioning",
     outputLatent: "Latent",
     outputVideoVae: "Video VAE",
@@ -360,6 +375,22 @@ const TEXT = {
     stepsLabel: ZH_BROWSER ? "\u6b65\u6570" : "Steps",
     denoiseLabel: ZH_BROWSER ? "\u964d\u566a" : "Denoise",
     cleanupLabel: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
+    guideImageLabel: ZH_BROWSER ? "\u5f15\u5bfc\u56fe\u7247" : "Guide image",
+    guideAudioLabel: ZH_BROWSER ? "\u5f15\u5bfc\u97f3\u9891" : "Guide audio",
+    guideFrameLabel: ZH_BROWSER ? "\u5f15\u5bfc\u5e27\u4f4d\u7f6e" : "Guide frame index",
+    digitalHumanSelfLiftLabel: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u653e\u5927" : "Latent upscale",
+    digitalHumanCfgLabel: ZH_BROWSER ? "\u653e\u5927 CFG" : "Upscale CFG",
+    digitalHumanTransitionLabel: ZH_BROWSER ? "\u8fc7\u6e21\u6b65\u6570" : "Transition step",
+    digitalHumanLowresScaleLabel: ZH_BROWSER ? "\u4f4e\u6e05\u6bd4\u4f8b" : "Low-res scale",
+    digitalHumanUpscalerLabel: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u653e\u5927\u5668" : "Latent upscaler",
+    digitalHumanLowresModelLabel: ZH_BROWSER ? "\u4f4e\u6e05\u6a21\u578b" : "Low-res model",
+    digitalHumanHighresModelLabel: ZH_BROWSER ? "\u9ad8\u6e05\u6a21\u578b" : "High-res model",
+    digitalHumanRifeLabel: ZH_BROWSER ? "\u6570\u5b57\u4eba RIFE \u667a\u80fd\u63d2\u5e27" : "Digital Human RIFE",
+    digitalHumanRifeModelLabel: ZH_BROWSER ? "RIFE \u6a21\u578b\u68c0\u67e5\u70b9" : "RIFE model checkpoint",
+    digitalHumanRifeMultiplierLabel: ZH_BROWSER ? "RIFE \u63d2\u5e27\u500d\u6570" : "RIFE multiplier",
+    digitalHumanRifeFastLabel: ZH_BROWSER ? "RIFE \u5feb\u901f\u6a21\u5f0f" : "RIFE fast mode",
+    digitalHumanRifeEnsembleLabel: ZH_BROWSER ? "RIFE \u96c6\u6210\u6a21\u5f0f" : "RIFE ensemble",
+    digitalHumanRifeCacheLabel: ZH_BROWSER ? "RIFE N \u5e27\u540e\u6e05\u7f13\u5b58" : "RIFE cache interval",
     renderTitle: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u9ad8\u7ea7\uff09" : "AICG Render (Advanced)",
     renderAccelTitle: ZH_BROWSER ? "AICG-渲染器（高级·加速）" : "AICG Render (Advanced Accelerated)",
     renderVideo: ZH_BROWSER ? "\u6210\u7247\u89c6\u9891" : "Video",
@@ -1310,6 +1341,12 @@ function localizeNodeInstance(node) {
             steps: TEXT.stepsLabel,
             denoise: TEXT.denoiseLabel,
             cleanup_after_run: TEXT.cleanupLabel,
+            guide_frame_idx: TEXT.guideFrameLabel,
+            digital_human_selflift: TEXT.digitalHumanSelfLiftLabel,
+            digital_human_cfg: TEXT.digitalHumanCfgLabel,
+            digital_human_transition_step: TEXT.digitalHumanTransitionLabel,
+            digital_human_lowres_scale: TEXT.digitalHumanLowresScaleLabel,
+            digital_human_upscaler_model: TEXT.digitalHumanUpscalerLabel,
             second_pass_seed: TEXT.pass2SeedLabel,
             second_pass_denoise: TEXT.pass2DenoiseLabel,
             tiled_sampling: TEXT.pass2TiledLabel,
@@ -1332,9 +1369,14 @@ function localizeNodeInstance(node) {
         }
         for (const input of node.inputs || []) {
             if (input.name === "h3_context") setLocalizedSlotLabel(input, TEXT.outputContext);
+            if (input.name === "model") setLocalizedSlotLabel(input, TEXT.outputModel);
             if (input.name === "pass1") setLocalizedSlotLabel(input, TEXT.renderPass1Data);
             if (input.name === "sampler") setLocalizedSlotLabel(input, TEXT.externalSampler);
             if (input.name === "sigmas") setLocalizedSlotLabel(input, TEXT.externalSigmas);
+            if (input.name === "guide_image") setLocalizedSlotLabel(input, TEXT.guideImageLabel);
+            if (input.name === "guide_audio") setLocalizedSlotLabel(input, TEXT.guideAudioLabel);
+            if (input.name === "digital_human_lowres_model") setLocalizedSlotLabel(input, TEXT.digitalHumanLowresModelLabel);
+            if (input.name === "digital_human_highres_model") setLocalizedSlotLabel(input, TEXT.digitalHumanHighresModelLabel);
         }
         for (const output of node.outputs || []) {
             const outputName = String(output.name || "").toLowerCase();
@@ -1573,6 +1615,12 @@ function localizeNodeInstance(node) {
             : TEXT.mainTitle;
     const labels = { mode: TEXT.mode, prompt: TEXT.prompt, selected_video: TEXT.selectedVideoInput, segment_mode: TEXT.selectedVideoSegmentMode, segment_cuts: TEXT.selectedVideoTimeCuts, audio_mode: TEXT.audioMode, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, context_prompt_optimizer_mode: TEXT.contextPromptOptimizerMode, context_prompt_optimizer_concurrency: TEXT.contextPromptOptimizerConcurrency, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode, segment_seconds: TEXT.segmentSeconds, context_length: TEXT.contextLength, continuity_mode: TEXT.continuityMode };
     labels.auto_cuts = TEXT.selectedVideoAutoCuts;
+    labels.digital_human_rife = TEXT.digitalHumanRifeLabel;
+    labels.digital_human_rife_model = TEXT.digitalHumanRifeModelLabel;
+    labels.digital_human_rife_multiplier = TEXT.digitalHumanRifeMultiplierLabel;
+    labels.digital_human_rife_fast_mode = TEXT.digitalHumanRifeFastLabel;
+    labels.digital_human_rife_ensemble = TEXT.digitalHumanRifeEnsembleLabel;
+    labels.digital_human_rife_clear_cache = TEXT.digitalHumanRifeCacheLabel;
     labels.snap_to_latent_grid = TEXT.selectedVideoAutoCutsSnap;
     labels.max_segments = TEXT.selectedVideoAutoCutsMax;
     labels.video_reference = TEXT.selectedVideoVideoReference;
@@ -2419,6 +2467,103 @@ function getNativeMediaBridgeLink(node) {
 
 function getMediaBridgeLink(node) {
     return getNativeMediaBridgeLink(node);
+}
+
+function restoreLegacyTextOnlyMediaModes(node, graph) {
+    const savedModes = node.properties?.[LEGACY_TEXT_ONLY_MEDIA_MODES_PROP];
+    if (!savedModes || typeof savedModes !== "object") return false;
+    let changed = false;
+    for (const [sourceId, savedMode] of Object.entries(savedModes)) {
+        const sourceNode = graph?.getNodeById?.(Number(sourceId));
+        if (!sourceNode) continue;
+        const mode = Number(savedMode);
+        sourceNode.mode = Number.isFinite(mode) ? mode : 0;
+        sourceNode.setDirtyCanvas?.(true, true);
+        changed = true;
+    }
+    delete node.properties[LEGACY_TEXT_ONLY_MEDIA_MODES_PROP];
+    return changed;
+}
+
+function syncTextOnlyMediaSource(node) {
+    if (!isTarget(node)) return false;
+    if (node.__h3SyncingTextOnlyMedia) return false;
+    node.__h3SyncingTextOnlyMedia = true;
+    try {
+        const graph = node.graph || app.graph;
+        const propertyStore = node.properties || (node.properties = {});
+        let changed = restoreLegacyTextOnlyMediaModes(node, graph);
+        if (isTextOnlyMode(node)) {
+            const inputSlot = getMediaInputIndex(node);
+            if (inputSlot < 0) return changed;
+            const currentInput = node.inputs?.[inputSlot];
+            const mediaLink = getNativeMediaBridgeLink(node);
+            if (propertyStore[TEXT_ONLY_MEDIA_LINK_PROP] && currentInput?.link == null) return changed;
+            if (!mediaLink) return changed;
+            const rawLinkId = currentInput?.link;
+            const runtimeLink = getNativeGraphLink(graph, rawLinkId);
+            const sourceNode = graph?.getNodeById?.(Number(mediaLink.source_id));
+            const sourceMode = Number.isFinite(Number(sourceNode?.mode))
+                && Number(sourceNode.mode) !== Number(globalThis.LiteGraph?.NEVER ?? 2)
+                ? Number(sourceNode.mode)
+                : 0;
+            if (!propertyStore[TEXT_ONLY_MEDIA_LINK_PROP]) {
+                propertyStore[TEXT_ONLY_MEDIA_LINK_PROP] = {
+                    source_id: Number(mediaLink.source_id),
+                    source_slot: Number(mediaLink.source_slot ?? runtimeLink?.origin_slot ?? 0),
+                    target_slot: inputSlot,
+                    source_mode: sourceMode,
+                    type: runtimeLink?.type || "MINIMAX_H3_MEDIA_BUNDLE",
+                };
+            }
+            if (sourceNode && Number(sourceNode.mode) === Number(globalThis.LiteGraph?.NEVER ?? 2)) {
+                sourceNode.mode = 0;
+                sourceNode.setDirtyCanvas?.(true, true);
+                changed = true;
+            }
+            if (typeof node.disconnectInput === "function") node.disconnectInput(inputSlot);
+            if (node.inputs?.[inputSlot]?.link != null && typeof graph?.removeLink === "function" && rawLinkId != null) {
+                graph.removeLink(rawLinkId);
+            }
+            if (node.inputs?.[inputSlot]) node.inputs[inputSlot].link = null;
+            node.setDirtyCanvas?.(true, true);
+            graph?.setDirtyCanvas?.(true, true);
+            graph?.change?.();
+            return true;
+        }
+        const savedLink = propertyStore[TEXT_ONLY_MEDIA_LINK_PROP];
+        if (!savedLink || typeof savedLink !== "object") {
+            if (changed) {
+                graph?.setDirtyCanvas?.(true, true);
+                graph?.change?.();
+            }
+            return changed;
+        }
+        const sourceNode = graph?.getNodeById?.(Number(savedLink.source_id));
+        const sourceSlot = Number(savedLink.source_slot);
+        const targetSlot = Number(savedLink.target_slot);
+        if (Number.isFinite(sourceSlot) && Number.isFinite(targetSlot)) {
+            if (sourceNode?.connect) {
+                sourceNode.connect(sourceSlot, node, targetSlot);
+                changed = true;
+            } else if (typeof graph?.addLink === "function") {
+                graph.addLink(Number(savedLink.source_id), sourceSlot, node.id, targetSlot, savedLink.type);
+                changed = true;
+            }
+        }
+        if (sourceNode && savedLink.source_mode != null) {
+            const sourceMode = Number(savedLink.source_mode);
+            sourceNode.mode = Number.isFinite(sourceMode) ? sourceMode : 0;
+            sourceNode.setDirtyCanvas?.(true, true);
+        }
+        delete propertyStore[TEXT_ONLY_MEDIA_LINK_PROP];
+        node.setDirtyCanvas?.(true, true);
+        graph?.setDirtyCanvas?.(true, true);
+        graph?.change?.();
+        return changed;
+    } finally {
+        node.__h3SyncingTextOnlyMedia = false;
+    }
 }
 
 function enforceMediaInputExclusivity(node) {
@@ -3322,7 +3467,8 @@ function patchGraphToPrompt() {
             const promptNode = output[String(node.id)];
             if (!promptNode) continue;
             promptNode.inputs ||= {};
-            const mediaBridgeLink = getMediaBridgeLink(node);
+            const textOnlyMode = isTextOnlyMode(node);
+            const mediaBridgeLink = textOnlyMode ? null : getMediaBridgeLink(node);
             if (mediaBridgeLink) promptNode.inputs.media = [String(mediaBridgeLink.source_id), mediaBridgeLink.source_slot];
             else delete promptNode.inputs.media;
             for (let index = 1; index <= transportMediaLimit(node); index += 1) {
@@ -3330,7 +3476,7 @@ function patchGraphToPrompt() {
                 delete promptNode.inputs[`media_type_${index}`];
             }
             if (node.__h3Editor) syncPromptFromEditor(node, false);
-            const runtimeLinks = mediaBridgeLink
+            const runtimeLinks = textOnlyMode || mediaBridgeLink
                 ? []
                 : normalizeLinks(node).filter((link) => Boolean(output[String(link.source_id)]));
             runtimeLinks.forEach((link, index) => {
@@ -3381,7 +3527,9 @@ function patchGraphToPrompt() {
             promptNode.inputs.advanced = asBoolean(getWidgetValue(node, "advanced", false));
             promptNode.inputs.prompt_optimizer_settings = false;
             promptNode.inputs.prompt_optimizer_scene_guide = promptOptimizerGuideForNode(node);
-            promptNode.inputs.prompt_optimizer_resources = JSON.stringify(promptOptimizerResources(node));
+            promptNode.inputs.prompt_optimizer_resources = textOnlyMode
+                ? "[]"
+                : JSON.stringify(promptOptimizerResources(node));
             promptNode.inputs.prompt_optimizer_marker = JSON.stringify(node.properties?.[PROMPT_AUTO_MARKER_PROP] || {});
             promptNode.inputs.prompt_optimizer_prompt_connected = hasPromptConnection;
             if (!isSelectedVideoContextNode(node)) {
@@ -3528,8 +3676,12 @@ function mediaLoaderState(node) {
 }
 
 function mediaLoaderEntryUrl(filename, type) {
-    if (!filename) return "";
-    const params = new URLSearchParams({ filename: String(filename), type: "input" });
+    const normalized = mediaLoaderNormalizeFilename(filename);
+    if (!normalized) return "";
+    const parts = normalized.split("/");
+    const name = parts.pop() || normalized;
+    const params = new URLSearchParams({ filename: name, type: "input" });
+    if (parts.length) params.set("subfolder", parts.join("/"));
     return `/view?${params.toString()}`;
 }
 
@@ -5532,6 +5684,23 @@ function syncContextLengthWidget(node) {
     return changed;
 }
 
+function syncDigitalHumanRifeWidgets(node, { adjustHeight = true } = {}) {
+    if (!nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__h3EasyNodeInstalled")) return false;
+    const digitalHuman = canonicalOption(
+        "mode",
+        getWidgetValue(node, "mode", MODE_IMAGE),
+    ) === MODE_DIGITAL_HUMAN;
+    const enabled = digitalHuman && asBoolean(getWidgetValue(node, "digital_human_rife", false));
+    return [
+        setConditionalWidgetVisible(node, getWidget(node, "digital_human_rife"), digitalHuman, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "digital_human_rife_model"), enabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "digital_human_rife_multiplier"), enabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "digital_human_rife_fast_mode"), enabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "digital_human_rife_ensemble"), enabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "digital_human_rife_clear_cache"), enabled, { adjustHeight }),
+    ].some(Boolean);
+}
+
 function syncModeWidgets(node, { adjustHeight = true } = {}) {
     const advanced = isAdvancedEnabled(node);
     const activeMode = generationMode(node);
@@ -5585,8 +5754,11 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         && selectedSegmentMode !== SELECTED_VIDEO_SEGMENT_WHOLE
         && asBoolean(getWidgetValue(node, "auto_cuts", true));
     const segmentContextNode = contextNode || selectedVideoSegmented;
+    const mediaSourceChanged = syncTextOnlyMediaSource(node);
     const changed = [
+        mediaSourceChanged,
         syncContextLengthWidget(node),
+        syncDigitalHumanRifeWidgets(node, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "mode"), !contextNode, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "audio_mode"), contextNode, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "fps"), advanced && !segmentContextNode, { adjustHeight }),
@@ -5777,6 +5949,7 @@ function normalizePromptOptimizerSettings(value) {
         api_format: apiFormat,
         api_url: String(source.api_url || "").trim(),
         api_key: String(source.api_key || ""),
+        has_api_key: asBoolean(source.has_api_key, false),
         model: String(source.model || "").trim(),
         language,
         prompt_guide_by_language: promptGuideByLanguage,
@@ -5834,8 +6007,10 @@ async function loadPromptOptimizerLocalModels({ force = false } = {}) {
     return promptOptimizerLocalModelsPromise;
 }
 
-async function savePromptOptimizerSettings(value) {
+async function savePromptOptimizerSettings(value, options = {}) {
     const settings = normalizePromptOptimizerSettings(value);
+    if (options.keepApiKey && !settings.api_key.trim()) settings.keep_api_key = true;
+    if (options.clearApiKey) settings.clear_api_key = true;
     const response = await api.fetchApi(PROMPT_OPTIMIZER_SETTINGS_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6325,15 +6500,25 @@ function buildPromptOptimizerSettingsDialog(node) {
     apiKey.type = "password";
     apiKey.autocomplete = "off";
     apiKey.spellcheck = false;
-    apiKey.value = promptOptimizerSettingsCache.api_key;
+    apiKey.value = "";
+    apiKey.placeholder = promptOptimizerSettingsCache.has_api_key
+        ? (ZH_BROWSER ? "已保存，留空保持不变" : "Saved; leave blank to keep it")
+        : (ZH_BROWSER ? "输入 API Key" : "Enter API key");
     const model = document.createElement("input");
     model.className = "h3-optimizer-settings-control";
     model.type = "text";
     model.autocomplete = "off";
     model.value = promptOptimizerSettingsCache.model;
+    const apiKeyClear = document.createElement("input");
+    apiKeyClear.type = "checkbox";
+    apiKeyClear.disabled = !promptOptimizerSettingsCache.has_api_key;
+    const apiKeyClearLabel = document.createElement("label");
+    apiKeyClearLabel.className = "h3-optimizer-settings-check";
+    apiKeyClearLabel.append(apiKeyClear, document.createTextNode(ZH_BROWSER ? " 清除已保存的 API Key" : " Clear saved API key"));
     const apiFormatRow = makePromptOptimizerSettingsRow(TEXT.apiFormat, apiFormat);
     const apiUrlRow = makePromptOptimizerSettingsRow(TEXT.apiUrl, apiUrl);
     const apiKeyRow = makePromptOptimizerSettingsRow(TEXT.apiKey, apiKey);
+    const apiKeyClearRow = makePromptOptimizerSettingsRow("", apiKeyClearLabel);
     const modelRow = makePromptOptimizerSettingsRow(TEXT.apiModel, model);
 
     const localModelSelect = makePromptOptimizerSelect(
@@ -6427,6 +6612,7 @@ function buildPromptOptimizerSettingsDialog(node) {
         apiFormatRow.hidden = local;
         apiUrlRow.hidden = local;
         apiKeyRow.hidden = local;
+        apiKeyClearRow.hidden = local || !promptOptimizerSettingsCache.has_api_key;
         modelRow.hidden = local;
         localModelRow.hidden = !local;
         localDeviceRow.hidden = !local;
@@ -6443,6 +6629,7 @@ function buildPromptOptimizerSettingsDialog(node) {
         apiFormatRow,
         apiUrlRow,
         apiKeyRow,
+        apiKeyClearRow,
         modelRow,
         localModelRow,
         mmprojRow,
@@ -6525,6 +6712,9 @@ function buildPromptOptimizerSettingsDialog(node) {
                 local_device: localDevice.value,
                 optimize_on_run: optimizeOnRun.checked,
                 unload_ollama_after_optimize: ollamaUnload.checked,
+            }, {
+                keepApiKey: !apiKey.value.trim() && promptOptimizerSettingsCache.has_api_key && !apiKeyClear.checked,
+                clearApiKey: apiKeyClear.checked,
             });
             notifyPromptOptimizer(TEXT.settingsSaved, "success");
             close();
@@ -6582,7 +6772,7 @@ function contextSegmentDurations(node, count) {
 }
 
 async function requestPromptOptimization(payload, signal) {
-    const response = await api.fetchApi("/minimax_h3_easy/prompt_optimize", {
+    const response = await api.fetchApi("/aicg3d/h3easy/prompt-optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal,
@@ -8751,7 +8941,49 @@ const SEQUENCE_SEGMENT_WIDGET_LABELS = {
     prompt: TEXT.prompt,
     seconds: TEXT.seconds,
     seed: TEXT.seedLabel,
+    guide_frame_idx: TEXT.guideFrameLabel,
 };
+
+function isSequenceMediaState(value) {
+    let source = value;
+    if (typeof source === "string") {
+        const text = source.trim();
+        if (!text.startsWith("{")) return false;
+        try { source = JSON.parse(text); } catch { return false; }
+    }
+    return Boolean(source && typeof source === "object"
+        && ["images", "audios", "videos"].some((key) => Array.isArray(source[key])));
+}
+
+function repairSequenceSegmentWidgetState(node) {
+    if (!node) return false;
+    const guide = getWidget(node, "guide_frame_idx");
+    const mediaState = getWidget(node, "inline_media_state");
+    if (!guide) return false;
+    let repaired = false;
+    if (isSequenceMediaState(guide.value)) {
+        if (mediaState && !isSequenceMediaState(mediaState.value)) {
+            mediaState.value = guide.value;
+            if (mediaState._state) mediaState._state.value = guide.value;
+        }
+        guide.value = 0;
+        if (guide._state) guide._state.value = 0;
+        repaired = true;
+    } else {
+        const value = Number(guide.value);
+        if (!Number.isFinite(value)) {
+            guide.value = 0;
+            if (guide._state) guide._state.value = 0;
+            repaired = true;
+        }
+    }
+    if (mediaState) mediaLoaderHideStateWidget(mediaState);
+    if (repaired) {
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return repaired;
+}
 
 function sequenceSlotIndex(slots, name) {
     return (slots || []).findIndex((slot) => String(slot?.name || "") === name);
@@ -8868,6 +9100,16 @@ function openSequenceMediaPopup(node) {
     const count = document.createElement("span");
     count.className = "h3-media-loader-count";
     heading.append(title, count);
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "h3-media-loader-clear";
+    clear.textContent = TEXT.mediaLoaderClearAll;
+    clear.title = TEXT.mediaLoaderClearAll;
+    clear.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        mediaLoaderClearAll(node);
+    });
     const upload = document.createElement("button");
     upload.type = "button";
     upload.className = "h3-media-loader-upload";
@@ -8887,7 +9129,11 @@ function openSequenceMediaPopup(node) {
     close.className = "h3-media-loader-upload";
     close.textContent = "收起";
     close.addEventListener("click", () => closeSequenceMediaPopup(node));
-    toolbar.append(heading, upload, close);
+    const actions = document.createElement("div");
+    actions.className = "h3-media-loader-toolbar-actions";
+    actions.append(clear, upload, close);
+    toolbar.append(heading, actions);
+    node.__h3MediaLoaderClear = clear;
     const groups = document.createElement("div");
     groups.className = "h3-media-loader-groups";
     for (const group of MEDIA_LOADER_GROUPS) {
@@ -9093,9 +9339,15 @@ function addSequenceNextSegment(node) {
     return true;
 }
 
+function sequenceWidgetGrid(node) {
+    let element = node?.__h3SequenceActionRow?.element || null;
+    while (element && !element.classList?.contains("lg-node-widgets")) element = element.parentElement;
+    if (element?.classList?.contains("lg-node-widgets")) return element;
+    return node?.__h3DomWidget?.element?.closest?.(".lg-node-widgets") || null;
+}
+
 function applySequenceWidgetGrid(node, resourceOpen = Boolean(node?.__h3InlineMediaPanelWidget)) {
-    const row = node?.__h3SequenceActionRow?.element;
-    const grid = row?.parentElement?.parentElement?.parentElement;
+    const grid = sequenceWidgetGrid(node);
     if (!grid) return false;
     grid.classList.add("h3-sequence-widget-grid");
     grid.classList.toggle("h3-sequence-resource-open", Boolean(resourceOpen));
@@ -9124,8 +9376,8 @@ function installSequenceActionRow(node) {
         style = document.createElement("style");
         style.id = "h3-sequence-action-styles";
         style.textContent = `
-          .h3-sequence-widget-grid{grid-template-rows:minmax(120px,1fr) min-content min-content 32px !important;}
-          .h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(160px,1fr) min-content min-content 32px minmax(0,320px) !important;}
+          .lg-node-widgets.h3-sequence-widget-grid{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px !important;}
+          .lg-node-widgets.h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px minmax(180px,320px) !important;}
         `;
         document.head.append(style);
     }
@@ -9170,7 +9422,7 @@ function installSequenceActionRow(node) {
             host.style.padding = "0";
             host.style.margin = "0";
         }
-        const widgetGrid = row.parentElement?.parentElement?.parentElement;
+        const widgetGrid = sequenceWidgetGrid(node);
         if (widgetGrid) {
             widgetGrid.classList.add("h3-sequence-widget-grid");
             widgetGrid.classList.toggle("h3-sequence-resource-open", Boolean(node.__h3InlineMediaPanelWidget));
@@ -9209,10 +9461,15 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         pruneTransportInputsFromNode(node, { force: true });
         localizeNodeInstance(node);
         localizeSequenceWidgets(node, SEQUENCE_SEGMENT_WIDGET_LABELS);
+        repairSequenceSegmentWidgetState(node);
         for (const input of node.inputs || []) {
             if (input.name === "sequence_config") setLocalizedSlotLabel(input, TEXT.sequenceConfig);
             if (input.name === "previous_segment") setLocalizedSlotLabel(input, TEXT.previousSegment);
             if (input.name === "media") setLocalizedSlotLabel(input, TEXT.inputMedia);
+            if (input.name === "guide_image") setLocalizedSlotLabel(input, TEXT.guideImageLabel);
+            if (input.name === "guide_audio") setLocalizedSlotLabel(input, TEXT.guideAudioLabel);
+            if (input.name === "digital_human_lowres_model") setLocalizedSlotLabel(input, TEXT.digitalHumanLowresModelLabel);
+            if (input.name === "digital_human_highres_model") setLocalizedSlotLabel(input, TEXT.digitalHumanHighresModelLabel);
         }
         const segmentOutput = (node.outputs || [])[0];
         if (String(segmentOutput?.name || "") === "segment") {
@@ -9279,7 +9536,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
 /* 无限段落顺序生成（全局设置）：宽 / 高不再是可填控件，改成在「宽高比」下面只读显示
    当前分辨率 + 宽高比算出来的画布尺寸（跟 Python _canvas_dimensions 同一套算法）。 */
 /* 显存档位与 Python 侧 VRAM_PROFILES 是同一张表：8G 档画布上限 480P、12G 档上限 720P。
-   前端只是把「实际会跑的画布」显示出来，真正的收口在 h3easy/nodes.py。 */
+   前端只是把「实际会跑的画布」显示出来，真正的收口在 aicg3d_h3easy/nodes.py。 */
 const VRAM_TIER_RESOLUTION_CAP = {
     "12G": "720P",
     "8G": "480P",
@@ -9529,18 +9786,29 @@ function installNode(nodeType, nodeData) {
                 this.setDirtyCanvas?.(true, true);
             };
         }
-        const advancedWidget = getWidget(this, "advanced");
-        if (advancedWidget && !advancedWidget.__h3ConditionalCallbackBound) {
-            advancedWidget.__h3ConditionalCallbackBound = true;
-            const originalCallback = advancedWidget.callback;
-            advancedWidget.callback = (value) => {
-                originalCallback?.call(advancedWidget, value);
-                syncModeWidgets(this);
-                repairNodeLayout(this);
-                this.setDirtyCanvas?.(true, true);
-            };
-        }
-        const referenceMentionWidget = getWidget(this, "reference_mention_mode");
+    const advancedWidget = getWidget(this, "advanced");
+    if (advancedWidget && !advancedWidget.__h3ConditionalCallbackBound) {
+        advancedWidget.__h3ConditionalCallbackBound = true;
+        const originalCallback = advancedWidget.callback;
+        advancedWidget.callback = (value) => {
+            originalCallback?.call(advancedWidget, value);
+            syncModeWidgets(this);
+            repairNodeLayout(this);
+            this.setDirtyCanvas?.(true, true);
+        };
+    }
+    const digitalHumanRifeWidget = getWidget(this, "digital_human_rife");
+    if (digitalHumanRifeWidget && !digitalHumanRifeWidget.__h3ConditionalCallbackBound) {
+        digitalHumanRifeWidget.__h3ConditionalCallbackBound = true;
+        const originalCallback = digitalHumanRifeWidget.callback;
+        digitalHumanRifeWidget.callback = (value) => {
+            originalCallback?.call(digitalHumanRifeWidget, value);
+            syncModeWidgets(this);
+            repairNodeLayout(this);
+            this.setDirtyCanvas?.(true, true);
+        };
+    }
+    const referenceMentionWidget = getWidget(this, "reference_mention_mode");
         const swapModeWidget = getWidget(this, "video_reference");
         const replacementTargetWidget = getWidget(this, "replacement_target");
         if (replacementTargetWidget && !replacementTargetWidget.__h3ConditionalCallbackBound) {
@@ -9686,6 +9954,8 @@ function installNode(nodeType, nodeData) {
             globalThis.requestAnimationFrame?.(() => syncPromptExternalConnectionState(this));
         }
         if (connected && !this.__h3VirtualWireClearing && /^media(?:_\d+)?$/i.test(String(input?.name || ""))) {
+            syncTextOnlyMediaSource(this);
+            if (this.inputs?.[inputIndex]?.link == null) return result;
             enforceMediaInputExclusivity(this);
             scheduleNativeMediaConnectionConversion(this, inputIndex, linkInfo);
         }
@@ -9958,12 +10228,34 @@ function mediaLoaderReadState(node) {
     };
 }
 
+function mediaLoaderTrimMapFromRawState(rawState) {
+    const result = { image: {}, audio: {}, video: {} };
+    for (const group of MEDIA_LOADER_GROUPS) {
+        for (const entry of rawState?.[group.key] || []) {
+            const trim = {};
+            for (const key of ["start", "end", "duration"]) {
+                const value = Number(entry?.[key]);
+                if (Number.isFinite(value) && value >= 0) trim[key] = value;
+            }
+            if (trim.end != null && trim.end <= (trim.start || 0)) delete trim.end;
+            if (Object.keys(trim).length) result[group.type][entry.filename] = trim;
+        }
+    }
+    return result;
+}
+
+function mediaLoaderSerializedEntry(filename, type, trimMap) {
+    const trim = trimMap?.[type]?.[filename];
+    return trim && Object.keys(trim).length ? { filename, ...trim } : { filename };
+}
+
 function mediaLoaderWriteState(node, state, options = {}) {
-    const unique = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
+    const unique = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => mediaLoaderNormalizeFilename(value)).filter(Boolean))];
+    const trimMap = options.trimMap || mediaLoaderTrimMapFromRawState(options.rawState || mediaLoaderRawState(node));
     const value = JSON.stringify({
-        images: unique(state.images).map((filename) => ({ filename })),
-        audios: unique(state.audios).map((filename) => ({ filename })),
-        videos: unique(state.videos).map((filename) => ({ filename })),
+        images: unique(state.images).map((filename) => mediaLoaderSerializedEntry(filename, "image", trimMap)),
+        audios: unique(state.audios).map((filename) => mediaLoaderSerializedEntry(filename, "audio", trimMap)),
+        videos: unique(state.videos).map((filename) => mediaLoaderSerializedEntry(filename, "video", trimMap)),
     });
     const widget = mediaLoaderStorageWidget(node);
     if (!widget) return;
@@ -10230,12 +10522,12 @@ function scheduleMissingMediaValidation({ prompt = true, delay = 900 } = {}) {
         validateMissingMediaNow({ prompt }).catch((error) => console.warn("[AICG3D] 素材缺失检查异常", error));
     }, Math.max(0, Number(delay) || 0));
 }
-function sequenceMediaStateValue(state) {
-    const normalize = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
+function sequenceMediaStateValue(state, trimMap = null) {
+    const normalize = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => mediaLoaderNormalizeFilename(value)).filter(Boolean))];
     return JSON.stringify({
-        images: normalize(state?.images).map((filename) => ({ filename })),
-        audios: normalize(state?.audios).map((filename) => ({ filename })),
-        videos: normalize(state?.videos).map((filename) => ({ filename })),
+        images: normalize(state?.images).map((filename) => mediaLoaderSerializedEntry(filename, "image", trimMap)),
+        audios: normalize(state?.audios).map((filename) => mediaLoaderSerializedEntry(filename, "audio", trimMap)),
+        videos: normalize(state?.videos).map((filename) => mediaLoaderSerializedEntry(filename, "video", trimMap)),
     });
 }
 
@@ -10247,6 +10539,8 @@ function propagateSequenceResourceLibrary(start) {
     }
     if (!isSequenceSegmentNode(start)) return 0;
     let state = sequenceSegmentEffectiveMediaState(start);
+    const initialStateSource = sequenceSegmentEffectiveMediaSource(start);
+    let trimMap = mediaLoaderTrimMapFromRawState(mediaLoaderRawState(initialStateSource || start));
     let current = start;
     let changed = 0;
     const seen = new Set();
@@ -10254,16 +10548,18 @@ function propagateSequenceResourceLibrary(start) {
         seen.add(current);
         if (sequenceSegmentHasOwnMedia(current)) {
             state = mediaLoaderReadState(current);
+            trimMap = mediaLoaderTrimMapFromRawState(mediaLoaderRawState(current));
         } else {
             const native = getNativeMediaBridgeLink(current);
             const loader = native ? app.graph?.getNodeById?.(Number(native.source_id)) : null;
-            if (loader && isMediaLoader(loader) && mediaStateHasItems(mediaLoaderState(loader))) {
+            if (loader && isMediaLoader(loader)) {
                 state = mediaLoaderReadState(loader);
+                trimMap = mediaLoaderTrimMapFromRawState(mediaLoaderRawState(loader));
             }
             const widget = mediaLoaderStorageWidget(current);
-            const nextValue = sequenceMediaStateValue(state);
-            if (widget && mediaStateHasItems(state) && String(widget.value || "") !== nextValue) {
-                mediaLoaderWriteState(current, state, { inherited: true, propagate: false, notify: false });
+            const nextValue = sequenceMediaStateValue(state, trimMap);
+            if (widget && String(widget.value || "") !== nextValue) {
+                mediaLoaderWriteState(current, state, { inherited: true, trimMap, propagate: false, notify: false });
                 if (current.__h3MediaLoaderPanel) mediaLoaderRender(current);
                 changed += 1;
             }
@@ -10402,7 +10698,8 @@ function formatAudioDurationLabel(seconds) {
 
 function mediaLoaderCardTitle(card, filename) {
     const duration = String(card?.__h3MediaLoaderDurationLabel || "").trim();
-    return duration ? `${duration}\u00b7${filename}` : filename;
+    const trim = String(card?.__h3MediaLoaderTrimLabel || "").trim();
+    return `${trim || duration ? `${trim ? `\u2702 ${trim}` : duration} \u00b7 ` : ""}${filename}`;
 }
 
 function mediaLoaderItemPreview(filename, type) {
@@ -10705,11 +11002,20 @@ function mediaLoaderUpdateCard(card, group, filename, index) {
     card.dataset.index = String(index);
     card.dataset.filename = filename;
     card.dataset.mediaType = group.type;
-    card.title = mediaLoaderCardTitle(card, filename);
+    card.title = filename;
     card.querySelector(".h3-media-loader-tag").textContent = String(index + 1);
     const label = card.querySelector(".h3-media-loader-label");
     label.textContent = filename.split(/[\\/]/).pop() || filename;
     label.title = filename;
+    const trimmed = mediaLoaderTrimLabel(mediaLoaderTrimEntry(card.__h3MediaLoaderNode, group.type, filename));
+    card.__h3MediaLoaderTrimLabel = trimmed;
+    const trimBadge = card.querySelector(".h3-media-loader-trim-badge");
+    if (trimBadge) {
+        trimBadge.textContent = trimmed || "";
+        trimBadge.hidden = !trimmed;
+    }
+    card.classList.toggle("is-trimmed", Boolean(trimmed));
+    card.title = mediaLoaderCardTitle(card, filename);
 }
 
 function mediaLoaderCreateCard(node, group, filename) {
@@ -10717,8 +11023,15 @@ function mediaLoaderCreateCard(node, group, filename) {
     card.className = `h3-media-loader-card is-${group.type}`;
     card.draggable = true;
     card.tabIndex = 0;
+    card.__h3MediaLoaderNode = node;
     const preview = mediaLoaderItemPreview(filename, group.type);
     card.append(preview);
+    if (group.type === "audio" || group.type === "video") {
+        const trimBadge = document.createElement("span");
+        trimBadge.className = "h3-media-loader-trim-badge";
+        trimBadge.hidden = true;
+        card.append(trimBadge);
+    }
 
     if (group.type === "audio") {
         const audio = preview.__h3MediaLoaderAudio;
@@ -10761,6 +11074,11 @@ function mediaLoaderCreateCard(node, group, filename) {
                 if (mediaLoaderActiveAudio === audio) mediaLoaderActiveAudio = null;
             });
             audio.addEventListener("ended", syncAudioButton);
+            audio.addEventListener("timeupdate", () => {
+                const trim = mediaLoaderTrimEntry(node, group.type, filename);
+                const trimEnd = Number(trim?.end);
+                if (Number.isFinite(trimEnd) && audio.currentTime >= trimEnd) audio.pause();
+            });
             play.addEventListener("pointerdown", (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -10773,9 +11091,18 @@ function mediaLoaderCreateCard(node, group, filename) {
                     audio.pause();
                     return;
                 }
-                if (audio.ended) audio.currentTime = 0;
+                const trim = mediaLoaderTrimEntry(node, group.type, filename);
+                const trimStart = Math.max(0, Number(trim?.start) || 0);
+                const trimEnd = Number(trim?.end);
+                if (audio.ended || audio.currentTime < trimStart || (Number.isFinite(trimEnd) && audio.currentTime >= trimEnd)) {
+                    audio.currentTime = trimStart;
+                }
                 if (mediaLoaderActiveAudio && mediaLoaderActiveAudio !== audio) {
                     mediaLoaderActiveAudio.pause();
+                }
+                if (mediaLoaderActiveVideo) {
+                    mediaLoaderActiveVideo.pause();
+                    mediaLoaderActiveVideo = null;
                 }
                 mediaLoaderActiveAudio = audio;
                 try {
@@ -10789,6 +11116,63 @@ function mediaLoaderCreateCard(node, group, filename) {
         }
         card.append(play);
     }
+    if (group.type === "video") {
+        const video = preview.querySelector("video");
+        if (video) {
+            const play = document.createElement("button");
+            play.type = "button";
+            play.className = "h3-media-loader-play";
+            play.title = TEXT.mediaLoaderPlay;
+            play.setAttribute("aria-label", TEXT.mediaLoaderPlay);
+            const playState = document.createElement("span");
+            playState.className = "h3-media-loader-play-state";
+            play.append(playState);
+            card.__h3MediaLoaderVideo = video;
+            card.__h3MediaLoaderPlay = play;
+            const syncVideoButton = () => {
+                const playing = !video.paused && !video.ended;
+                playState.textContent = playing ? "\u2161" : "";
+                play.title = playing ? TEXT.mediaLoaderPause : TEXT.mediaLoaderPlay;
+                play.setAttribute("aria-label", play.title);
+                card.classList.toggle("is-playing", playing);
+            };
+            video.addEventListener("play", () => {
+                if (mediaLoaderActiveAudio) mediaLoaderActiveAudio.pause();
+                if (mediaLoaderActiveVideo && mediaLoaderActiveVideo !== video) mediaLoaderActiveVideo.pause();
+                mediaLoaderActiveVideo = video;
+                syncVideoButton();
+            });
+            video.addEventListener("pause", () => {
+                syncVideoButton();
+                if (mediaLoaderActiveVideo === video) mediaLoaderActiveVideo = null;
+            });
+            video.addEventListener("ended", syncVideoButton);
+            video.addEventListener("timeupdate", () => {
+                const trim = mediaLoaderTrimEntry(node, group.type, filename);
+                const trimEnd = Number(trim?.end);
+                if (Number.isFinite(trimEnd) && video.currentTime >= trimEnd) video.pause();
+            });
+            play.addEventListener("pointerdown", (event) => event.stopPropagation());
+            play.addEventListener("mousedown", (event) => event.stopPropagation());
+            play.addEventListener("click", async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!video.paused && !video.ended) {
+                    video.pause();
+                    return;
+                }
+                const trim = mediaLoaderTrimEntry(node, group.type, filename);
+                video.muted = false;
+                if (video.ended || (trim && video.currentTime < Number(trim.start || 0))) {
+                    video.currentTime = Number(trim?.start || 0);
+                }
+                try { await video.play(); }
+                catch (error) { console.warn("Media Loader video preview could not play", error); }
+            });
+            card.append(play);
+        }
+    }
+
 
     const tag = document.createElement("span");
     tag.className = "h3-media-loader-tag";
@@ -10808,6 +11192,10 @@ function mediaLoaderCreateCard(node, group, filename) {
             card.__h3MediaLoaderAudio.pause();
             mediaLoaderActiveAudio = null;
         }
+        if (card.__h3MediaLoaderVideo === mediaLoaderActiveVideo) {
+            card.__h3MediaLoaderVideo.pause();
+            mediaLoaderActiveVideo = null;
+        }
         const index = Number(card.dataset.index);
         if (!Number.isInteger(index)) return;
         const next = mediaLoaderReadState(node);
@@ -10816,12 +11204,29 @@ function mediaLoaderCreateCard(node, group, filename) {
         mediaLoaderSyncGroup(node, group, next);
         mediaLoaderResize(node);
     });
+    let trim = null;
+    if (group.type === "audio" || group.type === "video") {
+        trim = document.createElement("button");
+        trim.type = "button";
+        trim.className = "h3-media-loader-trim";
+        trim.textContent = "\u2702";
+        trim.title = TEXT.mediaLoaderTrim;
+        trim.setAttribute("aria-label", TEXT.mediaLoaderTrim);
+        trim.addEventListener("pointerdown", (event) => event.stopPropagation());
+        trim.addEventListener("mousedown", (event) => event.stopPropagation());
+        trim.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            mediaLoaderOpenTrimEditor(node, group, filename);
+        });
+    }
     card.append(tag, label, remove);
+    if (trim) card.append(trim);
 
     // AICG3D：单击素材卡片 = 把该素材 @ 进主节点提示词。
     card.addEventListener("click", (event) => {
         if (card.classList.contains("is-dragging")) return;
-        if (event.target?.closest?.(".h3-media-loader-remove")) return;
+        if (event.target?.closest?.(".h3-media-loader-remove, .h3-media-loader-trim, .h3-media-loader-play")) return;
         const index = Number(card.dataset.index);
         if (!Number.isInteger(index)) return;
         aicg3dInsertLoaderMention(node, group.type, index);
@@ -10889,6 +11294,10 @@ function mediaLoaderSyncGroup(node, group, state = mediaLoaderReadState(node)) {
                 card.__h3MediaLoaderAudio.pause();
                 mediaLoaderActiveAudio = null;
             }
+            if (card.__h3MediaLoaderVideo === mediaLoaderActiveVideo) {
+                card.__h3MediaLoaderVideo.pause();
+                mediaLoaderActiveVideo = null;
+            }
             card.remove();
         }
     }
@@ -10924,6 +11333,7 @@ function mediaLoaderRender(node) {
     if (node.__h3MediaLoaderCount) node.__h3MediaLoaderCount.textContent = finiteCapacity
         ? String(total) + "/" + String(capacities.reduce((sum, capacity) => sum + capacity, 0))
         : String(total);
+    if (node.__h3MediaLoaderClear) node.__h3MediaLoaderClear.disabled = total === 0;
     for (const group of MEDIA_LOADER_GROUPS) mediaLoaderSyncGroup(node, group, state);
     refreshMediaLoaderMissingIndicator(node);
     mediaLoaderResize(node);
@@ -11021,7 +11431,7 @@ function mediaLoaderResize(node) {
             }
             if (inlinePanel && node.__h3SequenceActionRow?.element) {
                 const row = node.__h3SequenceActionRow.element;
-                const grid = row.parentElement?.parentElement?.parentElement;
+                const grid = sequenceWidgetGrid(node);
                 if (grid) {
                     grid.classList.add("h3-sequence-widget-grid");
                     grid.classList.add("h3-sequence-resource-open");
@@ -11049,6 +11459,10 @@ function installMediaLoaderStyles() {
       .h3-media-loader-panel.has-missing { border-color:#a45151; box-shadow:inset 0 0 0 1px rgba(164,81,81,.3); }
       .h3-media-loader-panel.is-file-drop-target::after { content:attr(data-drop-label); position:absolute; inset:8px; z-index:20; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:1px dashed rgba(146,177,207,.62); border-radius:5px; background:rgba(25,28,32,.9); color:#d7e2ec; font-size:12px; font-weight:600; letter-spacing:.01em; pointer-events:none; }
       .h3-media-loader-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:28px; padding-bottom:1px; }
+      .h3-media-loader-toolbar-actions { display:flex; align-items:center; justify-content:flex-end; gap:6px; min-width:0; }
+      .h3-media-loader-clear { border:1px solid #5a3434; border-radius:4px; background:#302020; color:#e4bdbd; padding:4px 8px; cursor:pointer; font-size:11px; line-height:1.35; }
+      .h3-media-loader-clear:hover { background:#452929; border-color:#8c4b4b; color:#fff; }
+      .h3-media-loader-clear:disabled { opacity:.45; cursor:default; }
       .h3-media-loader-heading { display:flex; align-items:baseline; gap:7px; min-width:0; }
       .h3-media-loader-title { font-weight:650; color:#eee; }
       .h3-media-loader-count { color:#888; font-size:10px; font-variant-numeric:tabular-nums; }
@@ -11081,6 +11495,11 @@ function installMediaLoaderStyles() {
       .h3-media-loader-label { position:absolute; right:4px; bottom:4px; left:25px; z-index:1; overflow:hidden; color:#eee; font-size:9px; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; }
       .h3-media-loader-card.is-image .h3-media-loader-label, .h3-media-loader-card.is-video .h3-media-loader-label { display:none; }
       .h3-media-loader-play { position:absolute; right:4px; bottom:4px; z-index:4; width:17px; height:17px; padding:0; border:2px solid #222; border-radius:50%; background:#3b434a; color:#f1f1f1; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:Arial,sans-serif; font-size:10px; font-weight:700; line-height:1; opacity:0; visibility:hidden; transform:scale(.82); transition:opacity .15s ease, visibility .15s ease, transform .15s ease, background .15s ease; }
+      .h3-media-loader-card.is-audio .h3-media-loader-play, .h3-media-loader-card.is-video .h3-media-loader-play { opacity:.92; visibility:visible; transform:scale(1); }
+      .h3-media-loader-trim { position:absolute; right:4px; top:4px; z-index:5; width:18px; height:18px; padding:0; border:1px solid #26333b; border-radius:4px; background:rgba(42,55,64,.94); color:#e5edf1; cursor:pointer; font:12px/16px Arial,sans-serif; }
+      .h3-media-loader-trim:hover { background:#315260; border-color:#4e7a8b; color:#fff; }
+      .h3-media-loader-card.is-audio .h3-media-loader-duration, .h3-media-loader-card.is-video .h3-media-loader-duration { right:auto; left:4px; }
+      .h3-media-loader-trim-badge { position:absolute; left:4px; bottom:27px; z-index:4; max-width:calc(100% - 8px); overflow:hidden; padding:2px 4px; border:1px solid rgba(65,191,169,.58); border-radius:3px; background:rgba(9,38,34,.9); color:#8be6d6; font-size:8px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; }
       .h3-media-loader-play-state { display:block; transform:translateY(1px); }
       .h3-media-loader-play::before { content:""; display:block; width:0; height:0; margin-left:1px; border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:6px solid currentColor; }
       .h3-media-loader-card.is-playing .h3-media-loader-play::before { display:none; }
@@ -11090,6 +11509,22 @@ function installMediaLoaderStyles() {
       .h3-media-loader-remove { position:absolute; top:-7px; right:-7px; z-index:3; width:17px; height:17px; padding:0; border:2px solid #222; border-radius:50%; background:#3b434a; color:#f1f1f1; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:Arial,sans-serif; font-size:15px; font-weight:400; line-height:1; opacity:0; visibility:hidden; transform:scale(.82); transition:opacity .15s ease, visibility .15s ease, transform .15s ease, background .15s ease; }
       .h3-media-loader-card:hover .h3-media-loader-remove, .h3-media-loader-card:focus-within .h3-media-loader-remove { opacity:1; visibility:visible; transform:scale(1); }
       .h3-media-loader-remove:hover { background:#8b4242; color:#fff; }
+      .h3-media-loader-trim-overlay { position:fixed; inset:0; z-index:10080; display:flex; align-items:center; justify-content:center; padding:18px; box-sizing:border-box; background:rgba(0,0,0,.72); font:12px Arial,sans-serif; }
+      .h3-media-loader-trim-dialog { width:min(680px,calc(100vw - 36px)); max-height:calc(100vh - 36px); overflow:auto; display:grid; gap:10px; box-sizing:border-box; padding:14px; border:1px solid #3d5362; border-radius:8px; background:#17212a; color:#dbe7ee; box-shadow:0 20px 60px rgba(0,0,0,.62); }
+      .h3-media-loader-trim-title { font-size:13px; font-weight:650; color:#f1f5f7; }
+      .h3-media-loader-trim-preview { display:block; width:100%; max-height:330px; border-radius:6px; background:#080d11; object-fit:contain; }
+      .h3-media-loader-trim-preview.is-audio { height:72px; background:#0d1817; }
+      .h3-media-loader-trim-track { position:relative; height:14px; overflow:hidden; border:1px solid #344956; border-radius:4px; background:#0d151b; }
+      .h3-media-loader-trim-region { position:absolute; top:0; bottom:0; border-left:2px solid #43d7c0; border-right:2px solid #43d7c0; background:rgba(44,184,163,.34); pointer-events:none; }
+      .h3-media-loader-trim-playhead { position:absolute; top:-2px; bottom:-2px; width:2px; background:#f3c969; box-shadow:0 0 6px rgba(243,201,105,.75); pointer-events:none; }
+      .h3-media-loader-trim-row { display:grid; grid-template-columns:52px minmax(0,1fr) 78px; align-items:center; gap:8px; }
+      .h3-media-loader-trim-row input[type=range] { width:100%; accent-color:#36bfa6; }
+      .h3-media-loader-trim-row input[type=number] { width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #36505f; border-radius:4px; background:#0f1921; color:#e3edf2; }
+      .h3-media-loader-trim-duration { color:#899eaa; font-variant-numeric:tabular-nums; }
+      .h3-media-loader-trim-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+      .h3-media-loader-trim-actions button { border:1px solid #3b5362; border-radius:4px; background:#22313c; color:#dce8ee; padding:6px 12px; cursor:pointer; }
+      .h3-media-loader-trim-actions button:hover { background:#2c4451; border-color:#547286; }
+      .h3-media-loader-trim-actions button.is-primary { margin-left:auto; border-color:#2d8076; background:#17695e; color:#e9fffb; }
     `;
 }
 
@@ -11132,6 +11567,16 @@ function installMediaLoaderNode(nodeType, nodeData) {
         const count = document.createElement("span");
         count.className = "h3-media-loader-count";
         heading.append(title, count);
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "h3-media-loader-clear";
+        clear.textContent = TEXT.mediaLoaderClearAll;
+        clear.title = TEXT.mediaLoaderClearAll;
+        clear.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            mediaLoaderClearAll(node);
+        });
         const upload = document.createElement("button");
         upload.type = "button";
         upload.className = "h3-media-loader-upload";
@@ -11147,7 +11592,11 @@ function installMediaLoaderNode(nodeType, nodeData) {
             }, { once: true });
             input.click();
         });
-        toolbar.append(heading, upload);
+        const actions = document.createElement("div");
+        actions.className = "h3-media-loader-toolbar-actions";
+        actions.append(clear, upload);
+        toolbar.append(heading, actions);
+        node.__h3MediaLoaderClear = clear;
         const groups = document.createElement("div");
         groups.className = "h3-media-loader-groups";
         panel.append(toolbar, groups);
@@ -11551,7 +12000,7 @@ function install() {
 
 /* ==========================================================================
    AICG-渲染器（高级）百分比进度条
-   后端 h3easy/render_progress.py 通过 WebSocket 发 aicg3d_render_progress，
+   后端 aicg3d_h3easy/render_progress.py 通过 WebSocket 发 aicg3d_render_progress，
    这里在节点底部画一条进度条：百分比 + 阶段 + 已用时间 + 剩余估计。
    采样阶段按步数走，解码 / 合成阶段没有步数可拆，改用来回跑的亮条。
    采样预览图不走这里：交给 ComfyUI 原生预览通道，Nodes 2.0 画在节点正文里。
@@ -12123,3 +12572,237 @@ globalThis.AICG3D_H3 = {
     },
 };
 /* cache-bust: v4 restore media loader visibility after resize */
+function mediaLoaderNormalizeFilename(value) {
+    const filename = String(value || "").replaceAll("\\", "/").replace(/^\/+/, "").trim();
+    if (!filename || filename.split("/").includes("..")) return "";
+    return filename;
+}
+
+function mediaLoaderRawState(node) {
+    const widget = mediaLoaderStorageWidget(node);
+    const state = { images: [], audios: [], videos: [] };
+    if (!widget) return state;
+    let value = widget.value;
+    if (isSequenceSegmentNode(node) && !value) value = node.properties?.minimax_h3_inline_media_state || "";
+    if (typeof value === "string") {
+        try { value = JSON.parse(value || "{}"); } catch { value = {}; }
+    }
+    const seen = new Set();
+    for (const group of MEDIA_LOADER_GROUPS) {
+        const values = Array.isArray(value?.[group.key]) ? value[group.key] : [];
+        for (const raw of values) {
+            const filename = mediaLoaderNormalizeFilename(typeof raw === "object" ? raw?.filename : raw);
+            const key = `${group.type}:${filename}`;
+            if (!filename || seen.has(key)) continue;
+            seen.add(key);
+            const entry = { filename };
+            if (raw && typeof raw === "object") {
+                for (const keyName of ["start", "end", "duration"]) {
+                    const number = Number(raw?.[keyName]);
+                    if (Number.isFinite(number) && number >= 0) entry[keyName] = number;
+                }
+                if (entry.end != null && entry.end <= (entry.start || 0)) delete entry.end;
+            }
+            state[group.key].push(entry);
+        }
+    }
+    return state;
+}
+
+function mediaLoaderTrimEntry(node, type, filename) {
+    const key = `${type}s`;
+    return mediaLoaderRawState(node)[key]?.find((entry) => entry.filename === filename) || null;
+}
+function mediaLoaderFormatClock(seconds) {
+    const value = Math.max(0, Number(seconds) || 0);
+    const minutes = Math.floor(value / 60);
+    const remainder = value % 60;
+    return `${minutes}:${remainder.toFixed(1).padStart(4, "0")}`;
+}
+
+function mediaLoaderTrimLabel(entry) {
+    const start = Number(entry?.start);
+    const end = Number(entry?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return "";
+    return `${mediaLoaderFormatClock(start)}-${mediaLoaderFormatClock(end)}`;
+}
+
+function mediaLoaderStopActiveMedia() {
+    try { mediaLoaderActiveAudio?.pause?.(); } catch {}
+    try { mediaLoaderActiveVideo?.pause?.(); } catch {}
+    mediaLoaderActiveAudio = null;
+    mediaLoaderActiveVideo = null;
+}
+
+function mediaLoaderClearAll(node) {
+    if (!node) return;
+    mediaLoaderActiveTrimOverlay?.close?.();
+    mediaLoaderStopActiveMedia();
+    mediaLoaderWriteState(node, { images: [], audios: [], videos: [] });
+    delete node.__h3MissingMedia;
+    mediaLoaderRender(node);
+    toast("已清空全部素材", "ok");
+}
+
+function mediaLoaderSetTrim(node, type, filename, start, end, duration) {
+    const state = mediaLoaderReadState(node);
+    const trimMap = mediaLoaderTrimMapFromRawState(mediaLoaderRawState(node));
+    const key = `${type}s`;
+    if (!state[key].includes(filename)) return;
+    trimMap[type] ||= {};
+    const total = Math.max(0, Number(duration) || 0);
+    const from = Math.max(0, Math.min(Number(start) || 0, total));
+    const to = Math.max(from, Math.min(Number(end) || 0, total));
+    if (from <= 0.04 && total > 0 && to >= total - 0.04) {
+        delete trimMap[type][filename];
+    } else {
+        trimMap[type][filename] = { start: from, end: to, duration: total };
+    }
+    mediaLoaderWriteState(node, state, { trimMap });
+    mediaLoaderRender(node);
+}
+
+function mediaLoaderOpenTrimEditor(node, group, filename) {
+    mediaLoaderActiveTrimOverlay?.close?.();
+    mediaLoaderStopActiveMedia();
+    const entry = mediaLoaderTrimEntry(node, group.type, filename) || { filename };
+    const overlay = document.createElement("div");
+    overlay.className = "h3-media-loader-trim-overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "h3-media-loader-trim-dialog";
+    const title = document.createElement("div");
+    title.className = "h3-media-loader-trim-title";
+    title.textContent = `${TEXT.mediaLoaderTrimTitle} · ${String(filename).split(/[\\/]/).pop() || filename}`;
+    const preview = document.createElement(group.type === "video" ? "video" : "audio");
+    preview.className = `h3-media-loader-trim-preview is-${group.type}`;
+    preview.src = mediaLoaderEntryUrl(filename, group.type);
+    preview.preload = "metadata";
+    preview.controls = true;
+    if (group.type === "video") preview.playsInline = true;
+    const track = document.createElement("div");
+    track.className = "h3-media-loader-trim-track";
+    const region = document.createElement("div");
+    region.className = "h3-media-loader-trim-region";
+    const playhead = document.createElement("div");
+    playhead.className = "h3-media-loader-trim-playhead";
+    track.append(region, playhead);
+    const makeRangeRow = (labelText, role) => {
+        const row = document.createElement("label");
+        row.className = "h3-media-loader-trim-row";
+        const label = document.createElement("span");
+        label.textContent = labelText;
+        const range = document.createElement("input");
+        range.type = "range";
+        range.min = "0";
+        range.step = "0.05";
+        range.dataset.trimRole = role;
+        const number = document.createElement("input");
+        number.type = "number";
+        number.min = "0";
+        number.step = "0.1";
+        number.dataset.trimNumber = role;
+        row.append(label, range, number);
+        return { row, range, number };
+    };
+    const startControl = makeRangeRow(TEXT.mediaLoaderTrimStart, "start");
+    const endControl = makeRangeRow(TEXT.mediaLoaderTrimEnd, "end");
+    const durationInfo = document.createElement("div");
+    durationInfo.className = "h3-media-loader-trim-duration";
+    const actions = document.createElement("div");
+    actions.className = "h3-media-loader-trim-actions";
+    const full = document.createElement("button");
+    full.type = "button";
+    full.textContent = TEXT.mediaLoaderTrimFull;
+    const playSelection = document.createElement("button");
+    playSelection.type = "button";
+    playSelection.textContent = TEXT.mediaLoaderTrimPreview;
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = TEXT.mediaLoaderCancel;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "is-primary";
+    save.textContent = TEXT.mediaLoaderSave;
+    save.disabled = !(Number(entry.duration) > 0);
+    actions.append(full, playSelection, cancel, save);
+    dialog.append(title, preview, track, startControl.row, endControl.row, durationInfo, actions);
+    overlay.append(dialog);
+    document.body.append(overlay);
+
+    let duration = Math.max(0.1, Number(entry.duration) || Number(preview.duration) || 0.1);
+    let start = Math.max(0, Math.min(Number(entry.start) || 0, duration));
+    let end = Number.isFinite(Number(entry.end)) && Number(entry.end) > start
+        ? Math.min(Number(entry.end), duration)
+        : duration;
+    const update = () => {
+        const minimum = Math.min(0.1, duration);
+        start = Math.max(0, Math.min(start, Math.max(0, duration - minimum)));
+        end = Math.max(start + minimum, Math.min(end, duration));
+        for (const control of [startControl, endControl]) {
+            control.range.max = String(duration);
+            control.number.max = String(duration);
+        }
+        startControl.range.value = String(start);
+        endControl.range.value = String(end);
+        startControl.number.value = start.toFixed(2);
+        endControl.number.value = end.toFixed(2);
+        region.style.left = `${(start / duration) * 100}%`;
+        region.style.width = `${Math.max(0, ((end - start) / duration) * 100)}%`;
+        durationInfo.textContent = `${TEXT.mediaLoaderTrimDuration} ${mediaLoaderFormatClock(end - start)} / ${mediaLoaderFormatClock(duration)}`;
+    };
+    const setBound = (role, value) => {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return;
+        if (role === "start") start = Math.min(number, end - Math.min(0.1, duration));
+        else end = Math.max(number, start + Math.min(0.1, duration));
+        update();
+    };
+    startControl.range.addEventListener("input", () => setBound("start", startControl.range.value));
+    endControl.range.addEventListener("input", () => setBound("end", endControl.range.value));
+    startControl.number.addEventListener("change", () => setBound("start", startControl.number.value));
+    endControl.number.addEventListener("change", () => setBound("end", endControl.number.value));
+    preview.addEventListener("timeupdate", () => {
+        const current = Number(preview.currentTime) || 0;
+        playhead.style.left = `${Math.max(0, Math.min(1, current / duration)) * 100}%`;
+        if (current >= end) preview.pause();
+    });
+    preview.addEventListener("loadedmetadata", () => {
+        const actual = Number(preview.duration);
+        if (Number.isFinite(actual) && actual > 0) {
+            duration = actual;
+            end = Math.min(end || actual, actual);
+            save.disabled = false;
+            update();
+        }
+    }, { once: true });
+    full.addEventListener("click", () => { start = 0; end = duration; update(); });
+    playSelection.addEventListener("click", async () => {
+        try {
+            preview.currentTime = start;
+            await preview.play();
+        } catch (error) {
+            console.warn("Media trim preview could not play", error);
+        }
+    });
+    const close = () => {
+        try { preview.pause(); } catch {}
+        document.removeEventListener("keydown", onKeyDown, true);
+        overlay.remove();
+        if (mediaLoaderActiveTrimOverlay?.overlay === overlay) mediaLoaderActiveTrimOverlay = null;
+    };
+    const onKeyDown = (event) => {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            close();
+        }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    cancel.addEventListener("click", close);
+    save.addEventListener("click", () => {
+        mediaLoaderSetTrim(node, group.type, filename, start, end, duration);
+        toast(`已保存截取 ${mediaLoaderFormatClock(start)}-${mediaLoaderFormatClock(end)}`, "ok");
+        close();
+    });
+    mediaLoaderActiveTrimOverlay = { overlay, close };
+    update();
+}

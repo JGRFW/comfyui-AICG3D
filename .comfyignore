@@ -6,6 +6,8 @@ __pycache__/
 *.pyo
 *.bak
 *.bak-*
+debug_load_test.py
+$null
 .github/
 tools/
 tests/

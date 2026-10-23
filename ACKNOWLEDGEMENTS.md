@@ -18,7 +18,7 @@ comfyui-AICG3D 不是一个从零开始的项目。它站在三个优秀的 Comf
 首尾帧 / 参考生视频 / 数字人"的整体设计思路，都来自这个项目。
 
 - 仓库：https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy
-- 贡献文件：`h3easy/`、`web/minimax_h3_easy_ui.js`、`workflows/1.*` ~ `workflows/7.*`
+- 贡献文件：`aicg3d_h3easy/`、`web/minimax_h3_easy_ui.js`、`workflows/1.*` ~ `workflows/7.*`
 - 使用方式：**大幅改动**。本插件把它的节点并入统一注册表、把显示名里的 `Easy` 换成
   `Aicg`、重写了加载器与素材库/技能库面板，还改了几处采样接口适配新版 ComfyUI。
   骨架和设计是它的，外层是本插件新写的。
@@ -33,8 +33,8 @@ comfyui-AICG3D 不是一个从零开始的项目。它站在三个优秀的 Comf
 - 仓库：https://github.com/goohai/Goohai-MiniMax-H3_Integration
 - 作者 B 站：孤海FOTO —— https://space.bilibili.com/1194488958
 - 另一插件：https://github.com/goohai/Goohaitools-comfyui
-- 贡献文件：`h3goohai/`、`web/minimax_h3_integration.js`、`web/audio/done.mp3`、`locales/`
-- 使用方式：**基本原样使用**，这点要说清楚，不能含糊 —— `h3goohai/` 里的
+- 贡献文件：`aicg3d_h3goohai/`、`web/minimax_h3_integration.js`、`web/audio/done.mp3`、`locales/`
+- 使用方式：**基本原样使用**，这点要说清楚，不能含糊 —— `aicg3d_h3goohai/` 里的
   `audio_ops.py`、`conditioning.py`、`core.py`、`prompt_tags.py`、`sampling.py`
   五个文件一字未改，`done.mp3` 也逐字节相同；只有 `prompt_optimizer.py`（本地 GGUF
   参考图降采样与上下文上限等适配）、`nodes.py`（节点分类改名）、前端脚本和语言文件

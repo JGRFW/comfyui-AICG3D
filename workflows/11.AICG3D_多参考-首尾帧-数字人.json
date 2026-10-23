@@ -1,0 +1,1395 @@
+{
+  "id": "f85c8784-876d-4487-a217-0a6fe2ac7f4e",
+  "revision": 5,
+  "last_node_id": 1025,
+  "last_link_id": 141,
+  "nodes": [
+    {
+      "id": 941,
+      "type": "SaveVideo",
+      "pos": [
+        590,
+        200
+      ],
+      "size": [
+        700,
+        690
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "视频",
+          "localized_name": "视频",
+          "name": "video",
+          "type": "VIDEO",
+          "link": 38
+        },
+        {
+          "localized_name": "文件名前缀",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "格式",
+          "name": "format",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "format"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "编解码器",
+          "name": "format.codec",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "format.codec"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "编解码器",
+          "name": "codec",
+          "shape": 7,
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "codec"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "video",
+          "type": "VIDEO",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SaveVideo"
+      },
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "video/ComfyUI",
+        "format": "auto",
+        "format.codec": "auto",
+        "codec": "auto"
+      }
+    },
+    {
+      "id": 942,
+      "type": "AICG3D_H3Loader",
+      "pos": [
+        -1410,
+        200
+      ],
+      "size": [
+        320,
+        660.5000420791486
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "FL2VA 模型",
+          "localized_name": "FL2VA 模型",
+          "name": "fl2va_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "fl2va_model"
+          },
+          "link": null
+        },
+        {
+          "label": "REF2VA 模型",
+          "localized_name": "REF2VA 模型",
+          "name": "ref2va_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "ref2va_model"
+          },
+          "link": null
+        },
+        {
+          "label": "文本编码器",
+          "localized_name": "文本编码器",
+          "name": "text_encoder",
+          "type": "COMBO",
+          "widget": {
+            "name": "text_encoder"
+          },
+          "link": null
+        },
+        {
+          "label": "视频 VAE",
+          "localized_name": "视频 VAE",
+          "name": "video_vae",
+          "type": "COMBO",
+          "widget": {
+            "name": "video_vae"
+          },
+          "link": null
+        },
+        {
+          "label": "音频 VAE",
+          "localized_name": "音频 VAE",
+          "name": "audio_vae",
+          "type": "COMBO",
+          "widget": {
+            "name": "audio_vae"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_1",
+          "name": "lora_1",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_1"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_1_strength",
+          "name": "lora_1_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_1_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_2",
+          "name": "lora_2",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_2"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_2_strength",
+          "name": "lora_2_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_2_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_3",
+          "name": "lora_3",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_3"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_3_strength",
+          "name": "lora_3_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_3_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_4",
+          "name": "lora_4",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_4"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_4_strength",
+          "name": "lora_4_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_4_strength"
+          },
+          "link": null
+        },
+        {
+          "label": "非 H3 权重处理",
+          "localized_name": "非 H3 权重处理",
+          "name": "non_h3_policy",
+          "type": "COMBO",
+          "widget": {
+            "name": "non_h3_policy"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_5",
+          "name": "lora_5",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_5"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_5_strength",
+          "name": "lora_5_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_5_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_6",
+          "name": "lora_6",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_6"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_6_strength",
+          "name": "lora_6_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_6_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_7",
+          "name": "lora_7",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_7"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_7_strength",
+          "name": "lora_7_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_7_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_8",
+          "name": "lora_8",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_8"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_8_strength",
+          "name": "lora_8_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_8_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_9",
+          "name": "lora_9",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_9"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "lora_9_strength",
+          "name": "lora_9_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "lora_9_strength"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "注意力加速(Sage)",
+          "name": "注意力加速(Sage)",
+          "type": "COMBO",
+          "widget": {
+            "name": "注意力加速(Sage)"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "h3_bundle",
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "links": [
+            42
+          ]
+        },
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "MODEL",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_H3Loader",
+        "aicg3d_lora_state": {
+          "1": {},
+          "2": {
+            "selected": "minimax\\Minimax H3真实电影质感V0.1.safetensors",
+            "enabled": true
+          },
+          "3": {
+            "selected": "minimax\\minimax_h3_lms_v1.0_r64视频锐化.safetensors",
+            "enabled": false
+          },
+          "4": {
+            "selected": "minimax\\曝光-亮度-3-3.safetensors",
+            "enabled": false
+          },
+          "5": {},
+          "6": {},
+          "7": {},
+          "8": {},
+          "9": {}
+        }
+      },
+      "widgets_values": [
+        "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
+        "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "minimax\\minimax_h3_dmad_full_dareties_v4_step600_comfy_fro.safetensors",
+        1,
+        "minimax\\Minimax H3真实电影质感V0.1.safetensors",
+        0.3,
+        "none",
+        1,
+        "none",
+        1,
+        "自动回落",
+        "none",
+        1,
+        "none",
+        1,
+        "none",
+        1,
+        "none",
+        1,
+        "none",
+        1,
+        "Comfy Kitchen INT8"
+      ],
+      "widgets_values_named": {
+        "fl2va_model": "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
+        "ref2va_model": "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
+        "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+        "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
+        "lora_1": "minimax\\minimax_h3_dmad_full_dareties_v4_step600_comfy_fro.safetensors",
+        "lora_1_strength": 1,
+        "lora_2": "minimax\\Minimax H3真实电影质感V0.1.safetensors",
+        "lora_2_strength": 0.3,
+        "lora_3": "none",
+        "lora_3_strength": 1,
+        "lora_4": "none",
+        "lora_4_strength": 1,
+        "non_h3_policy": "自动回落",
+        "lora_5": "none",
+        "lora_5_strength": 1,
+        "lora_6": "none",
+        "lora_6_strength": 1,
+        "lora_7": "none",
+        "lora_7_strength": 1,
+        "lora_8": "none",
+        "lora_8_strength": 1,
+        "lora_9": "none",
+        "lora_9_strength": 1,
+        "注意力加速(Sage)": "Comfy Kitchen INT8"
+      }
+    },
+    {
+      "id": 945,
+      "type": "AICG3D_H3RenderAdvancedWithModel",
+      "pos": [
+        160,
+        200
+      ],
+      "size": [
+        350,
+        770
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "localized_name": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 141
+        },
+        {
+          "label": "H3 Context",
+          "localized_name": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "link": 44
+        },
+        {
+          "label": "外部采样器",
+          "localized_name": "外部采样器",
+          "name": "sampler",
+          "shape": 7,
+          "type": "SAMPLER",
+          "link": 134
+        },
+        {
+          "label": "外部调度器（Sigmas）",
+          "localized_name": "外部调度器（Sigmas）",
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": 135
+        },
+        {
+          "label": "引导图片",
+          "localized_name": "引导图片",
+          "name": "guide_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "引导音频",
+          "localized_name": "引导音频",
+          "name": "guide_audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "低清模型",
+          "localized_name": "低清模型",
+          "name": "digital_human_lowres_model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": null
+        },
+        {
+          "label": "高清模型",
+          "localized_name": "高清模型",
+          "name": "digital_human_highres_model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": null
+        },
+        {
+          "localized_name": "noise_seed",
+          "name": "noise_seed",
+          "type": "INT",
+          "widget": {
+            "name": "noise_seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "scheduler",
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "steps",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "denoise",
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "cleanup_after_run",
+          "name": "cleanup_after_run",
+          "type": "COMBO",
+          "widget": {
+            "name": "cleanup_after_run"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "guide_frame_idx",
+          "name": "guide_frame_idx",
+          "type": "INT",
+          "widget": {
+            "name": "guide_frame_idx"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_selflift",
+          "name": "digital_human_selflift",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "digital_human_selflift"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_cfg",
+          "name": "digital_human_cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "digital_human_cfg"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_transition_step",
+          "name": "digital_human_transition_step",
+          "type": "INT",
+          "widget": {
+            "name": "digital_human_transition_step"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_lowres_scale",
+          "name": "digital_human_lowres_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "digital_human_lowres_scale"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_upscaler_model",
+          "name": "digital_human_upscaler_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "digital_human_upscaler_model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sample_preview",
+          "name": "sample_preview",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "sample_preview"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "成片视频",
+          "localized_name": "成片视频",
+          "name": "video",
+          "type": "VIDEO",
+          "links": [
+            38
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_H3RenderAdvanced"
+      },
+      "widgets_values": [
+        357482398646636,
+        "randomize",
+        "euler",
+        "beta",
+        8,
+        1.0,
+        "释放缓存",
+        0,
+        true,
+        1.0,
+        5,
+        0.5,
+        "minimax_h3_latent_upscaler_3d_fp16.safetensors",
+        false
+      ],
+      "widgets_values_named": {
+        "noise_seed": 357482398646636,
+        "control_after_generate": "randomize",
+        "sampler_name": "euler",
+        "scheduler": "beta",
+        "steps": 8,
+        "denoise": 1.0,
+        "cleanup_after_run": "释放缓存",
+        "guide_frame_idx": 0,
+        "digital_human_selflift": true,
+        "digital_human_cfg": 1.0,
+        "digital_human_transition_step": 5,
+        "digital_human_lowres_scale": 0.5,
+        "digital_human_upscaler_model": "minimax_h3_latent_upscaler_3d_fp16.safetensors",
+        "sample_preview": false
+      }
+    },
+    {
+      "id": 951,
+      "type": "AICG3D_H3",
+      "pos": [
+        -680,
+        200
+      ],
+      "size": [
+        480,
+        870
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "H3 模型组合",
+          "localized_name": "H3 模型组合",
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "link": 42
+        },
+        {
+          "label": "AICG3D",
+          "localized_name": "AICG3D",
+          "name": "media",
+          "shape": 7,
+          "type": "*",
+          "link": 126
+        },
+        {
+          "localized_name": "mode",
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "h3_prompt_mentions"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "resolution",
+          "name": "resolution",
+          "type": "COMBO",
+          "widget": {
+            "name": "resolution"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "aspect_ratio",
+          "name": "aspect_ratio",
+          "type": "COMBO",
+          "widget": {
+            "name": "aspect_ratio"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seconds",
+          "name": "seconds",
+          "type": "FLOAT",
+          "widget": {
+            "name": "seconds"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "advanced",
+          "name": "advanced",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "advanced"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "fps",
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "keyframe_role",
+          "name": "keyframe_role",
+          "type": "COMBO",
+          "widget": {
+            "name": "keyframe_role"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "ref_image_size",
+          "name": "ref_image_size",
+          "type": "COMBO",
+          "widget": {
+            "name": "ref_image_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "reference_mention_mode",
+          "name": "reference_mention_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "reference_mention_mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "prompt_optimizer_settings",
+          "name": "prompt_optimizer_settings",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "prompt_optimizer_settings"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "prompt_optimizer_scene_guide",
+          "name": "prompt_optimizer_scene_guide",
+          "type": "COMBO",
+          "widget": {
+            "name": "prompt_optimizer_scene_guide"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_rife",
+          "name": "digital_human_rife",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "digital_human_rife"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_rife_model",
+          "name": "digital_human_rife_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "digital_human_rife_model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_rife_multiplier",
+          "name": "digital_human_rife_multiplier",
+          "type": "INT",
+          "widget": {
+            "name": "digital_human_rife_multiplier"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_rife_fast_mode",
+          "name": "digital_human_rife_fast_mode",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "digital_human_rife_fast_mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_rife_ensemble",
+          "name": "digital_human_rife_ensemble",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "digital_human_rife_ensemble"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "digital_human_rife_clear_cache",
+          "name": "digital_human_rife_clear_cache",
+          "type": "INT",
+          "widget": {
+            "name": "digital_human_rife_clear_cache"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "localized_name": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            141
+          ]
+        },
+        {
+          "label": "H3 Context",
+          "localized_name": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "links": [
+            44
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_H3",
+        "minimax_h3_virtual_media_links": [],
+        "minimax_h3_prompt_reference_doc": {
+          "version": 1,
+          "text": "subject_definitions:\r<Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r<Picture 1>: fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: <Picture 1>: fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `<Picture 1>: fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 <Picture 1> 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 从梦想掌剑走天涯</d>\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 看一看世界的泛黄</d>\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A",
+          "parts": [
+            {
+              "type": "text",
+              "text": "subject_definitions:\r<Subject 1> 是 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r"
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": ": fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": ": fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `"
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": ": fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片1",
+              "tag": "<Picture 1>",
+              "label": "图片1",
+              "fullLabel": "Qwen_image_2.1_00033.png",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 1,
+              "mediaIndex": null,
+              "sourceId": 1017,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r"
+            },
+            {
+              "type": "dialogue",
+              "text": "[Mandarin singing] 从梦想掌剑走天涯"
+            },
+            {
+              "type": "text",
+              "text": "\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r"
+            },
+            {
+              "type": "dialogue",
+              "text": "[Mandarin singing] 看一看世界的泛黄"
+            },
+            {
+              "type": "text",
+              "text": "\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A"
+            }
+          ]
+        },
+        "minimax_h3_prompt_view_mode": "raw"
+      },
+      "widgets_values": [
+        "数字人",
+        "subject_definitions:\r<Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r<Picture 1>: fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: <Picture 1>: fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `<Picture 1>: fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 <Picture 1> 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 从梦想掌剑走天涯</d>\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 看一看世界的泛黄</d>\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A",
+        "640P",
+        "16:9",
+        1152,
+        640,
+        17.5,
+        true,
+        24,
+        "首帧优先",
+        "匹配生成分辨率",
+        "按序号",
+        false,
+        "通用",
+        true,
+        "rife47.pth",
+        4,
+        true,
+        true,
+        10
+      ],
+      "widgets_values_named": {
+        "mode": "数字人",
+        "prompt": "subject_definitions:\r<Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r<Picture 1>: fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: <Picture 1>: fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `<Picture 1>: fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 <Picture 1> 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 从梦想掌剑走天涯</d>\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 看一看世界的泛黄</d>\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A",
+        "resolution": "640P",
+        "aspect_ratio": "16:9",
+        "width": 1152,
+        "height": 640,
+        "seconds": 17.5,
+        "advanced": true,
+        "fps": 24,
+        "keyframe_role": "首帧优先",
+        "ref_image_size": "匹配生成分辨率",
+        "reference_mention_mode": "按序号",
+        "prompt_optimizer_settings": false,
+        "prompt_optimizer_scene_guide": "通用",
+        "digital_human_rife": true,
+        "digital_human_rife_model": "rife47.pth",
+        "digital_human_rife_multiplier": 4,
+        "digital_human_rife_fast_mode": true,
+        "digital_human_rife_ensemble": true,
+        "digital_human_rife_clear_cache": 10
+      }
+    },
+    {
+      "id": 1017,
+      "type": "AICG3D_H3MediaLoader",
+      "pos": [
+        -1080,
+        260
+      ],
+      "size": [
+        370,
+        570
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "media_state",
+          "name": "media_state",
+          "type": "STRING",
+          "widget": {
+            "name": "media_state"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "视频解码长边",
+          "name": "视频解码长边",
+          "type": "INT",
+          "widget": {
+            "name": "视频解码长边"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "AICG3D",
+          "localized_name": "AICG3D",
+          "name": "media_bundle",
+          "type": "MINIMAX_H3_MEDIA_BUNDLE",
+          "links": [
+            126
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_H3MediaLoader",
+        "aicg3d_media_trim": {
+          "videos": {},
+          "audios": {}
+        },
+        "media_loader_state": "{\"images\":[{\"filename\":\"Qwen_image_2.1_00033.png\"}],\"audios\":[{\"filename\":\"不灭神话18s.mp3\"}],\"videos\":[]}"
+      },
+      "widgets_values": [
+        "{\"images\":[{\"filename\":\"Qwen_image_2.1_00033.png\"}],\"audios\":[{\"filename\":\"不灭神话18s.mp3\"}],\"videos\":[]}",
+        0
+      ],
+      "widgets_values_named": {
+        "media_state": "{\"images\":[{\"filename\":\"Qwen_image_2.1_00033.png\"}],\"audios\":[{\"filename\":\"不灭神话18s.mp3\"}],\"videos\":[]}",
+        "视频解码长边": 0
+      }
+    },
+    {
+      "id": 1024,
+      "type": "MiniMaxH3DMADSampler",
+      "pos": [
+        -170,
+        280
+      ],
+      "size": [
+        290,
+        30
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "localized_name": "采样器",
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            134
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3DMADSampler"
+      }
+    },
+    {
+      "id": 1025,
+      "type": "DMADSigmas",
+      "pos": [
+        -170,
+        390
+      ],
+      "size": [
+        300,
+        120
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "steps",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "shift",
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "Sigmas",
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            135
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DMADSigmas"
+      },
+      "widgets_values": [
+        8,
+        12
+      ],
+      "widgets_values_named": {
+        "steps": 8,
+        "shift": 12
+      }
+    }
+  ],
+  "links": [
+    [
+      44,
+      951,
+      1,
+      945,
+      1,
+      "MINIMAX_H3_CONTEXT"
+    ],
+    [
+      134,
+      1024,
+      0,
+      945,
+      2,
+      "SAMPLER"
+    ],
+    [
+      135,
+      1025,
+      0,
+      945,
+      3,
+      "SIGMAS"
+    ],
+    [
+      141,
+      951,
+      0,
+      945,
+      0,
+      "MODEL"
+    ],
+    [
+      38,
+      945,
+      0,
+      941,
+      0,
+      "VIDEO"
+    ],
+    [
+      42,
+      942,
+      0,
+      951,
+      0,
+      "MINIMAX_H3_BUNDLE"
+    ],
+    [
+      126,
+      1017,
+      0,
+      951,
+      1,
+      "MINIMAX_H3_MEDIA_BUNDLE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 3,
+      "title": "Group",
+      "bounding": [
+        -1450,
+        60,
+        2810,
+        1110
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6934334949441353,
+      "offset": [
+        1780.3110036863593,
+        490.493739471962
+      ]
+    },
+    "frontendVersion": "1.24.0",
+    "ue_links": [],
+    "links_added_by_ue": []
+  },
+  "version": 0.4
+}

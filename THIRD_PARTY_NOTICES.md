@@ -1,7 +1,7 @@
 # 第三方组件与许可证声明
 
 本插件 **comfyui-AICG3D** 的**自有新增代码**（`aicg3d/`、`web/aicg3d-*.js`、
-`web/aicg3d-theme.css`、`h3easy/aicg3d_sampler.py` 等标注为「本模块为新增代码」的部分）
+`web/aicg3d-theme.css`、`aicg3d_h3easy/aicg3d_sampler.py` 等标注为「本模块为新增代码」的部分）
 版权归 **AICG3D** 所有，按 **GPL-3.0-or-later** 发布，全文见仓库根目录 `LICENSE`。
 
 本插件同时包含下列第三方组件。**各第三方组件仍适用其自身的许可证，不会因为被合并进
@@ -15,9 +15,9 @@
 |---|---|
 | 原始作者 | nkxx188 |
 | 原始仓库 | https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy |
-| 涉及文件 | `h3easy/`（含 `sampling_strategies.py`）、`web/minimax_h3_easy_ui.js`、`workflows/1.*` ~ `workflows/7.*`、`workflows/upstream/`（上游原版工作流）、`prompt_guides/zh_*` 与 `h3_general/*-zh.*`（按语言拆分的通用与场景指南） |
+| 涉及文件 | `aicg3d_h3easy/`（含 `sampling_strategies.py`）、`web/minimax_h3_easy_ui.js`、`workflows/1.*` ~ `workflows/7.*`、`workflows/upstream/`（上游原版工作流）、`prompt_guides/zh_*` 与 `h3_general/*-zh.*`（按语言拆分的通用与场景指南） |
 | 许可证 | MIT，全文见 `third_party/LICENSE-ComfyUI-MiniMaxH3-Easy-MIT.txt` |
-| 修改情况 | **已修改**：合并为 AICG3D 插件、重写加载器/素材库/技能库前端面板、新增 `_optimizer_attached_resources()` 与无引用输出规则、`aicg3d_sampler.py` 适配 ComfyUI 0.35 V3 节点接口 |
+| 修改情况 | **已修改**：合并为 AICG3D 插件、内部包名隔离为 `aicg3d_h3easy`、重写加载器/素材库/技能库前端面板、新增 `_optimizer_attached_resources()` 与无引用输出规则、`aicg3d_sampler.py` 适配 ComfyUI 0.35 V3 节点接口 |
 
 MIT 许可证要求：在软件的所有副本或实质性部分中保留上述版权声明与许可声明。
 
@@ -29,7 +29,7 @@ MIT 许可证要求：在软件的所有副本或实质性部分中保留上述�
 |---|---|
 | 原始作者 | goohai（其 LICENSE 署名为 "MiniMax H3 Audio T8 contributors"） |
 | 原始仓库 | https://github.com/goohai/Goohai-MiniMax-H3_Integration |
-| 涉及文件 | `h3goohai/`、`web/minimax_h3_integration.js`、`web/audio/done.mp3`、`locales/` |
+| 涉及文件 | `aicg3d_h3goohai/`、`web/minimax_h3_integration.js`、`web/audio/done.mp3`、`locales/` |
 | 许可证 | GPL-3.0-or-later，全文见 `third_party/GPL-3.0.txt`；原始声明见 `third_party/LICENSE-Goohai-MiniMax-H3_Integration-GPL-3.0-or-later.txt` |
 | 修改情况 | 见下方逐文件清单。大部分文件为**原样复制**，只有 3 个文件有实质改动 |
 
@@ -42,26 +42,26 @@ MIT 许可证要求：在软件的所有副本或实质性部分中保留上述�
 
 | 文件 | 状态 | 改动内容 |
 |---|---|---|
-| `h3goohai/audio_ops.py` | 原样复制 | — |
-| `h3goohai/conditioning.py` | 原样复制 | — |
-| `h3goohai/core.py` | 原样复制 | — |
-| `h3goohai/prompt_tags.py` | 原样复制 | — |
-| `h3goohai/sampling.py` | 原样复制 | — |
-| `h3goohai/nodes.py` | 已修改 2026-09-12 | 节点菜单分类由 `Goohai/MiniMax H3 Integration` 改为 `AICG3D/H3 集成` |
-| `h3goohai/prompt_optimizer.py` | 已修改 2026-09-12 | 本地 GGUF 参考图降采样与上下文上限、模型目录解析层级、日志前缀、RunningHub App id 改为可用环境变量覆盖 |
-| `web/minimax_h3_integration.js` | 已修改 2026-09-12 | 素材路径改为 `./audio/`，接入 AICG3D 公共层与主题 |
+| `aicg3d_h3goohai/audio_ops.py` | 已修改 2026-10-23 | 内部模块命名空间隔离为 `aicg3d_h3goohai` |
+| `aicg3d_h3goohai/conditioning.py` | 已修改 2026-10-23 | 内部模块命名空间隔离为 `aicg3d_h3goohai` |
+| `aicg3d_h3goohai/core.py` | 原样复制 | — |
+| `aicg3d_h3goohai/prompt_tags.py` | 原样复制 | — |
+| `aicg3d_h3goohai/sampling.py` | 已修改 2026-10-23 | 内部模块命名空间隔离为 `aicg3d_h3goohai` |
+| `aicg3d_h3goohai/nodes.py` | 已修改 2026-09-12 / 2026-10-23 | 节点菜单分类改为 `AICG3D/H3 集成`；内部模块命名空间隔离为 `aicg3d_h3goohai` |
+| `aicg3d_h3goohai/prompt_optimizer.py` | 已修改 2026-09-12 / 2026-10-23 | 本地 GGUF 参考图降采样与上下文上限、模型目录解析层级、日志前缀、RunningHub App id 改为可用环境变量覆盖；HTTP 路由收进 `/aicg3d/goohai/` 唯一命名空间 |
+| `web/minimax_h3_integration.js` | 已修改 2026-09-12 / 2026-10-23 | 素材路径改为 `./audio/`，接入 AICG3D 公共层与主题；前端扩展名和 API 路由改为 AICG3D 唯一命名空间 |
 | `web/audio/done.mp3` | 原样复制 | 与上游文件逐字节相同 |
 | `locales/en/main.json`、`locales/zh/main.json` | 已修改 2026-09-12 | 键值改写为 AICG3D 名称 |
 | `locales/en/nodeDefs.json`、`locales/zh/nodeDefs.json` | 已修改 2026-09-12 | 原有 4 个键的值改写为 AICG3D 名称，并新增 `AICG3D_SkillLoader`、`AICG3D_PromptPreset` 两个键 |
 
 ### 本插件对它的依赖方式
 
-`h3easy/nodes.py`（MIT 组件）通过 4 处调用使用本模块，这是两者的结合点：
+`aicg3d_h3easy/nodes.py`（MIT 组件）通过 4 处调用使用本模块，这是两者的结合点：
 
-- `h3easy/nodes.py` 中 3 处 `from ..h3goohai import prompt_optimizer`，
+- `aicg3d_h3easy/nodes.py` 中 3 处 `from aicg3d_h3goohai import prompt_optimizer`，
   调用 `image_file_data_url` / `generate_local_prompt` / `scan_local_models` /
   `missing_local_dependencies` / `gguf_dependency_status`；
-- `h3easy/nodes.py` 中 1 处 `from ..h3goohai.audio_ops import decode_av_latent`。
+- `aicg3d_h3easy/nodes.py` 中 1 处 `from aicg3d_h3goohai.audio_ops import decode_av_latent`。
 
 因为这 4 处调用把 MIT 组件与 GPL-3.0-or-later 组件组成了一个作品，本插件整体按
 GPL-3.0-or-later 发布。

@@ -25,7 +25,7 @@ function h3ClassName(name) {
     const text = String(name ?? "");
     return text.startsWith("AICG3D_H3") ? `MiniMaxH3Easy${text.slice("AICG3D_H3".length)}` : text;
 }
-// 与 h3easy/nodes.py 的 LORA_SLOT_COUNT 保持一致，改后端必须同步改这里。
+// 与 aicg3d_h3easy/nodes.py 的 LORA_SLOT_COUNT 保持一致，改后端必须同步改这里。
 const SLOT_COUNT = 9;
 const NONE_VALUES = new Set(["", "none", "无"]);
 
@@ -69,10 +69,10 @@ function clearLoraState(node, index) {
     if (store) delete store[String(index)];
 }
 
-// 与 h3easy/nodes.py 的 LORA_SLOT_COUNT_LEGACY 保持一致。
+// 与 aicg3d_h3easy/nodes.py 的 LORA_SLOT_COUNT_LEGACY 保持一致。
 const LEGACY_SLOT_COUNT = 4;
 
-/** LoRA 槽位在 widgets_values 里的下标（顺序由 h3easy/nodes.py 的 INPUT_TYPES 决定）。 */
+/** LoRA 槽位在 widgets_values 里的下标（顺序由 aicg3d_h3easy/nodes.py 的 INPUT_TYPES 决定）。 */
 function savedLoraIndex(index) {
     const base = MODEL_WIDGETS.length;
     if (index <= LEGACY_SLOT_COUNT) return base + (index - 1) * 2;

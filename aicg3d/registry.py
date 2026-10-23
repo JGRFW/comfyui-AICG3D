@@ -4,8 +4,6 @@
 # -*- coding: utf-8 -*-
 """整合注册表：绝对导入终极版。"""
 from __future__ import annotations
-import sys
-import os
 
 # 绝不使用 "." 相对导入
 import aicg3d.branding as branding
@@ -13,8 +11,10 @@ import aicg3d.compat as compat
 import aicg3d.nodes as aicg3d_nodes
 import aicg3d.routes as routes
 import aicg3d.prompt_split as prompt_split
-import h3easy.nodes as h3
-from h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+import aicg3d_h3easy.nodes as h3
+import nodes as comfy_nodes
+import aicg3d_h3easy.character_motion as character_motion
+from aicg3d_h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
 
 NODE_ID_PREFIX = "AICG3D_H3"
 
@@ -26,6 +26,8 @@ def plugin_node_id(node_id: str) -> str:
 def _h3_easy() -> tuple[dict, dict]:
     mapping = dict(h3.NODE_CLASS_MAPPINGS)
     display = dict(h3.NODE_DISPLAY_NAME_MAPPINGS)
+    mapping.update(character_motion.NODE_CLASS_MAPPINGS)
+    display.update(character_motion.NODE_DISPLAY_NAME_MAPPINGS)
     mapping["MiniMaxH3EasySamplerAdvanced"] = AICG3DSamplerAdvanced
     display["MiniMaxH3EasySamplerAdvanced"] = "AICG-采样器（高级）"
     return mapping, display
@@ -48,6 +50,18 @@ def build() -> tuple[dict, dict]:
 
     mapping.update(prompt_split.NODE_CLASS_MAPPINGS)
     display.update(prompt_split.NODE_DISPLAY_NAME_MAPPINGS)
+
+    # Keep old workflows working without competing for the generic upstream ID.
+    # If another PromptSplit plugin already registered it, ours uses only the
+    # namespaced ID and cannot overwrite that plugin's class.
+    external_mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
+    for node_id, node_class in prompt_split.LEGACY_NODE_CLASS_MAPPINGS.items():
+        if node_id in mapping or node_id in external_mappings:
+            continue
+        mapping[node_id] = node_class
+        legacy_name = prompt_split.LEGACY_NODE_DISPLAY_NAME_MAPPINGS.get(node_id)
+        if legacy_name:
+            display[node_id] = legacy_name
 
     for node_id, node_class in mapping.items():
         branding.apply(node_class, node_id)

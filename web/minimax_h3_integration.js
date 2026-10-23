@@ -11,6 +11,7 @@ import { api } from "/scripts/api.js";
 import { autoHideWidgets, refreshVueWidgets } from "./aicg3d-core.js";
 
 const OPTIMIZER_DONE_SOUND_URL = new URL("./audio/done.mp3", import.meta.url).href;
+const PROMPT_OPTIMIZER_ENDPOINT = "/aicg3d/goohai/minimax-h3/prompt-optimizer";
 
 const NODE = "MiniMaxH3IntegrationGH";
 const RH_NODE_IDS = [
@@ -1568,7 +1569,7 @@ function nodeColorToCss(value) {
     async function loadOptimizerSettings() {
         if (optimizerSettings) {
             if (!Array.isArray(optimizerSettings.runninghub_models) || !optimizerSettings.runninghub_models.length) {
-                const response = await api.fetchApi("/goohai/minimax-h3/prompt-optimizer/config", { cache: "no-store" });
+                const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/config`, { cache: "no-store" });
                 if (!response.ok) throw new Error("Unable to load prompt optimizer settings");
                 const defaults = await response.json();
                 optimizerSettings = {
@@ -1583,7 +1584,7 @@ function nodeColorToCss(value) {
             refreshOptimizerName();
             return optimizerSettings;
         }
-        const response = await api.fetchApi("/goohai/minimax-h3/prompt-optimizer/config", { cache: "no-store" });
+        const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/config`, { cache: "no-store" });
         if (!response.ok) throw new Error("Unable to load prompt optimizer settings");
         optimizerSettings = migrateLegacyOptimizerDefault(await response.json());
         refreshOptimizerName(); refreshPromptConnection();
@@ -1719,14 +1720,14 @@ function nodeColorToCss(value) {
                 finally { button.classList.remove("loading"); button.disabled = false; }
             };
             refreshRunninghubModels.onclick = () => withRefreshState(refreshRunninghubModels, async () => {
-                const response = await api.fetchApi("/goohai/minimax-h3/prompt-optimizer/runninghub-models", { cache: "no-store" });
+                const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/runninghub-models`, { cache: "no-store" });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || "RunningHub 模型列表刷新失败");
                 fillRunninghubModels(data.runninghub_models);
                 optimizerSettings = { ...(optimizerSettings || current), runninghub_models: [...runninghubModels] };
             }).catch(error => alert(error.message));
             refreshModels.onclick = () => withRefreshState(refreshModels, async () => {
-                const response = await api.fetchApi("/goohai/minimax-h3/prompt-optimizer/models", { cache: "no-store" });
+                const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/models`, { cache: "no-store" });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || "本地模型列表刷新失败");
                 fillModels(data.models); showDependencies(data.missing_dependencies);
@@ -1903,7 +1904,7 @@ function nodeColorToCss(value) {
         const requestId = optimizerRequestId;
         optimizerAbort?.abort();
         if (requestId) {
-            api.fetchApi("/goohai/minimax-h3/prompt-optimizer/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId }) }).catch(() => {});
+            api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId }) }).catch(() => {});
         }
     }
     function resemblesOfficialPrompt(value, task = resolvedTaskType()) {
@@ -1943,11 +1944,11 @@ function nodeColorToCss(value) {
             const timeout = setTimeout(() => {
                 const requestId = optimizerRequestId;
                 optimizerAbort?.abort();
-                if (requestId) api.fetchApi("/goohai/minimax-h3/prompt-optimizer/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId }) }).catch(() => {});
+                if (requestId) api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId }) }).catch(() => {});
             }, 200000);
             let response;
             try {
-                response = await api.fetchApi("/goohai/minimax-h3/prompt-optimizer/optimize", { method: "POST", headers: { "Content-Type": "application/json" }, signal: optimizerAbort.signal, body: JSON.stringify({ request_id: optimizerRequestId, prompt: before, task, duration, media: mediaPayload, context: taskContext, config: optimizerSettings }) });
+                response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/optimize`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: optimizerAbort.signal, body: JSON.stringify({ request_id: optimizerRequestId, prompt: before, task, duration, media: mediaPayload, context: taskContext, config: optimizerSettings }) });
             } finally { clearTimeout(timeout); }
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || "Prompt optimization failed");
@@ -2639,7 +2640,7 @@ function nodeColorToCss(value) {
         clearInterval(optimizerTimer);
         optimizerAbort?.abort();
         optimizerCompleteAudio?.pause(); optimizerCompleteAudio = null;
-        if (optimizerRequestId) api.fetchApi("/goohai/minimax-h3/prompt-optimizer/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: optimizerRequestId }) }).catch(() => {});
+        if (optimizerRequestId) api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: optimizerRequestId }) }).catch(() => {});
         stopActiveMedia();
         closeActiveTrimEditor?.();
         decodedAudioCache.clear();
@@ -2676,7 +2677,7 @@ function nodeColorToCss(value) {
 }
 
 app.registerExtension({
-    name: "goohai.minimax_h3_integration",
+    name: "AICG3D.GoohaiMiniMaxH3Integration",
     rh: {
         type: "nodes",
         nodes: RH_NODE_IDS,

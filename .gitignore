@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
-h3easy/prompt_optimizer.json
+aicg3d_h3easy/prompt_optimizer.json
 web/*.log
 *.bak
 *.bak-*

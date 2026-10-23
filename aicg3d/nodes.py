@@ -6,7 +6,8 @@
 """AICG3D 自有节点：统一的技能调用入口。"""
 from __future__ import annotations
 
-import aicg3d.branding as branding, aicg3d.skills as skills
+import aicg3d.branding as branding
+import aicg3d.skills as skills
 
 AUTO = skills.AUTO_SKILL
 

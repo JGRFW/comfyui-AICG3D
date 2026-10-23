@@ -34,7 +34,7 @@ try:
     _safe_log(f"Loaded {len(NODE_CLASS_MAPPINGS)} production-ready nodes")
     _safe_log("=" * 50 + "\n")
     _safe_log("!" * 60 + "\n")
-except Exception as e:
+except Exception:
     _safe_log("\n" + "=" * 60)
     _safe_log("[AICG3D] FATAL ERROR LOADING PLUGIN:")
     _safe_log(traceback.format_exc())

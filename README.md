@@ -6,7 +6,7 @@
 <p align="center"><strong>官方名称：短剧工作台</strong> · <strong>核心搜索词：无限时长视频的 MiniMax H3 工作流</strong></p>
 <p align="center">GitHub：<a href="https://github.com/JGRFW/comfyui-AICG3D">https://github.com/JGRFW/comfyui-AICG3D</a></p>
 
-短剧工作台（ComfyUI-AICG3D-Integrated）是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
+短剧工作台（comfyui-AICG3D）是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
 
 ## 官方搜索入口
 
@@ -21,6 +21,16 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
+## 🆕 v1.1.15 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.15.md](RELEASE_NOTES_v1.1.15.md)。
+
+- **目录结构唯一命名空间加固**：`h3easy/`、`h3goohai/` 迁移至 `aicg3d_h3easy/`、`aicg3d_h3goohai/`，进一步降低与同源插件的加载冲突。
+- **新增 3D 人物白模与分段采样器**：`MiniMax H3 Aicg 3D人物白模`（视频→动作骨架）与 `分段采样器` 节点。
+- **新增 11 号多参考·首尾帧·数字人、15 号分段人物场景动作迁移替换工作流**。
+- **数字人长音频自动分段**：超长音频自动切段顺序生成，配合 SelfLift 潜空间放大提速。
+- **修复数字人模式渲染报错**：修复 `NameError: name 'self' is not defined`。
+
 ## 🆕 v1.1.14 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.14.md](RELEASE_NOTES_v1.1.14.md)。
@@ -28,6 +38,9 @@
 - **Registry 搜索修复**：修复安全扫描标记的 PyTorch 不安全反序列化。
 - **安全加载权重**：非 SafeTensors 的 latent 放大模型改用 `weights_only=True` 加载。
 - **公开管理器可检索**：新版本通过自动扫描后，其他电脑可直接在自定义节点管理器搜索安装。
+- **开源兼容性加固**：内部 Python 包、HTTP 路由和前端扩展名全部改为 AICG3D 唯一命名空间，降低与同源插件的加载冲突。
+- **分段解析正式节点 ID**：改为 `AICG3D_H3PromptSegmentSplit`；未安装旧 PromptSplit 插件时仍保留旧 ID 兼容别名，新工作流不会争用通用节点名。
+- **API Key 不回传浏览器**：提示词优化设置只返回“是否已保存”，留空保存会保留原密钥，并支持显式清除。
 
 ## v1.1.13 更新摘要
 
@@ -61,7 +74,7 @@
 
 - **彻底取消上游 Easy 依赖**：单独安装本插件即可使用资源库，不需要另外安装 `ComfyUI-MiniMaxH3-Easy`。
 - **修复干净环境启动失败**：移除启动日志中的 Emoji 输出，避免 Windows GBK 控制台无法编码导致整个插件被误判为加载失败。
-- **资源库面板内置注册**：只加载 `ComfyUI-AICG3D-Integrated` 时，`MiniMax H3 Aicg资源库` 也会正常显示上传区、图片、音频和视频面板。
+- **资源库面板内置注册**：只加载 `comfyui-AICG3D` 时，`MiniMax H3 Aicg资源库` 也会正常显示上传区、图片、音频和视频面板。
 
 ## v1.1.9 更新摘要
 
@@ -171,7 +184,7 @@
 
 ## 🛠️ 安装与部署
 
-1.  **快速安装**：将 ComfyUI-AICG3D-Integrated 文件夹复制到 custom_nodes/ 目录下。
+1.  **快速安装**：将 `comfyui-AICG3D` 文件夹复制到 ComfyUI 的 `custom_nodes/` 目录下。
 2.  **启动服务**：重启 ComfyUI。
 3.  **定位节点**：在右键菜单中找到 **AICG3D** 分类即可开始创作。
 
@@ -182,10 +195,17 @@
 如果安装后仍提示缺少 FFmpeg，请在当前 ComfyUI 使用的 Python 环境执行：
 
 ```powershell
-python.exe -m pip install imageio-ffmpeg
+python.exe -m pip install -r requirements.txt
 ```
 
 然后重启 ComfyUI。请勿安装到系统 Python 或其他虚拟环境，否则节点仍可能找不到。
+
+### 官方工作流的附加节点
+
+- 13 号 1.2 工作流使用 `DMADSampler` / `DMADSigmas`，需安装 [ComfyUI-DMAD](https://github.com/Yzmblog/DMAD)。
+- 11 号数字人工作流中的 `MiniMaxH3DMADSampler` 来自 `Spark-H3`；没有该节点时请改用工作流内可用的 AICG3D 采样器，或安装对应节点包。
+- 12、13 号工作流里的 `Label (rgthree)` 只是画布注释；缺少 [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) 时不影响后端生成，但建议安装以正常显示标签。
+
 
 > **💡 迁移指南**：由于采用了强制前缀，若您迁移旧版工作流，请将原有的 MiniMaxH3Easy 节点手动替换为对应的 AICG3D_H3_ 节点。
 
@@ -202,4 +222,4 @@ python.exe -m pip install imageio-ffmpeg
 
 ## 📜 开源协议
 
-本项目遵循 GNU GPL v3.0 协议开源。
+本项目遵循 GNU GPL v3.0 或更高版本（GPL-3.0-or-later）协议开源。

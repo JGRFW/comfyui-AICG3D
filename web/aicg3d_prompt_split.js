@@ -11,7 +11,7 @@
 
 import { app } from "../../scripts/app.js";
 
-const NODE_CLASS = "AICG3DPromptSegmentSplit";
+const NODE_CLASS = "AICG3D_H3PromptSegmentSplit";
 /* 一次最多解析并填入多少段。段落节点够多就能一直往后加，这里只留个安全上限。 */
 const MAX_SEGMENTS = 64;
 const AUTOFILL_DELAY = 400;

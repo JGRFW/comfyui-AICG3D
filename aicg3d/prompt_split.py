@@ -471,10 +471,24 @@ class AICG3DPromptSegmentSplit:
         return (prompts[0],)
 
 
+class AICG3DPromptSegmentSplitLegacy(AICG3DPromptSegmentSplit):
+    """Compatibility-only alias for workflows saved before the namespaced ID."""
+
+    DEPRECATED = True
+
+
 NODE_CLASS_MAPPINGS = {
-    "AICG3DPromptSegmentSplit": AICG3DPromptSegmentSplit,
+    "AICG3D_H3PromptSegmentSplit": AICG3DPromptSegmentSplit,
+}
+
+LEGACY_NODE_CLASS_MAPPINGS = {
+    "AICG3DPromptSegmentSplit": AICG3DPromptSegmentSplitLegacy,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "AICG3DPromptSegmentSplit": "AICG3D 分段提示词解析",
+    "AICG3D_H3PromptSegmentSplit": "AICG3D 分段提示词解析",
+}
+
+LEGACY_NODE_DISPLAY_NAME_MAPPINGS = {
+    "AICG3DPromptSegmentSplit": "AICG3D 分段提示词解析（旧 ID）",
 }

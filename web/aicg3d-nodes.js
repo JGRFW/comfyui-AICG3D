@@ -49,9 +49,9 @@ const NOTE_COLOR_SETTING = "AICG3D.NoteUseSystemColor";
 function useSystemNoteColor() {
     try {
         const value = app?.ui?.settings?.getSettingValue?.(NOTE_COLOR_SETTING);
-        return value === undefined || value === null ? true : !!value;
+        return value === true;
     } catch (error) {
-        return true;
+        return false;
     }
 }
 
@@ -98,6 +98,7 @@ function hookNoteType(nodeType) {
 /** Note / Markdown Note 是前端自带的虚拟节点，不会走 beforeRegisterNodeDef，
     所以直接在节点工厂上补配色；工作流已保存的颜色在 configure() 时会被还原。 */
 function installNoteColor() {
+    if (!useSystemNoteColor()) return;
     const lite = globalThis.LiteGraph;
     if (!lite) return;
 
@@ -135,9 +136,9 @@ const TTN_FIX_SETTING = "AICG3D.ResetTtnDefaultNodeColor";
 function ttnFixEnabled() {
     try {
         const value = app?.ui?.settings?.getSettingValue?.(TTN_FIX_SETTING);
-        return value === undefined || value === null ? true : !!value;
+        return value === true;
     } catch (error) {
-        return true;
+        return false;
     }
 }
 
@@ -839,15 +840,18 @@ app.registerExtension({
             name: "备注节点使用系统默认配色（不再用黄色）",
             tooltip: "关闭后备注节点恢复 ComfyUI 自带的黄色。切换时会同步当前工作流里的备注节点。",
             type: "boolean",
-            defaultValue: true,
-            onChange: () => repaintNotes(),
+            defaultValue: false,
+            onChange: () => {
+                installNoteColor();
+                if (useSystemNoteColor()) repaintNotes();
+            },
         });
         app?.ui?.settings?.addSetting?.({
             id: TTN_FIX_SETTING,
             name: "新节点保持系统默认配色（自动清理 ttN 全局默认色）",
             tooltip: "tinyterraNodes(ttN) 的「🌏 Default Node BG Color」会给所有新建节点上色，这是新节点颜色不是系统默认的原因。保持开启会自动清掉它，并还原已被染色的节点；关闭后完全交给 ttN。",
             type: "boolean",
-            defaultValue: true,
+            defaultValue: false,
             onChange: () => {
                 clearTtnDefaultColor();
                 sweepTtnTints();

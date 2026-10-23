@@ -1,6 +1,7 @@
-<img width="1424" height="696" alt="image" src="https://github.com/user-attachments/assets/5a6c88f8-df4e-4091-b06b-ca799349f6c1" />
-<img width="1532" height="626" alt="image" src="https://github.com/user-attachments/assets/83787eb7-761e-4ddc-b70f-5bf6cd36c4ef" />
-<img width="1395" height="666" alt="image" src="https://github.com/user-attachments/assets/fcc53765-8818-470f-bacf-ceaf5a93fec3" />
+<img width="1735" height="964" alt="屏幕截图 2026-10-23 193931" src="https://github.com/user-attachments/assets/12e0430b-2694-466d-abc1-e59c53afd5ac" />
+<img width="1902" height="701" alt="屏幕截图 2026-10-23 210816" src="https://github.com/user-attachments/assets/43a3f73e-5519-4518-92de-1435f17b87fb" />
+<img width="2154" height="846" alt="屏幕截图 2026-10-23 205631" src="https://github.com/user-attachments/assets/b1abcf32-c77d-4947-af86-1c6600b2133b" />
+
 工作流下载地址：https://github.com/JGRFW/comfyui-AICG3D/tree/main/workflows
 <h1 align="center">短剧工作台</h1>
 <h3 align="center">ComfyUI · MiniMax H3 · 本地无限长视频生成工作流</h3>

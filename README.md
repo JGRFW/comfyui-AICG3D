@@ -1,6 +1,7 @@
 <img width="1424" height="696" alt="image" src="https://github.com/user-attachments/assets/5a6c88f8-df4e-4091-b06b-ca799349f6c1" />
 <img width="1532" height="626" alt="image" src="https://github.com/user-attachments/assets/83787eb7-761e-4ddc-b70f-5bf6cd36c4ef" />
 <img width="1395" height="666" alt="image" src="https://github.com/user-attachments/assets/fcc53765-8818-470f-bacf-ceaf5a93fec3" />
+工作流下载地址：https://github.com/JGRFW/comfyui-AICG3D/tree/main/workflows
 <h1 align="center">短剧工作台</h1>
 <h3 align="center">ComfyUI · MiniMax H3 · 本地无限长视频生成工作流</h3>
 <p align="center"><strong>官方名称：短剧工作台</strong> · <strong>核心搜索词：无限时长视频的 MiniMax H3 工作流</strong></p>

@@ -277,6 +277,8 @@ const TEXT = {
     mediaLoaderTrimStart: ZH_BROWSER ? "\u5f00\u59cb" : "Start",
     mediaLoaderTrimEnd: ZH_BROWSER ? "\u7ed3\u675f" : "End",
     mediaLoaderTrimDuration: ZH_BROWSER ? "\u9009\u53d6\u65f6\u957f" : "Selected duration",
+    mediaLoaderTrimLength: ZH_BROWSER ? "\u622a\u53d6\u65f6\u957f" : "Clip length",
+    mediaLoaderTrimPosition: ZH_BROWSER ? "\u9009\u6bb5\u4f4d\u7f6e" : "Clip position",
     mediaLoaderTrimPreview: ZH_BROWSER ? "\u64ad\u653e\u9009\u533a" : "Play selection",
     mediaLoaderTrimFull: ZH_BROWSER ? "\u4f7f\u7528\u5b8c\u6574\u7d20\u6750" : "Use full media",
     mediaLoaderCancel: ZH_BROWSER ? "\u53d6\u6d88" : "Cancel",
@@ -10688,6 +10690,31 @@ function promptOptimizerGuideForNode(node) {
     return canonicalPromptGuide(getWidgetValue(node, "prompt_optimizer_scene_guide", "none"));
 }
 
+function parseMediaLoaderTrimSeconds(value) {
+    let text = String(value ?? "").trim().toLowerCase();
+    if (!text) return null;
+    if (text.includes(":")) {
+        const parts = text.split(":");
+        if (parts.length >= 2) {
+            const minutes = Number(parts.at(-2));
+            const seconds = Number(parts.at(-1));
+            if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
+                const total = minutes * 60 + seconds;
+                return total > 0 ? total : null;
+            }
+        }
+    }
+    text = text.replace(/\u79d2/g, "").replace(/(?:seconds?|secs?|s)$/i, "").trim();
+    const seconds = Number(text);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+function formatMediaLoaderTrimLength(seconds) {
+    const value = Math.max(0, Number(seconds) || 0);
+    const rounded = Math.round(value * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}${ZH_BROWSER ? "\u79d2" : "s"}`;
+}
+
 function formatAudioDurationLabel(seconds) {
     const value = Number(seconds);
     if (!Number.isFinite(value) || value < 0) return "";
@@ -11519,7 +11546,7 @@ function installMediaLoaderStyles() {
       .h3-media-loader-trim-playhead { position:absolute; top:-2px; bottom:-2px; width:2px; background:#f3c969; box-shadow:0 0 6px rgba(243,201,105,.75); pointer-events:none; }
       .h3-media-loader-trim-row { display:grid; grid-template-columns:52px minmax(0,1fr) 78px; align-items:center; gap:8px; }
       .h3-media-loader-trim-row input[type=range] { width:100%; accent-color:#36bfa6; }
-      .h3-media-loader-trim-row input[type=number] { width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #36505f; border-radius:4px; background:#0f1921; color:#e3edf2; }
+      .h3-media-loader-trim-row input[type=number], .h3-media-loader-trim-row input[type=text] { width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #36505f; border-radius:4px; background:#0f1921; color:#e3edf2; }
       .h3-media-loader-trim-duration { color:#899eaa; font-variant-numeric:tabular-nums; }
       .h3-media-loader-trim-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
       .h3-media-loader-trim-actions button { border:1px solid #3b5362; border-radius:4px; background:#22313c; color:#dce8ee; padding:6px 12px; cursor:pointer; }
@@ -12706,6 +12733,21 @@ function mediaLoaderOpenTrimEditor(node, group, filename) {
     };
     const startControl = makeRangeRow(TEXT.mediaLoaderTrimStart, "start");
     const endControl = makeRangeRow(TEXT.mediaLoaderTrimEnd, "end");
+    const positionControl = makeRangeRow(TEXT.mediaLoaderTrimPosition, "position");
+    const lengthRow = document.createElement("label");
+    lengthRow.className = "h3-media-loader-trim-row";
+    const lengthLabel = document.createElement("span");
+    lengthLabel.textContent = TEXT.mediaLoaderTrimLength;
+    const lengthInput = document.createElement("input");
+    lengthInput.type = "text";
+    lengthInput.inputMode = "decimal";
+    lengthInput.autocomplete = "off";
+    lengthInput.dataset.trimLength = "true";
+    lengthInput.setAttribute("aria-label", TEXT.mediaLoaderTrimLength);
+    lengthInput.placeholder = ZH_BROWSER ? "例如 5 \u6216 6\u79d2" : "e.g. 5 or 6s";
+    const lengthTotal = document.createElement("span");
+    lengthTotal.className = "h3-media-loader-trim-duration";
+    lengthRow.append(lengthLabel, lengthInput, lengthTotal);
     const durationInfo = document.createElement("div");
     durationInfo.className = "h3-media-loader-trim-duration";
     const actions = document.createElement("div");
@@ -12725,34 +12767,58 @@ function mediaLoaderOpenTrimEditor(node, group, filename) {
     save.textContent = TEXT.mediaLoaderSave;
     save.disabled = !(Number(entry.duration) > 0);
     actions.append(full, playSelection, cancel, save);
-    dialog.append(title, preview, track, startControl.row, endControl.row, durationInfo, actions);
+    dialog.append(
+        title,
+        preview,
+        track,
+        lengthRow,
+        positionControl.row,
+        startControl.row,
+        endControl.row,
+        durationInfo,
+        actions,
+    );
     overlay.append(dialog);
     document.body.append(overlay);
 
     let duration = Math.max(0.1, Number(entry.duration) || Number(preview.duration) || 0.1);
     let start = Math.max(0, Math.min(Number(entry.start) || 0, duration));
-    let end = Number.isFinite(Number(entry.end)) && Number(entry.end) > start
+    let selectionInitialized = Number.isFinite(Number(entry.end)) && Number(entry.end) > start;
+    let end = selectionInitialized
         ? Math.min(Number(entry.end), duration)
         : duration;
     const update = () => {
         const minimum = Math.min(0.1, duration);
         start = Math.max(0, Math.min(start, Math.max(0, duration - minimum)));
         end = Math.max(start + minimum, Math.min(end, duration));
-        for (const control of [startControl, endControl]) {
-            control.range.max = String(duration);
-            control.number.max = String(duration);
+        if (end > duration) {
+            end = duration;
+            start = Math.max(0, Math.min(start, duration - minimum));
+        }
+        const selectionLength = Math.max(minimum, end - start);
+        const maxStart = Math.max(0, duration - selectionLength);
+        for (const control of [startControl, endControl, positionControl]) {
+            control.range.max = String(control === positionControl ? maxStart : duration);
+            control.number.max = String(control === positionControl ? maxStart : duration);
         }
         startControl.range.value = String(start);
         endControl.range.value = String(end);
         startControl.number.value = start.toFixed(2);
         endControl.number.value = end.toFixed(2);
+        positionControl.range.value = String(start);
+        positionControl.number.value = start.toFixed(2);
+        if (document.activeElement !== lengthInput) {
+            lengthInput.value = formatMediaLoaderTrimLength(selectionLength);
+        }
+        lengthTotal.textContent = mediaLoaderFormatClock(duration);
         region.style.left = `${(start / duration) * 100}%`;
-        region.style.width = `${Math.max(0, ((end - start) / duration) * 100)}%`;
-        durationInfo.textContent = `${TEXT.mediaLoaderTrimDuration} ${mediaLoaderFormatClock(end - start)} / ${mediaLoaderFormatClock(duration)}`;
+        region.style.width = `${Math.max(0, (selectionLength / duration) * 100)}%`;
+        durationInfo.textContent = `${TEXT.mediaLoaderTrimDuration} ${mediaLoaderFormatClock(selectionLength)} / ${mediaLoaderFormatClock(duration)}`;
     };
     const setBound = (role, value) => {
         const number = Number(value);
         if (!Number.isFinite(number)) return;
+        selectionInitialized = true;
         if (role === "start") start = Math.min(number, end - Math.min(0.1, duration));
         else end = Math.max(number, start + Math.min(0.1, duration));
         update();
@@ -12761,6 +12827,36 @@ function mediaLoaderOpenTrimEditor(node, group, filename) {
     endControl.range.addEventListener("input", () => setBound("end", endControl.range.value));
     startControl.number.addEventListener("change", () => setBound("start", startControl.number.value));
     endControl.number.addEventListener("change", () => setBound("end", endControl.number.value));
+    const moveSelection = (value) => {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return;
+        selectionInitialized = true;
+        const selectionLength = Math.max(Math.min(0.1, duration), end - start);
+        start = Math.max(0, Math.min(number, Math.max(0, duration - selectionLength)));
+        end = Math.min(duration, start + selectionLength);
+        update();
+    };
+    const applyLength = (value) => {
+        const requested = parseMediaLoaderTrimSeconds(value);
+        if (!Number.isFinite(requested)) {
+            update();
+            return;
+        }
+        selectionInitialized = true;
+        const selectionLength = Math.min(duration, Math.max(Math.min(0.1, duration), requested));
+        if (start + selectionLength > duration) start = Math.max(0, duration - selectionLength);
+        end = Math.min(duration, start + selectionLength);
+        update();
+    };
+    positionControl.range.addEventListener("input", () => moveSelection(positionControl.range.value));
+    positionControl.number.addEventListener("change", () => moveSelection(positionControl.number.value));
+    lengthInput.addEventListener("change", () => applyLength(lengthInput.value));
+    lengthInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        applyLength(lengthInput.value);
+        lengthInput.blur();
+    });
     preview.addEventListener("timeupdate", () => {
         const current = Number(preview.currentTime) || 0;
         playhead.style.left = `${Math.max(0, Math.min(1, current / duration)) * 100}%`;
@@ -12770,12 +12866,18 @@ function mediaLoaderOpenTrimEditor(node, group, filename) {
         const actual = Number(preview.duration);
         if (Number.isFinite(actual) && actual > 0) {
             duration = actual;
-            end = Math.min(end || actual, actual);
+            if (!selectionInitialized) {
+                start = 0;
+                end = actual;
+                selectionInitialized = true;
+            } else {
+                end = Math.min(end || actual, actual);
+            }
             save.disabled = false;
             update();
         }
     }, { once: true });
-    full.addEventListener("click", () => { start = 0; end = duration; update(); });
+    full.addEventListener("click", () => { selectionInitialized = true; start = 0; end = duration; update(); });
     playSelection.addEventListener("click", async () => {
         try {
             preview.currentTime = start;

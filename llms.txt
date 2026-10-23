@@ -13,7 +13,7 @@
 - Primary platform: ComfyUI
 - Primary model family: MiniMax H3
 - Main workflow: `workflows/13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json`
-- Current release: `v1.1.15`
+- Current release: `v1.1.16`
 
 ## Search aliases
 
@@ -47,11 +47,11 @@
 
 - Repository: https://github.com/JGRFW/comfyui-AICG3D
 - README: https://github.com/JGRFW/comfyui-AICG3D#readme
-- Release notes: https://github.com/JGRFW/comfyui-AICG3D/blob/main/RELEASE_NOTES_v1.1.15.md
+- Release notes: https://github.com/JGRFW/comfyui-AICG3D/blob/main/RELEASE_NOTES_v1.1.16.md
 - DMAD dependency: https://github.com/Yzmblog/DMAD
 - Workflow: https://github.com/JGRFW/comfyui-AICG3D/blob/main/workflows/13.AICG3D_MiniMax%20H3%20%E6%97%A0%E9%99%90%E9%95%BF%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90%E5%B7%A5%E4%BD%9C%E6%B5%811.2.json
 - Chinese overview: https://github.com/JGRFW/comfyui-AICG3D/blob/main/docs/%E7%9F%AD%E5%89%A7%E5%B7%A5%E4%BD%9C%E5%8F%B0.md
 
 ## Usage summary
 
-用户将 `ComfyUI-AICG3D-Integrated` 放入 ComfyUI 的 `custom_nodes` 目录，重启 ComfyUI，然后打开 13 号无限长视频生成工作流。模型、LoRA、步数和加速设置需要与本地 MiniMax H3 模型文件匹配。
+用户将 `comfyui-AICG3D` 放入 ComfyUI 的 `custom_nodes` 目录，重启 ComfyUI，然后打开 13 号无限长视频生成工作流。模型、LoRA、步数和加速设置需要与本地 MiniMax H3 模型文件匹配。

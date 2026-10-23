@@ -25,7 +25,7 @@
 
 ## 🆕 v1.1.17 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.17.md](RELEASE_NOTES_v1.1.17.md)。
+完整说明见 [RELEASE_NOTES_v1.1.17.md](release_notes/RELEASE_NOTES_v1.1.17.md)。
 
 - **全能参考采样预览恢复**：修复“高级·加速”渲染器解码了预览帧却未回传原生预览通道的问题，全能参考、图生视频和数字人模式均可实时显示采样预览。
 - **未引用音频不再误用**：`Ref2VA 全能参考` 只有提示词明确写入有效的 `<Audio N>` 时才读取资源库音频；没有音频标签时自动忽略音频，图片与视频参考保持不变。
@@ -33,7 +33,7 @@
 
 ## v1.1.16 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.16.md](RELEASE_NOTES_v1.1.16.md)。
+完整说明见 [RELEASE_NOTES_v1.1.16.md](release_notes/RELEASE_NOTES_v1.1.16.md)。
 
 - **资源库音频/视频直接引用**：点击音频、视频卡片会按当前光标位置插入 `<Audio N>` / `<Video N>`，播放按钮独立操作，不再抢占卡片点击。
 - **截取时长与选段窗口**：音频/视频裁剪支持输入 `5`、`5 秒`、`5s` 或 `0:05`；新增“选段位置”滑块可整体移动固定时长片段。
@@ -42,7 +42,7 @@
 
 ## 🆕 v1.1.15 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.15.md](RELEASE_NOTES_v1.1.15.md)。
+完整说明见 [RELEASE_NOTES_v1.1.15.md](release_notes/RELEASE_NOTES_v1.1.15.md)。
 
 - **目录结构唯一命名空间加固**：`h3easy/`、`h3goohai/` 迁移至 `aicg3d_h3easy/`、`aicg3d_h3goohai/`，进一步降低与同源插件的加载冲突。
 - **新增 3D 人物白模与分段采样器**：`MiniMax H3 Aicg 3D人物白模`（视频→动作骨架）与 `分段采样器` 节点。
@@ -52,7 +52,7 @@
 
 ## 🆕 v1.1.14 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.14.md](RELEASE_NOTES_v1.1.14.md)。
+完整说明见 [RELEASE_NOTES_v1.1.14.md](release_notes/RELEASE_NOTES_v1.1.14.md)。
 
 - **Registry 搜索修复**：修复安全扫描标记的 PyTorch 不安全反序列化。
 - **安全加载权重**：非 SafeTensors 的 latent 放大模型改用 `weights_only=True` 加载。
@@ -63,7 +63,7 @@
 
 ## v1.1.13 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.13.md](RELEASE_NOTES_v1.1.13.md)。
+完整说明见 [RELEASE_NOTES_v1.1.13.md](release_notes/RELEASE_NOTES_v1.1.13.md)。
 
 - **模型目录树**：加载器下拉按 `MiniMax`、`Krea2`、`Qwen`、`LTX2.5` 等文件夹分组显示。
 - **LoRA 多级目录**：支持 `Krea2/Krea2-风格` 这类多层文件夹展开选择。
@@ -72,7 +72,7 @@
 
 ## v1.1.12 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.12.md](RELEASE_NOTES_v1.1.12.md)。
+完整说明见 [RELEASE_NOTES_v1.1.12.md](release_notes/RELEASE_NOTES_v1.1.12.md)。
 
 - **缺失素材自动检查**：打开工作流后批量检查图片、音频和视频是否存在。
 - **精确段落提示**：提示缺失文件属于哪一个视频段落，资源卡片同步显示红色“素材缺失”。
@@ -81,7 +81,7 @@
 
 ## v1.1.11 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.11.md](RELEASE_NOTES_v1.1.11.md)。
+完整说明见 [RELEASE_NOTES_v1.1.11.md](release_notes/RELEASE_NOTES_v1.1.11.md)。
 
 - **接入 Comfy Registry**：补齐官方节点管理器要求的项目名称、Publisher、显示名称、图标、关键词、仓库和问题反馈地址。
 - **官方管理器可检索**：发布后可搜索 `AICG3D`、`短剧工作台` 或 `MiniMax H3` 找到本插件。
@@ -89,7 +89,7 @@
 
 ## v1.1.10 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.10.md](RELEASE_NOTES_v1.1.10.md)。
+完整说明见 [RELEASE_NOTES_v1.1.10.md](release_notes/RELEASE_NOTES_v1.1.10.md)。
 
 - **彻底取消上游 Easy 依赖**：单独安装本插件即可使用资源库，不需要另外安装 `ComfyUI-MiniMaxH3-Easy`。
 - **修复干净环境启动失败**：移除启动日志中的 Emoji 输出，避免 Windows GBK 控制台无法编码导致整个插件被误判为加载失败。
@@ -97,7 +97,7 @@
 
 ## v1.1.9 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.9.md](RELEASE_NOTES_v1.1.9.md)。
+完整说明见 [RELEASE_NOTES_v1.1.9.md](release_notes/RELEASE_NOTES_v1.1.9.md)。
 
 - **修复资源库白板**：`mediaLoaderResize` 测量后不再恢复旧的隐藏状态，面板会稳定保持可见。
 - **同步可见状态**：同时修复 `hidden`、`type`、`options.hidden`、`options.canvasOnly` 与 `_state`，避免工作流重载后只恢复一半。
@@ -105,14 +105,14 @@
 
 ## 🆕 v1.1.8 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.8.md](RELEASE_NOTES_v1.1.8.md)。
+完整说明见 [RELEASE_NOTES_v1.1.8.md](release_notes/RELEASE_NOTES_v1.1.8.md)。
 
 - 为 13 号无限长视频工作流最终合成补齐 `imageio-ffmpeg` 运行依赖。
 - 缺少 FFmpeg 时给出中文安装提示和 ComfyUI Python 安装命令。
 
 ## 🆕 v1.1.7 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.7.md](RELEASE_NOTES_v1.1.7.md)。
+完整说明见 [RELEASE_NOTES_v1.1.7.md](release_notes/RELEASE_NOTES_v1.1.7.md)。
 
 - **资源库点击引用严格跟随光标**：图片、视频和音频标签现在插入到用户最后操作的位置，不再追加到提示词末尾。
 - **兼容隐藏与可见 textarea**：优先使用用户实际点击的编辑框，同时保留原提示词编辑器的选区恢复。
@@ -120,7 +120,7 @@
 
 ## 🆕 v1.1.6 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.6.md](RELEASE_NOTES_v1.1.6.md)。
+完整说明见 [RELEASE_NOTES_v1.1.6.md](release_notes/RELEASE_NOTES_v1.1.6.md)。
 
 - **五种 H3 任务模式已接入执行链**：`Ref2VA 全能参考（推荐）`、`T2VA 纯文本`、`I2VA 首帧参考`、`FL2VA 首尾帧参考`、`L2VA 尾帧参考`。
 - **模式会真实改变生成行为**：素材数量校验、首尾帧条件、模型角色和提示词优化规则都会随模式切换。
@@ -131,7 +131,7 @@
 
 ## 🆕 v1.1.5 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.5.md](RELEASE_NOTES_v1.1.5.md)。
+完整说明见 [RELEASE_NOTES_v1.1.5.md](release_notes/RELEASE_NOTES_v1.1.5.md)。
 
 - **三个渲染器支持外部采样**：高级·加速、一采、二采放大均新增“外部采样器”和“外部调度器（Sigmas）”可选输入。
 - **二采全路径支持**：二采整幅采样与分块采样都能使用外部采样器和 Sigmas。
@@ -141,7 +141,7 @@
 
 ## v1.1.4 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.4.md](RELEASE_NOTES_v1.1.4.md)。
+完整说明见 [RELEASE_NOTES_v1.1.4.md](release_notes/RELEASE_NOTES_v1.1.4.md)。
 
 - **外部采样器接口**：无限段落顺序生成（全局设置）新增“外部采样器”和“外部调度器（Sigmas）”输入，连接后自动覆盖内置采样器、调度器、步数和 denoise 截断。
 - **DMAD 官方四步加速**：支持 `DMAD Sampler (re-noise)` + `DMAD Sigmas`，官方推荐参数为 LoRA 强度 1.0、步数 4、shift 12。
@@ -151,7 +151,7 @@
 
 ## v1.1.3 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.3.md](RELEASE_NOTES_v1.1.3.md)。
+完整说明见 [RELEASE_NOTES_v1.1.3.md](release_notes/RELEASE_NOTES_v1.1.3.md)。
 
 - **视频段落编辑区重排**：提示词框自动占据节点的主要伸缩空间，底部操作按钮固定为 32px，不再出现大面积空白。
 - **资源库展开更稳定**：资源库打开时最高 320px，内容过多时内部滚动；提示词仍保留可编辑空间，节点可自由拖高且不会回弹。
@@ -176,7 +176,7 @@
 
 ## v1.1.1 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md)。
+完整说明见 [RELEASE_NOTES_v1.1.1.md](release_notes/RELEASE_NOTES_v1.1.1.md)。
 
 - **跨段接缝曝光锁定**：匹配上一段尾帧的低频色光，使用有上限的全局亮度对齐，解决分段拼接处明暗跳变。
 - **拼接模糊修复**：修正接缝亮度过渡的运算顺序，避免为平滑曝光而把整段画面模糊。

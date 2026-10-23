@@ -5835,17 +5835,34 @@ def bind_reference_media(text: str, items: list[_MediaInput]) -> tuple[list[_Med
     call only accepts 9 pictures, 3 videos and 3 audio clips. Prompts that
     mention media are therefore reduced to those inputs and renumbered
     compactly so the tags in the prompt and the references handed to H3 stay
-    aligned. Prompts without any mention keep every input so existing
-    workflows behave exactly as before.
+    aligned. Prompts without any tag keep images and videos for backward
+    compatibility, but unmentioned audio is discarded so the resource
+    library cannot silently supply reference audio.
     """
     source = str(text or "")
     if not items:
         return list(items), source
-    if not SEGMENT_TAG_PATTERN.search(_segment_expand_media_placeholders(source, items)):
-        return list(items), source
+    expanded = _segment_expand_media_placeholders(source, items)
+    if not SEGMENT_TAG_PATTERN.search(expanded):
+        # Images and videos remain backward-compatible when no tag is written,
+        # but standalone audio is an explicit reference capability.  Keeping an
+        # untagged audio clip here would silently reuse it as reference audio.
+        visual_items = [item for item in items if item.media_type != "audio"]
+        if len(visual_items) != len(items):
+            print(
+                "[MiniMax H3 Aicg] 参考模式：提示词未引用 <Audio N>，"
+                "已忽略资源库中的音频；图片和视频参考保持不变。"
+            )
+        return visual_items, source
     chosen, rewritten = bind_segment_media(source, items)
+    audio_count = sum(1 for item in chosen if item.media_type == "audio")
+    if audio_count == 0 and any(item.media_type == "audio" for item in items):
+        print(
+            "[MiniMax H3 Aicg] 参考模式：提示词没有有效的 <Audio N>，"
+            "已忽略资源库中的音频。"
+        )
     if not chosen:
-        return list(items), source
+        return [item for item in items if item.media_type != "audio"], rewritten
     return chosen, rewritten
 
 
@@ -8248,15 +8265,17 @@ class MiniMaxH3EasyRenderAdvanced:
         from aicg3d_h3easy.render_progress import SAMPLE_PREVIEW_ENABLED, RenderPreviewEncoder, RenderProgressReporter
 
         # 前端会在节点底部按这些进度画一条百分比进度条（带已用时间与剩余估计），
-        # 采样占 90%，解码与合成占剩下 10%。节点上不显示采样预览图；需要时把
-        # render_progress.SAMPLE_PREVIEW_ENABLED 改成 True 再挂上预览回调。
+        # 采样占 90%，解码与合成占剩下 10%。开启采样预览时，把解码后的图
+        # 作为 ComfyUI 原生预览元组交给 ProgressBar，节点正文会实时刷新。
         reporter = RenderProgressReporter()
         want_preview = bool(SAMPLE_PREVIEW_ENABLED or sample_preview)
         preview = RenderPreviewEncoder(model) if want_preview else None
         on_preview = None
         if preview is not None:
             def on_preview(x0, *_info):
-                reporter.update_preview(preview.decode(x0))
+                # The sampler must receive the native preview tuple; otherwise the
+                # image is decoded but ProgressBar is called with preview=None.
+                return reporter.update_preview(preview.decode(x0))
         done = False
         try:
             if long_digital_human:

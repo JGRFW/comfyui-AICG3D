@@ -23,7 +23,13 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.17 更新摘要
+## 🆕 v1.1.18 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.18.md](release_notes/RELEASE_NOTES_v1.1.18.md)。
+
+- **旧版数字人工作流兼容**：自动修复其他电脑加载旧工作流时 RIFE 模型、插帧倍率和清缓存值错位的问题，避免出现“输入超出范围 / 无效输入”。
+
+## v1.1.17 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.17.md](release_notes/RELEASE_NOTES_v1.1.17.md)。
 

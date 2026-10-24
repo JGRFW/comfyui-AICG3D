@@ -5686,6 +5686,57 @@ function syncContextLengthWidget(node) {
     return changed;
 }
 
+function repairLegacyDigitalHumanRifeValues(node, info = null) {
+    if (!node || !getWidget(node, "digital_human_rife")) return false;
+    const named = info?.widgets_values_named && typeof info.widgets_values_named === "object"
+        ? info.widgets_values_named
+        : {};
+    const read = (name) => Object.prototype.hasOwnProperty.call(named, name)
+        ? named[name]
+        : getWidgetValue(node, name, "");
+    const modelWidget = getWidget(node, "digital_human_rife_model");
+    const modelOptions = Array.isArray(modelWidget?.options?.values)
+        ? modelWidget.options.values.map(String)
+        : [];
+    const preferredModel = modelOptions.includes("rife47.pth")
+        ? "rife47.pth"
+        : (modelOptions[0] || "rife47.pth");
+    const requestedModel = String(read("digital_human_rife_model") ?? "").trim();
+    const model = modelOptions.length === 0 || modelOptions.includes(requestedModel)
+        ? (requestedModel || preferredModel)
+        : preferredModel;
+    const boundedInteger = (raw, fallback, min, max) => {
+        if (typeof raw === "boolean") return fallback;
+        const parsed = Number.parseInt(String(raw ?? ""), 10);
+        return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+    };
+    const multiplier = boundedInteger(read("digital_human_rife_multiplier"), 4, 2, 8);
+    const clearCache = boundedInteger(read("digital_human_rife_clear_cache"), 10, 1, 1000);
+    let changed = false;
+    if (String(getWidgetValue(node, "digital_human_rife_model", "")) !== model) {
+        changed = setWidgetValue(node, "digital_human_rife_model", model) || changed;
+    }
+    if (Number(getWidgetValue(node, "digital_human_rife_multiplier", 0)) !== multiplier) {
+        changed = setWidgetValue(node, "digital_human_rife_multiplier", multiplier) || changed;
+    }
+    if (Number(getWidgetValue(node, "digital_human_rife_clear_cache", 0)) !== clearCache) {
+        changed = setWidgetValue(node, "digital_human_rife_clear_cache", clearCache) || changed;
+    }
+    if (changed) {
+        if (!node.__h3LegacyRifeRepairLogged) {
+            node.__h3LegacyRifeRepairLogged = true;
+            console.warn(
+                "[AICG3D] 已修复旧工作流中的数字人 RIFE 控件值",
+                { model, multiplier, clearCache },
+            );
+        }
+        node._widgetSlotsDirty = true;
+        refreshVueNodeWidgets(node);
+        node.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
 function syncDigitalHumanRifeWidgets(node, { adjustHeight = true } = {}) {
     if (!nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__h3EasyNodeInstalled")) return false;
     const digitalHuman = canonicalOption(
@@ -9888,6 +9939,7 @@ function installNode(nodeType, nodeData) {
         // A workflow-tab activation is a restore operation. Its serialized or
         // previously stable size is already authoritative, so reapplying the
         // same widget visibility must not add/subtract rows again.
+        repairLegacyDigitalHumanRifeValues(this);
         syncModeWidgets(this, { adjustHeight: false });
         repairNodeLayout(this);
         return result;
@@ -9923,6 +9975,7 @@ function installNode(nodeType, nodeData) {
             this.properties[SIMPLE_SWAP_UI_PROP] = info.properties[SIMPLE_SWAP_UI_PROP] === true;
         }
         repairConfiguredWidgetValues(this, info);
+        repairLegacyDigitalHumanRifeValues(this, info);
         normalizeLinks(this);
         pruneTransportInputsFromNode(this, { force: true });
         normalizeLinks(this);

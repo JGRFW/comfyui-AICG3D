@@ -6145,6 +6145,55 @@ def _rife_model_choices() -> tuple[list[str], str]:
     ], "rife47.pth"
 
 
+def _normalize_digital_human_rife_settings(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Repair legacy digital-human RIFE widget values before execution.
+
+    Older workflow snapshots could shift the RIFE model, multiplier, and cache
+    values into one another. The strings/numbers then fail ComfyUI's normal
+    widget validation before this node runs, so the node opts into custom
+    validation for those three fields and normalizes them here.
+    """
+    models, default_model = _rife_model_choices()
+    raw_model = values.get("digital_human_rife_model")
+    requested_model = str(raw_model if raw_model is not None else "").strip()
+    model = requested_model if requested_model in models else default_model
+
+    def bounded_integer(raw: Any, fallback: int, minimum: int, maximum: int) -> int:
+        if isinstance(raw, bool) or raw is None:
+            return fallback
+        try:
+            number = int(float(raw))
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+        return number if minimum <= number <= maximum else fallback
+
+    multiplier = bounded_integer(
+        values.get("digital_human_rife_multiplier"), 4, 2, 8
+    )
+    clear_cache = bounded_integer(
+        values.get("digital_human_rife_clear_cache"), 10, 1, 1000
+    )
+    raw_multiplier = values.get("digital_human_rife_multiplier")
+    raw_clear_cache = values.get("digital_human_rife_clear_cache")
+    if (
+        (requested_model and requested_model not in models)
+        or (raw_multiplier is not None and str(raw_multiplier) != str(multiplier))
+        or (raw_clear_cache is not None and str(raw_clear_cache) != str(clear_cache))
+    ):
+        print(
+            "[MiniMax H3 Aicg] 已修复旧工作流中的数字人 RIFE 控件值："
+            f"模型 {model}，倍率 {multiplier}，清缓存 {clear_cache}。"
+        )
+    return {
+        "enabled": _coerce_bool(values.get("digital_human_rife"), False),
+        "model": model,
+        "multiplier": multiplier,
+        "fast_mode": _coerce_bool(values.get("digital_human_rife_fast_mode"), True),
+        "ensemble": _coerce_bool(values.get("digital_human_rife_ensemble"), True),
+        "clear_cache": clear_cache,
+    }
+
+
 def _run_rife_transition(
     previous_frame: torch.Tensor,
     target_frame: torch.Tensor,
@@ -6244,6 +6293,18 @@ class MiniMaxH3Easy:
             },
             "optional": optional,
         }
+
+    @classmethod
+    def VALIDATE_INPUTS(
+        cls,
+        digital_human_rife_model=None,
+        digital_human_rife_multiplier=None,
+        digital_human_rife_clear_cache=None,
+    ):
+        # Older workflows may shift these three widget values. Validate them in
+        # _normalize_digital_human_rife_settings() after ComfyUI has accepted the
+        # legacy values, instead of failing the whole prompt before execution.
+        return True
 
     @staticmethod
     def _collect_media(kwargs: dict, maximum: int = MAX_MEDIA) -> list[_MediaInput]:
@@ -6394,14 +6455,7 @@ class MiniMaxH3Easy:
                 "height": height,
                 "fps": float(fps),
                 "ref_image_size": ref_image_size,
-                "rife": {
-                    "enabled": bool(kwargs.get("digital_human_rife", False)),
-                    "model": str(kwargs.get("digital_human_rife_model") or "rife47.pth"),
-                    "multiplier": max(2, int(kwargs.get("digital_human_rife_multiplier") or 4)),
-                    "fast_mode": bool(kwargs.get("digital_human_rife_fast_mode", True)),
-                    "ensemble": bool(kwargs.get("digital_human_rife_ensemble", True)),
-                    "clear_cache": max(1, int(kwargs.get("digital_human_rife_clear_cache") or 10)),
-                },
+                "rife": _normalize_digital_human_rife_settings(kwargs),
             }
         elif mode == MODE_REFERENCE and items:
             items, prompt = bind_reference_media(prompt, items)

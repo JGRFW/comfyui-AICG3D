@@ -255,6 +255,10 @@ def _scan_visual_models() -> list[dict]:
     return result
 
 
+def _public_visual_models() -> list[dict]:
+    return [{key: value for key, value in item.items() if key != "path"} for item in _scan_visual_models()]
+
+
 def _find_visual_model(selected: str) -> dict | None:
     return next((item for item in _scan_visual_models() if item["relative_path"] == selected), None)
 
@@ -279,6 +283,59 @@ def _normalize_config(data: dict | None) -> dict:
         "auto_optimize": bool(data.get("auto_optimize", current.get("auto_optimize", False))),
     }
     return config
+
+
+_CONFIG_LOCK = threading.RLock()
+
+
+def _config_path() -> Path:
+    try:
+        user_root = Path(folder_paths.get_user_directory())
+    except Exception:
+        user_root = Path(getattr(folder_paths, "base_path", Path(__file__).resolve().parents[3])) / "user"
+    return (user_root / "default" / "aicg3d" / "goohai_prompt_optimizer.json").resolve()
+
+
+def _read_stored_config() -> dict:
+    path = _config_path()
+    with _CONFIG_LOCK:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            return _normalize_config(DEFAULT_CONFIG)
+    return _normalize_config(payload)
+
+
+def _write_stored_config(config: dict) -> dict:
+    normalized = _normalize_config(config)
+    path = _config_path()
+    directory = path.parent
+    temporary_path = ""
+    with _CONFIG_LOCK:
+        directory.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            try:
+                os.chmod(directory, 0o700)
+            except OSError:
+                pass
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=directory,
+                prefix=".prompt_optimizer.", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary_path = handle.name
+                json.dump(normalized, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            os.replace(temporary_path, path)
+            if os.name != "nt":
+                os.chmod(path, 0o600)
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
+    return normalized
 
 
 def _public_config(config: dict) -> dict:
@@ -336,16 +393,27 @@ async def _refresh_runninghub_models() -> tuple[str, ...]:
 
 
 def _resolve_input_file(name: str) -> Path:
-    value = str(name or "").strip()
-    if not value:
-        raise ValueError("参考素材文件名为空")
-    annotated = folder_paths.get_annotated_filepath(value)
-    if annotated and os.path.isfile(annotated):
-        return Path(annotated)
-    path = Path(folder_paths.get_input_directory()) / value
-    if path.is_file():
-        return path
-    raise FileNotFoundError(f"找不到参考素材: {value}")
+    value = str(name or "").strip().replace("\\", "/")
+    if not value or "\x00" in value or value.startswith("/"):
+        raise ValueError("参考素材文件名无效")
+    parts = [part for part in value.split("/") if part and part != "."]
+    if not parts or any(part == ".." for part in parts):
+        raise ValueError("参考素材路径不能离开 ComfyUI input 目录")
+    relative = "/".join(parts)
+    annotated = folder_paths.get_annotated_filepath(relative)
+    candidates = [annotated, os.path.join(folder_paths.get_input_directory(), *parts)]
+    input_root = os.path.realpath(folder_paths.get_input_directory())
+    for candidate in candidates:
+        if not candidate:
+            continue
+        resolved = os.path.realpath(candidate)
+        try:
+            inside = os.path.commonpath((input_root, resolved)) == input_root
+        except ValueError:
+            inside = False
+        if inside and os.path.isfile(resolved):
+            return Path(resolved)
+    raise FileNotFoundError(f"找不到参考素材: {relative}")
 
 
 def _ffmpeg_path() -> str:
@@ -513,7 +581,9 @@ def _gguf_dependency_status() -> dict:
     }
     try:
         import llama_cpp
-        from llama_cpp.llama_chat_format import Qwen35ChatHandler  # noqa: F401
+        from llama_cpp import llama_chat_format
+        if not hasattr(llama_chat_format, "Qwen35ChatHandler"):
+            raise RuntimeError("llama-cpp-python does not provide Qwen35ChatHandler")
         status["available"] = True
         status["version"] = str(getattr(llama_cpp, "__version__", "unknown"))
         return status
@@ -596,7 +666,7 @@ def _downscaled_jpeg(image, max_side: int = IMAGE_MAX_SIDE) -> str:
         )
     buffer = BytesIO()
     image.convert("RGB").save(buffer, "JPEG", quality=_IMAGE_JPEG_QUALITY, optimize=True)
-    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    return "data:" + "image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def _shrink_data_url_image(data_url: str, max_side: int = IMAGE_MAX_SIDE) -> str:
@@ -1576,8 +1646,8 @@ def gguf_dependency_status() -> dict:
 
 
 async def get_prompt_optimizer_config(_request):
-    config = _public_config(DEFAULT_CONFIG)
-    config["models"] = _scan_visual_models()
+    config = _public_config(_read_stored_config())
+    config["models"] = _public_visual_models()
     config["mmproj_files"] = _mmproj_options()
     config["missing_dependencies"] = _local_missing_dependencies()
     config["gguf_dependency"] = _gguf_dependency_status()
@@ -1592,7 +1662,7 @@ def _local_missing_dependencies() -> list[str]:
 
 async def list_prompt_optimizer_models(_request):
     return web.json_response({
-        "models": _scan_visual_models(),
+        "models": _public_visual_models(),
         "mmproj_files": _mmproj_options(),
         "missing_dependencies": _local_missing_dependencies(),
         "gguf_dependency": _gguf_dependency_status(),
@@ -1608,7 +1678,24 @@ async def refresh_runninghub_models(_request):
 
 
 async def save_prompt_optimizer_config(request):
-    return web.json_response(_public_config(_normalize_config(await request.json())))
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        return web.json_response({"error": "请求内容不是有效 JSON"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "配置必须是 JSON 对象"}, status=400)
+    current = _read_stored_config()
+    incoming = dict(payload)
+    if incoming.pop("clear_api_key", False):
+        incoming["api_key"] = ""
+    elif not str(incoming.get("api_key") or "").strip():
+        incoming["api_key"] = current.get("api_key", "")
+    try:
+        settings = _write_stored_config({**current, **incoming})
+    except OSError as exc:
+        _LOGGER.error("Unable to persist prompt optimizer settings: %s", exc)
+        return web.json_response({"error": "无法保存提示词优化配置"}, status=500)
+    return web.json_response(_public_config(settings))
 
 
 async def optimize_prompt(request):
@@ -1624,7 +1711,10 @@ async def optimize_prompt(request):
                 previous_cancel_event.set()
             _ACTIVE_CANCEL_EVENTS[request_id] = cancel_event
         node_config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
-        config = _normalize_config(node_config)
+        requested_key = str(node_config.get("api_key") or "")
+        config = _normalize_config({**_read_stored_config(), **node_config})
+        if requested_key:
+            config["api_key"] = requested_key
         if config.get("mode") == "local":
             model_path = _local_model_path(config)
             if model_path.suffix.lower() == ".gguf":

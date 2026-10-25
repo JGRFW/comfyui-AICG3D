@@ -8,7 +8,7 @@
 <p align="center"><strong>官方名称：短剧工作台</strong> · <strong>核心搜索词：无限时长视频的 MiniMax H3 工作流</strong></p>
 <p align="center">GitHub：<a href="https://github.com/JGRFW/comfyui-AICG3D">https://github.com/JGRFW/comfyui-AICG3D</a></p>
 
-短剧工作台（comfyui-AICG3D）是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**零冲突、工业级、可预测**的视频创作环境。
+短剧工作台（comfyui-AICG3D）是一个专为专业 AI 视频创作者打造的深度整合插件包。它将 MiniMax H3 的核心生成能力、智能分段解析与高阶渲染策略集成于一体，旨在为用户提供一个**节点命名空间隔离、可维护、可预测**的视频创作环境。
 
 ## 官方搜索入口
 
@@ -23,7 +23,14 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.18 更新摘要
+## 🆕 v1.1.19 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.19.md](release_notes/RELEASE_NOTES_v1.1.19.md)。
+
+- **开源安全与兼容性审计**：修复集成节点 ID 冲突并为旧工作流自动迁移，隔离 API Key、阻止素材路径穿越、移除 KJNodes 私有模块注入，并修复本地视觉模型图像载荷。
+- **UI 与注册稳定性**：修复资源库恢复时的重复尺寸回调、补齐节点分类、减少全局补丁层级，并确保后端失败时不会启动半套前端。
+
+## v1.1.18 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.18.md](release_notes/RELEASE_NOTES_v1.1.18.md)。
 

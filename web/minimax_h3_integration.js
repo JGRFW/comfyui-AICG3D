@@ -13,12 +13,17 @@ import { autoHideWidgets, refreshVueWidgets } from "./aicg3d-core.js";
 const OPTIMIZER_DONE_SOUND_URL = new URL("./audio/done.mp3", import.meta.url).href;
 const PROMPT_OPTIMIZER_ENDPOINT = "/aicg3d/goohai/minimax-h3/prompt-optimizer";
 
-const NODE = "MiniMaxH3IntegrationGH";
-const RH_NODE_IDS = [
+const NODE = "AICG3D_H3IntegrationGH";
+const LEGACY_NODE_ID_MAP = new Map([
+    ["MiniMaxH3IntegrationGH", "AICG3D_H3IntegrationGH"],
+    ["MiniMaxH3IntegrationAdapterGH", "AICG3D_H3IntegrationAdapterGH"],
+    ["MiniMaxH3DualClockT8GH", "AICG3D_H3DualClockT8GH"],
+    ["MiniMaxH3AVDecodeT8GH", "AICG3D_H3AVDecodeT8GH"],
+]);const RH_NODE_IDS = [
     NODE,
-    "MiniMaxH3IntegrationAdapterGH",
-    "MiniMaxH3DualClockT8GH",
-    "MiniMaxH3AVDecodeT8GH",
+    "AICG3D_H3IntegrationAdapterGH",
+    "AICG3D_H3DualClockT8GH",
+    "AICG3D_H3AVDecodeT8GH",
 ];
 const WIDTH = 500;
 const PANEL_WIDTH = 476;
@@ -74,6 +79,18 @@ function installAutoOptimizerQueueHook() {
     autoOptimizerQueueInstalled = true;
 }
 
+function migrateLegacyIntegrationNodeIds(graphData) {
+    if (!graphData || typeof graphData !== "object") return;
+    const migrateNodes = nodes => {
+        if (!Array.isArray(nodes)) return;
+        for (const node of nodes) {
+            const replacement = LEGACY_NODE_ID_MAP.get(String(node?.type || ""));
+            if (replacement) node.type = replacement;
+        }
+    };
+    migrateNodes(graphData.nodes);
+    for (const subgraph of graphData.definitions?.subgraphs ?? []) migrateNodes(subgraph?.nodes);
+}
 const DOM_TRANSLATIONS = {
     "Audio": "音频",
     "First and last frames": "首尾帧",
@@ -409,6 +426,19 @@ function createPanel(node) {
             text_keyframes: (savedState.mode || "text_keyframes") === "text_keyframes" ? optimizerBefore : null,
             all_reference: savedState.mode === "all_reference" ? optimizerBefore : null,
         };
+    const optimizerForWorkflow = settings => {
+        if (!settings || typeof settings !== "object") return settings || null;
+        const persistent = [
+            "mode", "provider", "api_url", "model", "protocol", "read_media",
+            "output_language", "local_model", "local_device", "auto_optimize",
+        ];
+        const safe = {};
+        for (const key of persistent) {
+            if (settings[key] !== undefined) safe[key] = settings[key];
+        }
+        safe.has_api_key = Boolean(settings.has_api_key || settings.api_key);
+        return safe;
+    };
     const serializedState = () => {
         promptByMode[state.mode] = prompt.value;
         return JSON.stringify({
@@ -418,7 +448,7 @@ function createPanel(node) {
             prompts: { ...promptByMode },
             height: userHeight,
             advanced: !!advanced?.open,
-            optimizer: optimizerSettings,
+            optimizer: optimizerForWorkflow(optimizerSettings),
             optimizerCache,
             optimizerBefore,
             optimizerBeforeByMode: { ...optimizerBeforeByMode },
@@ -1062,9 +1092,10 @@ function nodeColorToCss(value) {
     prompt.addEventListener("compositionstart", () => { pendingPromptSnapshot ||= promptSnapshot(); promptComposing = true; });
     prompt.addEventListener("compositionend", () => { promptComposing = false; commitPromptEditorInput(); });
     prompt.addEventListener("input", () => { if (!promptComposing) commitPromptEditorInput(); });
-    document.addEventListener("selectionchange", () => {
+    const applyPromptSelection = () => {
         if (document.activeElement === prompt) selectionOffsets();
-    });
+    };
+    document.addEventListener("selectionchange", applyPromptSelection);
     prompt.addEventListener("beforeinput", event => {
         if (prompt.readOnly) return;
         if (["historyUndo", "historyRedo"].includes(event.inputType)) {
@@ -1567,27 +1598,31 @@ function nodeColorToCss(value) {
         };
     };
     async function loadOptimizerSettings() {
-        if (optimizerSettings) {
-            if (!Array.isArray(optimizerSettings.runninghub_models) || !optimizerSettings.runninghub_models.length) {
-                const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/config`, { cache: "no-store" });
-                if (!response.ok) throw new Error("Unable to load prompt optimizer settings");
-                const defaults = await response.json();
-                optimizerSettings = {
-                    ...defaults,
-                    ...optimizerSettings,
-                    runninghub_models: defaults.runninghub_models || [],
-                    models: optimizerSettings.models || defaults.models || [],
-                    missing_dependencies: optimizerSettings.missing_dependencies || defaults.missing_dependencies || [],
-                };
-            }
-            optimizerSettings = migrateLegacyOptimizerDefault(optimizerSettings);
-            refreshOptimizerName();
-            return optimizerSettings;
-        }
         const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/config`, { cache: "no-store" });
         if (!response.ok) throw new Error("Unable to load prompt optimizer settings");
-        optimizerSettings = migrateLegacyOptimizerDefault(await response.json());
-        refreshOptimizerName(); refreshPromptConnection();
+        const defaults = await response.json();
+        const saved = optimizerSettings;
+        const savedKey = String(saved?.api_key || "");
+        const safeSaved = optimizerForWorkflow(saved);
+        let resolved = null;
+        if (savedKey) {
+            const migrate = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/config`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...(safeSaved || {}), api_key: savedKey }),
+            });
+            if (migrate.ok) {
+                resolved = { ...defaults, ...(await migrate.json()) };
+            }
+        }
+        if (!resolved) {
+            resolved = { ...defaults, ...(safeSaved || {}) };
+        }
+        optimizerSettings = resolved;
+        optimizerSettings.api_key = "";
+        optimizerSettings.has_api_key = Boolean(defaults.has_api_key || safeSaved?.has_api_key || savedKey);
+        optimizerSettings = migrateLegacyOptimizerDefault(optimizerSettings);
+        refreshOptimizerName(); refreshPromptConnection(); persistState();
         return optimizerSettings;
     }
     function openOptimizerSettings() {
@@ -1600,7 +1635,9 @@ function nodeColorToCss(value) {
             const provider = row("Provider", make("select"));
             for (const [value, preset] of Object.entries(optimizerProviders)) provider.append(new Option(preset.label, value));
             provider.value = current.provider || "runninghub";
-            const key = row("API key", make("input")); key.type = "password"; key.value = current.api_key || "";
+            const key = row("API key", make("input")); key.type = "password"; key.value = "";
+            key.placeholder = current.has_api_key ? "已保存；留空保持不变" : "";
+            const clearKey = row("Clear saved API key", make("input")); clearKey.type = "checkbox"; clearKey.disabled = !current.has_api_key;
             const readMedia = make("input"); readMedia.type = "checkbox"; readMedia.checked = current.read_media !== false; readMedia.className = "ghh3-opt-check";
             const language = make("div"); language.className = "ghh3-opt-language";
             for (const value of ["English", "中文"]) {
@@ -1739,7 +1776,7 @@ function nodeColorToCss(value) {
                 dialog.classList.toggle("custom", custom);
                 const local = mode.value === "local";
                 dialog.classList.toggle("local", local);
-                [provider, key, url, model, protocol].forEach(control => control.closest("label")?.classList.toggle("ghh3-opt-hidden", local));
+                [provider, key, clearKey, url, model, protocol].forEach(control => control.closest("label")?.classList.toggle("ghh3-opt-hidden", local));
                 runninghubModel.closest("label")?.classList.toggle("ghh3-opt-hidden", local || !runninghub);
                 model.closest("label")?.classList.toggle("ghh3-opt-hidden", local || !custom);
                 url.closest("label")?.classList.toggle("ghh3-opt-hidden", local || !custom);
@@ -1755,13 +1792,24 @@ function nodeColorToCss(value) {
             const cancel = make("button", {}, t("Cancel")); const save = make("button", {}, t("Save")); actions.append(cancel, save); dialog.append(actions);
             const close = () => overlay.remove(); cancel.onclick = close; overlay.addEventListener("pointerdown", event => { if (event.target === overlay) close(); });
             save.onclick = async () => {
+                try {
                 const outputLanguage = language.querySelector("input:checked")?.value || "中文";
                 const preset = optimizerProviders[provider.value];
                 const selectedModel = provider.value === "runninghub" ? runninghubModel.value : model.value;
                 const body = { mode: mode.value, provider: provider.value, api_url: provider.value === "custom" ? url.value : preset?.url || url.value, model: selectedModel, protocol: provider.value === "custom" ? protocol.value : preset?.protocol || protocol.value, read_media: readMedia.checked, output_language: outputLanguage, local_model: localModel.value, local_device: localDevice.value, auto_optimize: autoOptimize.checked };
-                body.api_key = key.value;
-                body.has_api_key = !!key.value;
-                optimizerSettings = body; refreshOptimizerName(); refreshPromptConnection(); persistState(); close();
+                if (clearKey.checked && !key.value) body.clear_api_key = true;
+                else if (key.value) body.api_key = key.value;
+                const response = await api.fetchApi(`${PROMPT_OPTIMIZER_ENDPOINT}/config`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (!response.ok) throw new Error("Unable to save prompt optimizer settings");
+                optimizerSettings = { ...current, ...(await response.json()), api_key: "" };
+                refreshOptimizerName(); refreshPromptConnection(); persistState(); close();
+                } catch (error) {
+                    alert(error?.message || String(error));
+                }
             };
             document.body.append(overlay);
         }).catch(error => alert(error.message));
@@ -2566,6 +2614,9 @@ function nodeColorToCss(value) {
                 renderPromptHighlights();
                 setPromptWidget(node, prompt.value);
                 optimizerSettings = restored.optimizer || optimizerSettings;
+                if (optimizerSettings?.api_key) {
+                    queueMicrotask(() => loadOptimizerSettings().catch(error => console.warn("[AICG3D] Legacy optimizer key migration failed", error)));
+                }
                 refreshOptimizerName(); refreshPromptConnection();
                 optimizerCache = restored.optimizerCache || null;
                 const restoredBeforeByMode = restored.optimizerBeforeByMode && typeof restored.optimizerBeforeByMode === "object"
@@ -2654,6 +2705,7 @@ function nodeColorToCss(value) {
         window.removeEventListener("keydown", capturePromptHistoryKeys, true);
         window.removeEventListener("keyup", releasePromptHistoryKeys, true);
         window.removeEventListener("storage", applyLocale);
+        document.removeEventListener("selectionchange", applyPromptSelection);
         return oldRemoved?.apply(this, args);
     };
     const initialRestoreEpoch = restoreEpoch;
@@ -2672,6 +2724,9 @@ function nodeColorToCss(value) {
         syncLayout(userHeight, true);
         refreshPromptConnection();
         if (initialRestoreEpoch === restoreEpoch) restoringState = false;
+        if (savedState.optimizer?.api_key) {
+            loadOptimizerSettings().catch(error => console.warn("[AICG3D] Legacy optimizer key migration failed", error));
+        }
     });
     return true;
 }
@@ -2686,8 +2741,10 @@ app.registerExtension({
         if (typeof app.ensureNodesRegistered !== "function") return;
         await app.ensureNodesRegistered(new Set(RH_NODE_IDS));
     },
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name === "MiniMaxH3AVDecodeT8GH") {
+    beforeConfigureGraph(graphData) {
+        migrateLegacyIntegrationNodeIds(graphData);
+    },    async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name === "AICG3D_H3AVDecodeT8GH") {
         const previousDecode = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function() {
             const result = previousDecode?.apply(this, arguments);
@@ -2703,7 +2760,7 @@ app.registerExtension({
         };
         return;
     }
-    if (nodeData.name === "MiniMaxH3IntegrationAdapterGH") {
+    if (nodeData.name === "AICG3D_H3IntegrationAdapterGH") {
         const previousAdapter = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function() {
             const result = previousAdapter?.apply(this, arguments);

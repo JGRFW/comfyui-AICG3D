@@ -14,8 +14,8 @@ import json
 import folder_paths
 import nodes
 import torch
-from comfy_api.latest import ComfyExtension, io
-from comfy_api.latest._input_impl import VideoFromFile
+from comfy_api.latest import ComfyExtension, InputImpl, io
+VideoFromFile = InputImpl.VideoFromFile
 from comfy_extras import nodes_audio
 
 from aicg3d_h3goohai.conditioning import build_conditioning
@@ -48,7 +48,11 @@ DEFAULT_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 
 
 def _files(content_type: str):
-    return sorted(folder_paths.filter_files_content_types(os.listdir(folder_paths.get_input_directory()), [content_type]))
+    try:
+        names = os.listdir(folder_paths.get_input_directory())
+    except OSError:
+        return []
+    return sorted(folder_paths.filter_files_content_types(names, [content_type]))
 
 
 def _image_files():
@@ -365,7 +369,8 @@ class MiniMaxH3IntegrationGH(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="MiniMaxH3IntegrationGH",
+            node_id="AICG3D_H3IntegrationGH",
+            display_name="MiniMax H3 Aicg 集成面板",
             category=NODE_CATEGORY,
             description="Integrated MiniMax H3 conditioning input. The diffusion model remains external.",
             inputs=[
@@ -607,7 +612,8 @@ class MiniMaxH3IntegrationAdapterGH(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="MiniMaxH3IntegrationAdapterGH",
+            node_id="AICG3D_H3IntegrationAdapterGH",
+            display_name="MiniMax H3 Aicg 集成分离",
             category=NODE_CATEGORY,
             inputs=[io.Custom("MiniMax").Input("integration", display_name="<")],
             outputs=[
@@ -635,8 +641,8 @@ class MiniMaxH3DualClockT8GH(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="MiniMaxH3DualClockT8GH",
-            display_name="MiniMax H3 Dual Clock - T8 (GH)",
+            node_id="AICG3D_H3DualClockT8GH",
+            display_name="MiniMax H3 Aicg 双时钟采样器 T8",
             description=(
                 "Independent MiniMax H3 dual-clock sampler with clean locked-audio "
                 "compatibility for current ComfyUI. Based on the T8 dual-clock design."
@@ -698,8 +704,8 @@ class MiniMaxH3AVDecodeT8GH(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="MiniMaxH3AVDecodeT8GH",
-            display_name="MiniMax H3 AV Decode - T8 (GH)",
+            node_id="AICG3D_H3AVDecodeT8GH",
+            display_name="MiniMax H3 Aicg AV 解码 T8",
             description=(
                 "Independent MiniMax H3 joint video/audio latent decoder. "
                 "Interface follows the original T8 AV Decode design."

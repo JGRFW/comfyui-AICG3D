@@ -433,7 +433,7 @@ function fillSegments(node, options = {}) {
     const seedStartRaw = Math.trunc(Number(readWidget(node, "seed_start", 0)) || 0);
     const seedStart = Math.max(0, Math.min(seedStartRaw, SEED_MAX));
     const limitRaw = Number(readWidget(node, "max_segments", MAX_SEGMENTS)) || MAX_SEGMENTS;
-    const limit = Math.max(1, Math.min(limitRaw, MAX_SEGMENTS));
+    let limit = Math.max(1, Math.min(limitRaw, MAX_SEGMENTS));
 
     let parsed;
     try {
@@ -442,6 +442,11 @@ function fillSegments(node, options = {}) {
         notify("解析失败：" + (err?.message || err), "error");
         return 0;
     }
+    const targets = orderSegmentNodes(graph, anchorSegmentNode(node, graph));
+    if (targets.length > limit) {
+        limit = Math.min(MAX_SEGMENTS, targets.length);
+        writeWidget(node, "max_segments", limit);
+    }
     const prompts = parsed.prompts.slice(0, limit);
     const seconds = parsed.seconds.slice(0, limit);
     if (!prompts.length) {
@@ -449,7 +454,6 @@ function fillSegments(node, options = {}) {
         return 0;
     }
 
-    const targets = orderSegmentNodes(graph, anchorSegmentNode(node, graph));
     if (!targets.length) {
         notify("画布上没找到「视频段落」节点。", "error");
         return 0;
@@ -491,11 +495,10 @@ function fillSegments(node, options = {}) {
         if (seedsWritten) {
             notes.push(`种子按顺序写入 ${seedBase}–${sequenceSeed(seedBase, seedsWritten - 1)}`);
         }
-        if (parsed.prompts.length > prompts.length) {
-            notes.push(`解析出 ${parsed.prompts.length} 段，但「解析上限」只有 ${limit}，多的没填（把上限调大就行）`);
-        }
-        if (prompts.length > targets.length) {
-            notes.push(`解析出 ${prompts.length} 段，画布上只有 ${targets.length} 个段落节点，多的没填`);
+        if (parsed.prompts.length > targets.length) {
+            notes.push(`解析出 ${parsed.prompts.length} 段，画布上只有 ${targets.length} 个段落节点，多的没填`);
+        } else if (parsed.prompts.length > prompts.length) {
+            notes.push(`解析出 ${parsed.prompts.length} 段，但当前解析上限只有 ${limit}，多的没填`);
         }
         if (prompts.length < targets.length) {
             notes.push(`还剩 ${targets.length - prompts.length} 个段落节点没轮到`);
@@ -621,7 +624,7 @@ function install(node) {
         seconds_mode: "时长模式",
         default_seconds: "默认时长（秒）",
         auto_fill: "自动填入段落",
-        max_segments: "最大分段数",
+        max_segments: "最大分段数（自动跟随）",
         randomize_seed: "顺序写入种子",
         seed_start: "起始种子（0=随机）",
     };
@@ -630,6 +633,10 @@ function install(node) {
         if (widget) widget.label = label;
     }
 
+    const maxSegmentsWidget = findWidget(node, "max_segments");
+    if (maxSegmentsWidget) {
+        maxSegmentsWidget.tooltip = "增加或删除视频段落后，这个上限会自动改成画布上的实际段落数，不需要手动调整。";
+    }
     const seedToggle = findWidget(node, "randomize_seed");
     if (seedToggle) {
         seedToggle.label = "顺序写入种子";

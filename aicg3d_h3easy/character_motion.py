@@ -11,11 +11,9 @@ load with its expected node IDs and parameters.
 
 from __future__ import annotations
 
-import importlib
 import json
 import math
 import os
-import sys
 import types
 from collections.abc import Mapping
 from fractions import Fraction
@@ -910,39 +908,6 @@ class MiniMaxH3EasyWhiteModelRig:
             return self._render_impl(**kwargs)
 
 
-_KJ_PREVIEW_NODE_CLASS = None
-_KJ_PREVIEW_IMPORT_FAILED = False
-
-
-def _load_kj_preview_override_class():
-    """Load KJNodes' public ModelPreviewOverrideKJ class without copying it."""
-    global _KJ_PREVIEW_NODE_CLASS, _KJ_PREVIEW_IMPORT_FAILED
-    if _KJ_PREVIEW_NODE_CLASS is not None:
-        return _KJ_PREVIEW_NODE_CLASS
-    if _KJ_PREVIEW_IMPORT_FAILED:
-        return None
-    try:
-        plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        custom_nodes_dir = os.path.dirname(plugin_dir)
-        kj_nodes_dir = os.path.join(custom_nodes_dir, "comfyui-kjnodes", "nodes")
-        if not os.path.isfile(os.path.join(kj_nodes_dir, "preview_override_node.py")):
-            raise FileNotFoundError("comfyui-kjnodes/nodes/preview_override_node.py")
-        package_name = "_aicg3d_kj_preview_runtime"
-        if package_name not in sys.modules:
-            package = types.ModuleType(package_name)
-            package.__path__ = [kj_nodes_dir]
-            sys.modules[package_name] = package
-        module = importlib.import_module(f"{package_name}.preview_override_node")
-        _KJ_PREVIEW_NODE_CLASS = getattr(module, "ModelPreviewOverrideKJ", None)
-        if _KJ_PREVIEW_NODE_CLASS is None:
-            raise RuntimeError("ModelPreviewOverrideKJ is not exported")
-        return _KJ_PREVIEW_NODE_CLASS
-    except Exception as error:
-        _KJ_PREVIEW_IMPORT_FAILED = True
-        print(f"[MiniMax H3 Aicg] 未能调用 KJNodes 模型预览：{error}")
-        return None
-
-
 def _apply_kj_preview_override(
     model,
     *,
@@ -960,26 +925,29 @@ def _apply_kj_preview_override(
     """Call KJNodes' public preview override node class without patching it."""
     if not enabled:
         return model
-    preview_class = _load_kj_preview_override_class()
+    preview_class = h3._registered_node_class("ModelPreviewOverrideKJ")
     if preview_class is None:
         return model
 
-    original_hidden = getattr(preview_class, "hidden", None)
-    try:
-        preview_class.hidden = types.SimpleNamespace(unique_id=str(unique_id or "0"))
-        output = preview_class.execute(
-            model,
-            int(max_resolution),
-            int(jpeg_quality),
-            bool(suppress_default_preview),
-            int(preview_frames),
-            int(preview_fps),
-            vae,
-            str(tiny_vae or "none"),
-            audio_vae,
-        )
-    finally:
-        preview_class.hidden = original_hidden
+    # Never mutate KJNodes' class-level hidden state: concurrent KJ executions
+    # would race and receive this node's unique_id. A disposable subclass keeps
+    # the same execute implementation with isolated hidden values.
+    runtime_preview_class = type(
+        "AICG3DKJPreviewRuntime",
+        (preview_class,),
+        {"hidden": types.SimpleNamespace(unique_id=str(unique_id or "0"))},
+    )
+    output = runtime_preview_class.execute(
+        model,
+        int(max_resolution),
+        int(jpeg_quality),
+        bool(suppress_default_preview),
+        int(preview_frames),
+        int(preview_fps),
+        vae,
+        str(tiny_vae or "none"),
+        audio_vae,
+    )
     result = getattr(output, "result", None)
     if not result:
         raise RuntimeError("KJNodes 模型预览没有返回 MODEL 输出")

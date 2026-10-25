@@ -7,7 +7,7 @@
 
 三个来源插件原本各有自己的节点菜单分类，合并后统一收敛到 ``AICG3D``
 命名空间下，用户在节点搜索里输入 AICG3D 就能看到整套节点。
-节点 ID 与显示名保持原样，保证既有工作流和前端脚本继续可用。
+H3 节点统一映射到 ``AICG3D_H3*`` 命名空间，避免与上游同名插件抢占注册表；旧工作流中的兼容 ID 仍按需保留。
 """
 from __future__ import annotations
 
@@ -22,19 +22,31 @@ GROUP_COLORS = {
     CATEGORY_TEXT: "#2f8f7f",
 }
 
-_H3_EASY_PREFIX = "MiniMaxH3Easy"
+_H3_EASY_PREFIXES = ("MiniMaxH3Easy", "AICG3D_H3")
 _INTEGRATION_IDS = {
     "MiniMaxH3IntegrationGH",
     "MiniMaxH3IntegrationAdapterGH",
     "MiniMaxH3DualClockT8GH",
     "MiniMaxH3AVDecodeT8GH",
+    "AICG3D_H3IntegrationGH",
+    "AICG3D_H3IntegrationAdapterGH",
+    "AICG3D_H3DualClockT8GH",
+    "AICG3D_H3AVDecodeT8GH",
+}
+_TEXT_NODE_IDS = {
+    "AICG3DPromptSegmentSplit",
+    "AICG3D_H3PromptSegmentSplit",
+    "AICG3D_PromptPreset",
+    "AICG3D_SkillLoader",
 }
 
 
 def category_for(node_id: str) -> str:
     if node_id in _INTEGRATION_IDS:
         return CATEGORY_INTEGRATION
-    if node_id.startswith(_H3_EASY_PREFIX):
+    if node_id in _TEXT_NODE_IDS:
+        return CATEGORY_TEXT
+    if node_id.startswith(_H3_EASY_PREFIXES):
         return CATEGORY_H3
     return CATEGORY_TEXT
 

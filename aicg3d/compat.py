@@ -9,8 +9,8 @@ ComfyUI-MiniMaxH3-Easy 与本插件注册的是同一批节点类名
 （MiniMaxH3EasyLoader、MiniMaxH3Easy……）。ComfyUI 只会保留其中一份，
 被顶掉的那份连同它的前端界面一起失效，节点上还会挂上对方插件包的名字。
 
-所以这里在启动阶段扫一遍 custom_nodes，把"谁在跟我们抢名字"查清楚：
-拿到结果后，注册表会改用本插件自己的 AICG3D_H3* 节点 ID。
+注册表始终使用本插件自己的 AICG3D_H3* 节点 ID；这里扫描 custom_nodes 仅用于诊断
+并存档可能同时提供上游 MiniMaxH3Easy* 节点的插件，不再改变注册结果。
 """
 from __future__ import annotations
 

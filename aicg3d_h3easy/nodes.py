@@ -848,8 +848,18 @@ def _prompt_guide_bundle(
     return "\n\n".join(blocks)
 
 
-def _prompt_optimizer_config_path() -> str:
+def _prompt_optimizer_legacy_config_path() -> str:
+    """Old releases wrote secrets into the plugin checkout."""
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "prompt_optimizer.json")
+
+
+def _prompt_optimizer_config_path() -> str:
+    """Keep API keys outside the source tree so git/pip updates cannot leak them."""
+    try:
+        user_root = folder_paths.get_user_directory()
+    except Exception:
+        user_root = os.path.join(getattr(folder_paths, "base_path", os.path.dirname(PROMPT_GUIDES_DIR)), "user")
+    return os.path.join(os.path.realpath(user_root), "default", "aicg3d", "prompt_optimizer.json")
 
 
 def _normalize_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -935,19 +945,43 @@ def _prompt_optimizer_ready(settings: Mapping[str, Any] | None) -> bool:
 
 def _read_prompt_optimizer_config() -> dict[str, Any]:
     path = _prompt_optimizer_config_path()
+    legacy_path = _prompt_optimizer_legacy_config_path()
     with _PROMPT_OPTIMIZER_CONFIG_LOCK:
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError, ValueError):
+        payload = None
+        for candidate in (path, legacy_path):
+            try:
+                with open(candidate, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                break
+            except FileNotFoundError:
+                continue
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                return dict(PROMPT_OPTIMIZER_CONFIG_DEFAULTS)
+        if payload is None:
             return dict(PROMPT_OPTIMIZER_CONFIG_DEFAULTS)
-    return _normalize_prompt_optimizer_config(payload)
+        normalized = _normalize_prompt_optimizer_config(payload)
+        try:
+            from pathlib import Path
+            migrated = Path(path)
+            legacy = Path(legacy_path)
+            if legacy.is_file() and not migrated.is_file():
+                _write_prompt_optimizer_config(normalized)
+                legacy.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"[AICG3D] Prompt optimizer config migration skipped: {exc}")
+    return normalized
 
 
 def _write_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[str, Any]:
     normalized = _normalize_prompt_optimizer_config(value)
     path = _prompt_optimizer_config_path()
     directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    if os.name != "nt":
+        try:
+            os.chmod(directory, 0o700)
+        except OSError:
+            pass
     temporary_path = ""
     with _PROMPT_OPTIMIZER_CONFIG_LOCK:
         try:
@@ -963,6 +997,8 @@ def _write_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[str,
                 json.dump(normalized, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")
             os.replace(temporary_path, path)
+            if os.name != "nt":
+                os.chmod(path, 0o600)
         finally:
             if temporary_path and os.path.exists(temporary_path):
                 try:
@@ -3032,16 +3068,6 @@ def _registered_node_class(*names: str):
         node_class = mappings.get(name) if hasattr(mappings, "get") else None
         if node_class is not None:
             return node_class
-        node_class = getattr(nodes, name, None)
-        if node_class is not None:
-            return node_class
-    for module in tuple(sys.modules.values()):
-        if module is None:
-            continue
-        for name in names:
-            node_class = getattr(module, name, None)
-            if node_class is not None:
-                return node_class
     return None
 
 
@@ -8326,10 +8352,11 @@ class MiniMaxH3EasyRenderAdvanced:
         preview = RenderPreviewEncoder(model) if want_preview else None
         on_preview = None
         if preview is not None:
-            def on_preview(x0, *_info):
+            def preview_callback(x0, *_info):
                 # The sampler must receive the native preview tuple; otherwise the
                 # image is decoded but ProgressBar is called with preview=None.
                 return reporter.update_preview(preview.decode(x0))
+            on_preview = preview_callback
         done = False
         try:
             if long_digital_human:
@@ -8743,10 +8770,11 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         if preview is not None:
             should_push = _preview_step_filter(preview_interval)
 
-            def on_preview(x0, step=None, total=None, *_info):
+            def preview_callback(x0, step=None, total=None, *_info):
                 if not should_push(step, total):
                     return None
                 return reporter.update_preview(preview.decode(x0))
+            on_preview = preview_callback
 
         done = False
         try:
@@ -9174,10 +9202,11 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         if preview is not None:
             should_push = _preview_step_filter(preview_interval)
 
-            def on_preview(x0, step=None, total=None, *_info):
+            def preview_callback(x0, step=None, total=None, *_info):
                 if not should_push(step, total):
                     return None
                 return reporter.update_preview(preview.decode(x0))
+            on_preview = preview_callback
         want_first_pass = str(output_first_pass or "").strip() == PASS2_FIRST_PASS_ON
         done = False
         try:
@@ -11377,7 +11406,7 @@ class MiniMaxH3EasySegmentDecode:
         }
 
     @classmethod
-    def _decode_streaming(cls, segments, bundle, source_audio, progress, terminal_progress):
+    def _decode_streaming(cls, segments, bundle, source_audio, progress, terminal_progress, collect_seam_report=False):
         """Decode one segment at a time and feed a persistent FFmpeg encoder."""
         if not segments.samples:
             raise ValueError("The segment result contains no delivered video frames")
@@ -11504,9 +11533,25 @@ class MiniMaxH3EasySegmentDecode:
                     raise RuntimeError(f"Streaming Context Segment audio mux failed: {detail}")
                 output_path = final_video_path
 
+            handoff_mode = (
+                "尾帧画面（RGB）"
+                if str(segments.plan.get("continuity_mode") or "") == CONTEXT_CONTINUITY_GUIDE
+                else "尾帧续写（latent）"
+            )
+            seam_report = seam_matcher.format_report(
+                segment_count=len(segments.samples),
+                total_frames=delivered_total,
+                fps=h3.FPS,
+                context_frames=int(segments.plan.get("context_length") or 0),
+                handoff_mode=handoff_mode,
+            )
+            if collect_seam_report:
+                print(seam_report)
             stream_video = InputImpl.VideoFromFile(output_path)
             setattr(stream_video, "_h3_stream_temp_dir", stream_dir)
             weakref.finalize(stream_video, _segment_cleanup_temp_dir, stream_dir)
+            if collect_seam_report:
+                return (stream_video, seam_report)
             return (stream_video,)
         except Exception:
             if video_process is not None:
@@ -11903,7 +11948,7 @@ except Exception:
 # 段落衔接复用本插件已验证的两套上下文机制：
 #   尾帧续写（latent）：把上一段尾部的 latent 当作下一段的时间上下文，无损、最快（默认）；
 #   尾帧画面（RGB）  ：把上一段尾部的画面重新编码成 Guide，像素级对齐。
-# 衔接帧数可填 1~22，H3 原生时间栅格只有 5 / 22 两档：1~5 取 5 帧，6~22 取 22 帧。
+# 衔接帧数可填 1~56，H3 原生时间栅格使用 5 / 22 / 39 / 56 四档。
 # ===========================================================================
 
 SEQUENCE_CONFIG_TYPE = "MINIMAX_H3_SEQUENCE_CONFIG"
@@ -11921,7 +11966,8 @@ SEQUENCE_AUDIO_DIGITAL_HUMAN = "数字人（锁定音频）"
 SEQUENCE_AUDIO_CHOICES = (SEQUENCE_AUDIO_GENERATED, SEQUENCE_AUDIO_DIGITAL_HUMAN)
 
 SEQUENCE_HANDOFF_MIN_FRAMES = 1
-SEQUENCE_HANDOFF_MAX_FRAMES = 22
+# Native MiniMax H3 context grid: 5 / 22 / 39 / 56 frames.
+SEQUENCE_HANDOFF_MAX_FRAMES = 56
 SEQUENCE_HANDOFF_DEFAULT_FRAMES = 5
 
 SEQUENCE_EXPOSURE_LOCK_OFF = "关闭"
@@ -11954,6 +12000,8 @@ SEQUENCE_SEAM_BRIDGE_RATIO = 1.75
 SEQUENCE_SEAM_BRIDGE_MIN_STEP = 0.025
 SEQUENCE_SEAM_BRIDGE_MAX_STEP = 0.090
 SEQUENCE_SEAM_BRIDGE_CUT_DIFF = 0.045
+SEQUENCE_SEAM_BRIDGE_CUT_STRUCTURE_DIFF = 0.022
+SEQUENCE_SEAM_BRIDGE_CUT_MIN_LOWFREQ = 0.012
 SEQUENCE_SEAM_BRIDGE_MIN_WEIGHT = 0.10
 SEQUENCE_SEAM_BRIDGE_MAX_WEIGHT = 0.45
 
@@ -11961,7 +12009,7 @@ SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
 
 
 def _sequence_handoff_context_frames(frames: Any) -> int:
-    """把「衔接帧数」吸附到 H3 原生上下文时间栅格（5 / 22 帧两档）。"""
+    """把「衔接帧数」吸附到 H3 原生上下文时间栅格（5 / 22 / 39 / 56 四档）。"""
     try:
         value = int(frames)
     except (TypeError, ValueError):
@@ -12146,8 +12194,47 @@ def _sequence_additive_opening_luma(
     return out, seam_gap, opening_spike
 
 
+def _sequence_seam_snapshot(
+    frames: torch.Tensor,
+    previous_tail: torch.Tensor,
+) -> dict[str, float]:
+    """Measure one boundary before or after repair without keeping frame tensors."""
+    if (
+        not isinstance(frames, torch.Tensor)
+        or frames.numel() == 0
+        or not isinstance(previous_tail, torch.Tensor)
+        or previous_tail.numel() == 0
+    ):
+        return {
+            "seam_gap": 0.0,
+            "opening_spike": 0.0,
+            "lowfreq_diff": 0.0,
+            "structure_diff": 0.0,
+        }
+    guide = _sequence_fit_frame(
+        previous_tail[-1], int(frames.shape[2]), int(frames.shape[1])
+    )
+    body0 = frames[0]
+    y_start = _sequence_frame_luma(guide)
+    y0 = _sequence_frame_luma(body0)
+    y1 = _sequence_frame_luma(frames[min(1, int(frames.shape[0]) - 1)])
+    y2 = _sequence_frame_luma(frames[min(2, int(frames.shape[0]) - 1)])
+    guide_blur = _sequence_box_blur(guide.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0]
+    body_blur = _sequence_box_blur(body0.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0]
+    lowfreq_diff = _sequence_frame_mae(guide_blur, body_blur)
+    guide_structure = guide_blur - guide_blur.mean(dim=(0, 1), keepdim=True)
+    body_structure = body_blur - body_blur.mean(dim=(0, 1), keepdim=True)
+    structure_diff = _sequence_frame_mae(guide_structure, body_structure)
+    return {
+        "seam_gap": abs(y0 - y_start),
+        "opening_spike": abs(y1 - y0) + abs(y2 - y1),
+        "lowfreq_diff": lowfreq_diff,
+        "structure_diff": structure_diff,
+    }
+
+
 def _sequence_frame_mae(left: torch.Tensor, right: torch.Tensor) -> float:
-    """Mean absolute RGB error used to tell real motion from a seam jump."""
+    """Mean absolute RGB error used to tell real motion from a seam jump and report it."""
     if left is None or right is None:
         return 0.0
     if left.dim() == 4:
@@ -12162,6 +12249,7 @@ def _sequence_frame_mae(left: torch.Tensor, right: torch.Tensor) -> float:
 def _sequence_motion_bridge(
     frames: torch.Tensor,
     previous_tail: torch.Tensor,
+    lowfreq_diff: float | None = None,
 ) -> tuple[torch.Tensor, dict[str, float] | None]:
     """Soften a one-frame same-shot jump without touching hard cuts.
 
@@ -12197,10 +12285,11 @@ def _sequence_motion_bridge(
 
     # A hard cut has a large low-frequency difference. Blending across it would
     # turn the intended cut into a one-frame ghost, so leave it untouched.
-    lowfreq_diff = _sequence_frame_mae(
-        _sequence_box_blur(prev_last.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0],
-        _sequence_box_blur(body0.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0],
-    )
+    if lowfreq_diff is None:
+        lowfreq_diff = _sequence_frame_mae(
+            _sequence_box_blur(prev_last.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0],
+            _sequence_box_blur(body0.unsqueeze(0), SEQUENCE_SEAM_GRADE_BLUR)[0],
+        )
     if lowfreq_diff > SEQUENCE_SEAM_BRIDGE_CUT_DIFF:
         return frames, None
 
@@ -12236,26 +12325,84 @@ def _sequence_motion_bridge(
 
 
 class _SequenceSeamMatcher:
-    """Director-style seam repair for the streaming sequence combiner."""
+    """Director-style seam repair and diagnostics for the sequence combiner."""
 
     def __init__(self, enabled: bool = True):
         self.enabled = bool(enabled)
         self.previous_tail: torch.Tensor | None = None
         self.previous_segment_luma: float | None = None
+        self.records: list[dict[str, Any]] = []
 
     def apply(self, frames: torch.Tensor, index: int) -> torch.Tensor:
-        if not self.enabled or not isinstance(frames, torch.Tensor) or frames.numel() == 0:
+        if not isinstance(frames, torch.Tensor) or frames.numel() == 0:
             return frames
         repaired = frames
+        before = None
+        hard_cut = False
+        bridge = None
+        global_offset = 0.0
+        repair_enabled = bool(self.enabled)
         if self.previous_tail is not None:
-            repaired, bridge = _sequence_motion_bridge(repaired, self.previous_tail)
-            repaired = _sequence_match_opening_grade(repaired, self.previous_tail)
+            before = _sequence_seam_snapshot(repaired, self.previous_tail)
+            hard_cut = (
+                before["structure_diff"] > SEQUENCE_SEAM_BRIDGE_CUT_STRUCTURE_DIFF
+                and before["lowfreq_diff"] > SEQUENCE_SEAM_BRIDGE_CUT_MIN_LOWFREQ
+            )
+            repair_enabled = bool(self.enabled)
+            bridge_enabled = bool(repair_enabled and not hard_cut)
+            repaired, bridge = (
+                _sequence_motion_bridge(
+                    repaired, self.previous_tail, before["lowfreq_diff"]
+                )
+                if bridge_enabled else (repaired, None)
+            )
+
+            if bridge_enabled:
+                repaired = _sequence_match_opening_grade(repaired, self.previous_tail)
             repaired, global_offset = _sequence_match_segment_luma(
                 repaired, self.previous_segment_luma
-            )
-            repaired, seam_gap, opening_spike = _sequence_additive_opening_luma(
+            ) if repair_enabled else (repaired, 0.0)
+            luma_result = _sequence_additive_opening_luma(
                 repaired, self.previous_tail
-            )
+            ) if repair_enabled else (repaired, before["seam_gap"], before["opening_spike"])
+            repaired, seam_gap, opening_spike = luma_result
+            after = _sequence_seam_snapshot(repaired, self.previous_tail)
+            if hard_cut:
+                status = "硬切保护"
+            elif not self.enabled:
+                status = "仅检测"
+            elif after["seam_gap"] <= SEQUENCE_SEAM_LUMA_EPSILON:
+                status = "平整"
+            elif after["seam_gap"] <= 0.025:
+                status = "已平滑"
+            else:
+                status = "建议检查"
+            self.records.append({
+                "from_segment": int(index) - 1,
+                "to_segment": int(index),
+                "status": status,
+                "applied": bool(repair_enabled),
+                "hard_cut": bool(hard_cut),
+                "seam_gap_before": float(before["seam_gap"]),
+                "seam_gap_after": float(after["seam_gap"]),
+                "opening_spike_before": float(before["opening_spike"]),
+                "opening_spike_after": float(after["opening_spike"]),
+                "lowfreq_diff": float(before["lowfreq_diff"]),
+                "structure_diff": float(before["structure_diff"]),
+                "global_offset": float(global_offset),
+                "bridge_weight": float(bridge["weight"]) if bridge is not None else 0.0,
+            })
+            if not repair_enabled:
+                action = "exposure lock disabled"
+                print(
+                    f"[MiniMax H3 Aicg] Segment {index} seam: {action}; "
+                    f"luma {before['seam_gap']:.3f}, opening {before['opening_spike']:.3f}, "
+                    f"low-frequency diff {before['lowfreq_diff']:.3f}, "
+                    f"structure diff {before['structure_diff']:.3f}."
+                )
+                self.previous_tail = repaired[-min(3, int(repaired.shape[0])):].detach().to("cpu").contiguous()
+                self.previous_segment_luma = _sequence_robust_luma(repaired)
+                return repaired
             bridge_note = ""
             if bridge is not None:
                 bridge_note = (
@@ -12274,6 +12421,44 @@ class _SequenceSeamMatcher:
         self.previous_tail = repaired[-min(3, int(repaired.shape[0])):].detach().to("cpu").contiguous()
         self.previous_segment_luma = _sequence_robust_luma(repaired)
         return repaired
+
+
+    def format_report(
+        self,
+        segment_count: int,
+        total_frames: int,
+        fps: float,
+        context_frames: int,
+        handoff_mode: str,
+    ) -> str:
+        """Return a compact, copyable seam report for the combine node."""
+        lines = [
+            "AICG3D H3 接缝报告",
+            f"状态：{'跨段曝光锁定开启' if self.enabled else '跨段曝光锁定关闭（仅检测）'}",
+            f"段落：{int(segment_count)} 段；成片：{int(total_frames)} 帧 / {float(fps):g}fps",
+            f"衔接：{int(context_frames)} 帧；方式：{handoff_mode}",
+        ]
+        if not self.records:
+            lines.append("接缝：单段没有段落接缝。")
+            return "\n".join(lines)
+        hard_cuts = sum(1 for item in self.records if item["hard_cut"])
+        checks = sum(1 for item in self.records if item["status"] == "建议检查")
+        for item in self.records:
+            lines.append(
+                f"{item['from_segment']}→{item['to_segment']} {item['status']}："
+                f"亮度 {item['seam_gap_before']:.3f}→{item['seam_gap_after']:.3f}；"
+                f"开头波动 {item['opening_spike_before']:.3f}→{item['opening_spike_after']:.3f}；"
+                f"低频差 {item['lowfreq_diff']:.3f}；结构差 {item['structure_diff']:.3f}；"
+                f"整段校正 {item['global_offset']:+.3f}；"
+                f"运动桥 {item['bridge_weight']:.2f}"
+            )
+        if checks:
+            lines.append(f"结论：有 {checks} 个接缝建议人工回看；其余接缝已记录。")
+        elif hard_cuts:
+            lines.append(f"结论：亮度接缝检查通过；{hard_cuts} 个硬切未做跨镜头空间混合。")
+        else:
+            lines.append("结论：亮度接缝检查通过，未发现需要额外处理的曝光跳变。")
+        return "\n".join(lines)
 
 
 class _SequenceExposureLock:
@@ -12631,7 +12816,7 @@ def _sequence_same_audio(left: Any, right: Any) -> bool:
 
 
 class MiniMaxH3EasySequenceGlobal:
-    """AICG3D 无限段落顺序生成（全局设置）
+    """AICG3D H3 智能短剧台
 
     一条线喂给所有「视频段落」：分辨率、宽高比、帧率、显存收尾策略、采样参数，
     以及段落之间的衔接帧数。段落可以只用一个，也可以无限往下接。
@@ -12642,8 +12827,8 @@ class MiniMaxH3EasySequenceGlobal:
     RETURN_TYPES = (SEQUENCE_CONFIG_TYPE,)
     RETURN_NAMES = ("sequence_config",)
     DESCRIPTION = (
-        "顺序生成长视频的全局设置：分辨率 / 宽高比 / 帧率 / 显存收尾 / 采样参数 / 衔接帧数。"
-        "输出一条 sequence_config，喂给所有 MiniMax H3 Aicg 视频段落。"
+        "智能短剧台：统一管理镜头时间轴、分辨率、帧率、显存收尾、采样参数和 5 / 22 / 39 / 56 帧跨段衔接。"
+        "输出 sequence_config，自动驱动整条视频段落链；最终合成同时给出接缝检测报告。"
     )
 
     @classmethod
@@ -12687,8 +12872,8 @@ class MiniMaxH3EasySequenceGlobal:
                         "step": 1,
                         "tooltip": (
                             "每段开头要接住上一段结尾多少帧画面："
-                            "H3 使用固定时间栅格，当前面板开放 5 / 22 两档："
-                            "填 1~5 按 5 帧衔接，填 6~22 按 22 帧衔接（越大越稳、越慢）。"
+                            "H3 使用固定时间栅格，当前面板开放 5 / 22 / 39 / 56 四档："
+                            "填 1~5 用 5 帧，6~22 用 22 帧，23~39 用 39 帧，40~56 用 56 帧（越长越稳、越慢）。"
                         ),
                     },
                 ),
@@ -12793,8 +12978,9 @@ class MiniMaxH3EasySequenceGlobal:
                         "default": SEQUENCE_EXPOSURE_LOCK_ON,
                         "tooltip": (
                             "接缝亮度匹配：开头 12 帧匹配上一段尾帧的低频色光，12 帧加性亮度平滑过渡，"
-                            "整段校正限制在 ±0.04；同镜头的一帧接缝跳变会做轻微运动桥接，硬切镜头保持不动。"
-                            "关闭则完全按原采样结果输出。"
+                            "整段校正限制在 ±0.04；同镜头的一帧接缝跳变会做轻微运动桥接。"
+                            "硬切用低频差与画面结构差双判定保护，避免把镜头切换误平滑。"
+                            "关闭则完全不改画面，但最终合成仍会输出检测报告。"
                         ),
                     },
                 ),
@@ -13304,10 +13490,11 @@ class MiniMaxH3EasySequenceSegment:
                 max(int(config.preview_interval or 1), int(vram.preview_interval_min))
             )
 
-            def on_preview(x0, step=None, total=None, *_info):
+            def preview_callback(x0, step=None, total=None, *_info):
                 if not should_push(step, total):
                     return None
                 return reporter.update_preview(preview.decode(x0))
+            on_preview = preview_callback
 
         done = False
         try:
@@ -13389,11 +13576,11 @@ class MiniMaxH3EasySequenceCombine:
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "combine"
     OUTPUT_NODE = True
-    RETURN_TYPES = ("VIDEO", "STRING")
-    RETURN_NAMES = ("video", "saved_file")
+    RETURN_TYPES = ("VIDEO", "STRING", "STRING")
+    RETURN_NAMES = ("video", "saved_file", "seam_report")
     DESCRIPTION = (
         "把整条「视频段落」链按顺序拼成一条完整视频：逐段解码、逐段写进同一个编码器，"
-        "音画一起拼，内存只跟单段有关。保存到 output 目录，同时输出 VIDEO 方便再接别的节点。"
+        "音画一起拼，内存只跟单段有关。保存到 output 目录，同时输出 VIDEO 和可核验的接缝报告。"
     )
 
     @classmethod
@@ -13496,8 +13683,13 @@ class MiniMaxH3EasySequenceCombine:
         progress = comfy.utils.ProgressBar(max(1, len(samples)))
         terminal_progress = _H3TerminalProgress("Sequence Combine", len(samples))
         try:
-            (stream_video,) = MiniMaxH3EasySegmentDecode._decode_streaming(
-                segments, bundle, source_audio, progress, terminal_progress,
+            stream_video, seam_report = MiniMaxH3EasySegmentDecode._decode_streaming(
+                segments,
+                bundle,
+                source_audio,
+                progress,
+                terminal_progress,
+                collect_seam_report=True,
             )
         finally:
             terminal_progress.finish()
@@ -13532,6 +13724,7 @@ class MiniMaxH3EasySequenceCombine:
             "result": (
                 video,
                 os.path.join(saved_subfolder, saved_file) if saved_file else "",
+                seam_report,
             ),
         }
 
@@ -13596,7 +13789,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasyRenderAdvancedWithModel": "AICG-渲染器（高级·加速）",
     "MiniMaxH3EasyRenderPass1": "AICG-渲染器（一采）",
     "MiniMaxH3EasyRenderPass2": "AICG-渲染器（二采放大）",
-    "MiniMaxH3EasySequenceGlobal": "MiniMax H3 Aicg 无限段落顺序生成（全局设置）",
+    "MiniMaxH3EasySequenceGlobal": "AICG3D H3 智能短剧台",
     "MiniMaxH3EasySequenceSegment": "MiniMax H3 Aicg 视频段落",
     "MiniMaxH3EasySequenceCombine": "MiniMax H3 Aicg 最终合成视频",
 }

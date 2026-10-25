@@ -6,7 +6,7 @@
 | 文件 | 对应组件 | 许可证 |
 |---|---|---|
 | `GPL-3.0.txt` | 本插件自身 + `aicg3d_h3goohai/`（源自 Goohai-MiniMax-H3_Integration） | GPL-3.0（全文） |
-| `LICENSE-ComfyUI-MiniMaxH3-Easy-MIT.txt` | `aicg3d_h3easy/`、`web/minimax_h3_easy_ui.js` | MIT |
+| `LICENSE-ComfyUI-MiniMaxH3-Easy-MIT.txt` | `aicg3d_h3easy/`、`web/minimax_h3_easy_ui_v4.js` | MIT |
 | `LICENSE-Goohai-MiniMax-H3_Integration-GPL-3.0-or-later.txt` | `aicg3d_h3goohai/`、`web/minimax_h3_integration.js`、`web/audio/done.mp3` | GPL-3.0-or-later（原始声明） |
 | `LICENSE-MiniMax-H3-Community.txt` | `skills/`、`prompt_guides/` 中的 MiniMax H3 官方提示词内容 | MiniMax H3 Community License Agreement |
 

@@ -15,13 +15,16 @@ def _safe_log(message=""):
         safe = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
         print(safe)
 
-# 强制将插件根目录加入 sys.path
+
 plugin_dir = os.path.dirname(os.path.abspath(__file__))
-if plugin_dir not in sys.path:
+path_was_added = plugin_dir not in sys.path
+if path_was_added:
+    # Absolute imports are used during package initialization. Keep the path
+    # only for this load and remove it afterwards so other plugins cannot be
+    # shadowed by whatever files happen to be in this directory.
     sys.path.insert(0, plugin_dir)
 
 try:
-    # 绝对导入
     import aicg3d.registry as registry
     res = registry.build()
     NODE_CLASS_MAPPINGS = res[0]
@@ -41,6 +44,13 @@ except Exception:
     _safe_log("=" * 60 + "\n")
     NODE_CLASS_MAPPINGS = {}
     NODE_DISPLAY_NAME_MAPPINGS = {}
-    WEB_DIRECTORY = "./web"
+    # Avoid loading a half-initialized frontend after a backend failure.
+    WEB_DIRECTORY = None
+finally:
+    if path_was_added:
+        try:
+            sys.path.remove(plugin_dir)
+        except ValueError:
+            pass
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

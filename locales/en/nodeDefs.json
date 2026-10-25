@@ -1,5 +1,5 @@
 {
-  "MiniMaxH3IntegrationGH": {
+  "AICG3D_H3IntegrationGH": {
     "display_name": "MiniMax-H3 Integration (GH)",
     "inputs": {
       "clip_name": {
@@ -41,7 +41,7 @@
       }
     }
   },
-  "MiniMaxH3IntegrationAdapterGH": {
+  "AICG3D_H3IntegrationAdapterGH": {
     "display_name": "MiniMax-H3 Adapter (GH)",
     "inputs": {
       "integration": {
@@ -81,7 +81,7 @@
       }
     }
   },
-  "MiniMaxH3DualClockT8GH": {
+  "AICG3D_H3DualClockT8GH": {
     "display_name": "MiniMax H3 Dual Clock - T8 (GH)",
     "inputs": {
       "model": {
@@ -118,7 +118,7 @@
       }
     }
   },
-  "MiniMaxH3AVDecodeT8GH": {
+  "AICG3D_H3AVDecodeT8GH": {
     "display_name": "MiniMax H3 AV Decode - T8 (GH)",
     "inputs": {
       "av_latent": {

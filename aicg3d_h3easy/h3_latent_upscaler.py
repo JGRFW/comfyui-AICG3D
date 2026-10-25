@@ -352,7 +352,7 @@ class MiniMaxH3EasyLatentUpscaler3D(io.ComfyNode):
         return io.Schema(
             node_id="MiniMaxH3EasyLatentUpscaler3D",
             display_name="MiniMax H3 Easy 3D Latent Upscale (Built-in)",
-            category="video/MinimaxH3",
+            category="AICG3D/H3 工作流",
             search_aliases=["minimax", "h3", "latent", "upscale", "3d"],
             inputs=[
                 io.AnyType.Input("latent", tooltip="Input MiniMax H3 latent."),

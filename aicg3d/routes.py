@@ -21,7 +21,7 @@ from aiohttp import web
 import aicg3d.prompt_guides as guide_lib
 import aicg3d.skills as skill_lib
 
-VERSION = "1.1.18"
+VERSION = "1.1.19"
 PROJECT_NAME = "短剧工作台"
 PROJECT_DESCRIPTION = "无限时长视频的 MiniMax H3 ComfyUI 工作流与插件"
 REPOSITORY_URL = "https://github.com/JGRFW/comfyui-AICG3D"
@@ -162,7 +162,10 @@ def list_media(kind: str = "", limit: int = 400) -> list[dict[str, Any]]:
     root = folder_paths.get_input_directory()
     wanted = MEDIA_KINDS.get(kind.lower())
     entries: list[dict[str, Any]] = []
+    max_entries = max(1, min(4000, int(limit)))
     for current, _dirs, names in os.walk(root):
+        if len(entries) >= max_entries:
+            break
         for name in names:
             extension = os.path.splitext(name)[1].lower()
             if wanted:
@@ -189,7 +192,7 @@ def list_media(kind: str = "", limit: int = 400) -> list[dict[str, Any]]:
                 "path": f"{subfolder}/{name}" if subfolder else name,
                 "url": _entry_url(name, "input", subfolder),
             })
-            if len(entries) >= max(1, min(4000, int(limit))):
+            if len(entries) >= max_entries:
                 break
     entries.sort(key=lambda item: item["mtime"], reverse=True)
     return entries

@@ -23,6 +23,14 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
+## 🆕 v1.1.21 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.21.md](release_notes/RELEASE_NOTES_v1.1.21.md)。
+
+- **Registry 安装包修复**：关闭 Git 中文路径转义并启用 UTF-8，管理器下载包现在会包含全部工作流和中文技能资源。
+- **发布包自动验收**：Registry Action 会下载刚发布的 zip，关键入口、后端节点、至少 9 个工作流或许可证缺失时直接失败。
+- **保留 1.1.20 功能**：旧节点兼容、资源库上传、PromptSplit 新旧 ID、Nodes 2.0 布局和真正单段抽卡全部保留。
+
 ## 🆕 v1.1.19 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.19.md](release_notes/RELEASE_NOTES_v1.1.19.md)。

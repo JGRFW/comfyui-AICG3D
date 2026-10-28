@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONUTF8: "1"
+
 concurrency:
   group: comfy-registry-publish
   cancel-in-progress: false
@@ -21,6 +24,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Preserve non-ASCII package paths
+        run: git config --global core.quotepath false
 
       - name: Check Registry token
         id: registry-token
@@ -39,3 +45,47 @@ jobs:
         uses: Comfy-Org/publish-node-action@main
         with:
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+
+      - name: Verify Registry package contents
+        if: steps.registry-token.outputs.configured == 'true'
+        shell: bash
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          python - "${VERSION}" <<'PY'
+          import io
+          import sys
+          import time
+          import urllib.request
+          import zipfile
+
+          version = sys.argv[1]
+          url = f"https://cdn.comfy.org/aicg3d/aicg3d-h3-suite/{version}/node.zip"
+          last_error = None
+          for _ in range(18):
+              try:
+                  with urllib.request.urlopen(url, timeout=60) as response:
+                      payload = response.read()
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  time.sleep(5)
+          else:
+              raise RuntimeError(f"Registry package was not available: {last_error}")
+
+          with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+              names = set(archive.namelist())
+          required = {
+              "web/minimax_h3_easy_ui_v4.js",
+              "web/aicg3d_prompt_split.js",
+              "aicg3d_h3easy/nodes.py",
+              "pyproject.toml",
+              "LICENSE",
+          }
+          missing = sorted(required - names)
+          workflows = sorted(name for name in names if name.startswith("workflows/") and name.endswith(".json"))
+          if missing or len(workflows) < 9:
+              raise RuntimeError(
+                  f"Incomplete Registry package: missing={missing}, workflows={workflows}"
+              )
+          print(f"Verified {len(names)} files and {len(workflows)} workflows")
+          PY

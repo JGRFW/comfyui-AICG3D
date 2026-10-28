@@ -83,9 +83,22 @@ jobs:
           }
           missing = sorted(required - names)
           workflows = sorted(name for name in names if name.startswith("workflows/") and name.endswith(".json"))
-          if missing or len(workflows) < 9:
-              raise RuntimeError(
-                  f"Incomplete Registry package: missing={missing}, workflows={workflows}"
+          last_error = None
+          for attempt in range(1, 37):
+              if not missing and len(workflows) >= 9:
+                  print(f"Verified {len(names)} files and {len(workflows)} workflows")
+                  break
+              last_error = RuntimeError(
+                  f"incomplete package: missing={missing}, workflows={len(workflows)}"
               )
-          print(f"Verified {len(names)} files and {len(workflows)} workflows")
+              print(f"Verification attempt {attempt}/36 failed: {last_error}")
+              if attempt >= 36:
+                  raise RuntimeError(f"Registry package verification failed: {last_error}")
+              time.sleep(10)
+              with urllib.request.urlopen(url, timeout=60) as response:
+                  payload = response.read()
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = set(archive.namelist())
+              missing = sorted(required - names)
+              workflows = sorted(name for name in names if name.startswith("workflows/") and name.endswith(".json"))
           PY

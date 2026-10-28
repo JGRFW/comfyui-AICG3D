@@ -331,8 +331,8 @@ function buildLoraRow(node, index, loraMeta, onChange = () => {}) {
 
     const slider = el("input", "a3-slider");
     slider.type = "range";
-    slider.min = String(strengthWidget?.options?.min ?? -4);
-    slider.max = String(strengthWidget?.options?.max ?? 4);
+    slider.min = String(strengthWidget?.options?.min ?? -30);
+    slider.max = String(strengthWidget?.options?.max ?? 30);
     slider.step = String(strengthWidget?.options?.step ?? 0.05);
     slider.value = String(strengthWidget?.value ?? 1);
 

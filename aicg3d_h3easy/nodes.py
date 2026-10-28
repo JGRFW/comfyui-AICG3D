@@ -4090,7 +4090,7 @@ class MiniMaxH3EasyLoader:
             )
             required[f"lora_{index}_strength"] = (
                 "FLOAT",
-                {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重。"},
+                {"default": 1.0, "min": -30.0, "max": 30.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重（-30 ~ +30）。"},
             )
         required["non_h3_policy"] = (
             list(NON_H3_POLICY_CHOICES),
@@ -4111,7 +4111,7 @@ class MiniMaxH3EasyLoader:
             )
             required[f"lora_{index}_strength"] = (
                 "FLOAT",
-                {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重。"},
+                {"default": 1.0, "min": -30.0, "max": 30.0, "step": 0.05, "tooltip": f"第 {index} 个 LoRA 权重（-30 ~ +30）。"},
             )
         # AICG3D：加载器现在只留「注意力加速」一个加速控件，前面 24 格 widget
         # 的位置完全不变；运动缓存（MotionCache）的开关与细项已从加载器移除，
@@ -12777,6 +12777,11 @@ class MiniMaxH3SequenceSegment:
     # 数字人模式下随段落链传下去的驱动音轨（原始 waveform），
     # 合成时直接用它当最终音轨，不再逐段写模型生成的音频。
     source_audio: Mapping[str, Any] | None = None
+    #: 单段抽卡运行时使用的稳定工作流作用域和链路标识。缓存只在当前
+    #: ComfyUI 进程内使用，重启后自动退回 ComfyUI 自身的节点缓存。
+    cache_scope: str = ""
+    chain_key: str = ""
+    node_id: str = ""
 
 
 def _sequence_collect_chain(final_segment: Any) -> list[MiniMaxH3SequenceSegment]:
@@ -12802,6 +12807,91 @@ def _sequence_collect_chain(final_segment: Any) -> list[MiniMaxH3SequenceSegment
                 f"「视频段落」链不连续：第 {expected} 段收到的是第 {item.index} 段"
             )
     return chain
+
+
+_SEQUENCE_LIVE_CACHE_LOCK = threading.RLock()
+_SEQUENCE_LIVE_CACHE_MAX_ITEMS = 512
+_SEQUENCE_LIVE_CACHE: OrderedDict[tuple[str, str, int], MiniMaxH3SequenceSegment] = OrderedDict()
+_SEQUENCE_LIVE_CACHE_REVISIONS: dict[tuple[str, str], int] = {}
+
+
+def _sequence_workflow_fingerprint(extra_pnginfo: Any) -> str:
+    """从提交提示词携带的工作流元数据里得到一个稳定的缓存作用域。"""
+    workflow = extra_pnginfo.get("workflow") if isinstance(extra_pnginfo, Mapping) else None
+    if not isinstance(workflow, Mapping):
+        workflow = extra_pnginfo if isinstance(extra_pnginfo, Mapping) else None
+    if isinstance(workflow, Mapping):
+        for key in ("id", "workflow_id", "workflowId"):
+            value = str(workflow.get(key) or "").strip()
+            if value:
+                return f"workflow:{value}"
+        nodes = workflow.get("nodes")
+        if isinstance(nodes, list):
+            node_ids = [str(item.get("id")) for item in nodes if isinstance(item, Mapping) and item.get("id") is not None]
+            if node_ids:
+                digest = hashlib.sha1("|".join(node_ids).encode("utf-8")).hexdigest()
+                return f"nodes:{digest[:20]}"
+    return "workflow:unknown"
+
+
+def _sequence_runtime_scope(extra_pnginfo: Any = None, explicit: Any = "") -> str:
+    scope = str(explicit or "").strip()
+    if scope:
+        return scope
+    return _sequence_workflow_fingerprint(extra_pnginfo)
+
+
+def _sequence_cache_store(segment: MiniMaxH3SequenceSegment) -> None:
+    """保存某一段最新结果；分段抽卡和最终合成通过这个缓存交接。"""
+    scope = str(getattr(segment, "cache_scope", "") or "workflow:unknown")
+    chain_key = str(getattr(segment, "chain_key", "") or "chain:unknown")
+    index = int(getattr(segment, "index", 0) or 0)
+    if index <= 0:
+        return
+    key = (scope, chain_key, index)
+    with _SEQUENCE_LIVE_CACHE_LOCK:
+        _SEQUENCE_LIVE_CACHE[key] = segment
+        _SEQUENCE_LIVE_CACHE.move_to_end(key)
+        revision_key = (scope, chain_key)
+        _SEQUENCE_LIVE_CACHE_REVISIONS[revision_key] = (
+            int(_SEQUENCE_LIVE_CACHE_REVISIONS.get(revision_key, 0)) + 1
+        )
+        while len(_SEQUENCE_LIVE_CACHE) > _SEQUENCE_LIVE_CACHE_MAX_ITEMS:
+            _SEQUENCE_LIVE_CACHE.popitem(last=False)
+
+
+def _sequence_cache_read(scope: str, chain_key: str, index: int) -> MiniMaxH3SequenceSegment | None:
+    with _SEQUENCE_LIVE_CACHE_LOCK:
+        return _SEQUENCE_LIVE_CACHE.get((str(scope), str(chain_key), int(index)))
+
+
+def _sequence_cache_read_chain(
+    scope: str, chain_key: str, expected_count: int = 0,
+) -> list[MiniMaxH3SequenceSegment]:
+    """读取一条已完整生成的段落链；expected_count 可屏蔽断链前的旧尾段。"""
+    with _SEQUENCE_LIVE_CACHE_LOCK:
+        entries = sorted(
+            (
+                (key[2], value)
+                for key, value in _SEQUENCE_LIVE_CACHE.items()
+                if key[0] == str(scope) and key[1] == str(chain_key)
+                and (int(expected_count or 0) <= 0 or key[2] <= int(expected_count))
+            ),
+            key=lambda item: item[0],
+        )
+    if not entries:
+        raise ValueError("没有找到这条段落链的抽卡缓存，请先完整运行一次，或直接连接最后一段的 segment")
+    chain = [value for _index, value in entries]
+    expected = list(range(1, len(chain) + 1))
+    actual = [int(item.index) for item in chain]
+    if actual != expected:
+        raise ValueError(f"抽卡缓存段落不连续：期望 {expected}，实际 {actual}")
+    return chain
+
+
+def _sequence_cache_revision(scope: str, chain_key: str) -> int:
+    with _SEQUENCE_LIVE_CACHE_LOCK:
+        return int(_SEQUENCE_LIVE_CACHE_REVISIONS.get((str(scope), str(chain_key)), 0))
 
 
 def _sequence_same_audio(left: Any, right: Any) -> bool:
@@ -13155,6 +13245,9 @@ class MiniMaxH3EasySequenceSegment:
     FUNCTION = "sample_segment"
     RETURN_TYPES = (SEQUENCE_SEGMENT_TYPE,)
     RETURN_NAMES = ("segment",)
+    # 允许“抽卡时段”把这一个段落作为本次执行的目标；普通完整运行时它仍会
+    # 作为最终合成节点的依赖被正常调度。
+    OUTPUT_NODE = True
     DESCRIPTION = (
         "顺序生成的一段视频。接上一条「视频段落」的 segment 即可无限往下接；"
         "第一段不接 previous_segment。段落之间自动衔接上一段的结尾帧（帧数在全局设置里调）。"
@@ -13194,6 +13287,15 @@ class MiniMaxH3EasySequenceSegment:
         for index in range(1, SEGMENT_MAX_MEDIA + 1):
             optional[f"media_{index}"] = ("*", {"hidden": True})
             optional[f"media_type_{index}"] = ("STRING", {"default": "", "hidden": True})
+        # 由前端注入，用来隔离不同工作流/不同副本的单段抽卡缓存；不可见。
+        optional["sequence_scope"] = ("STRING", {"default": "", "hidden": True})
+        optional["draw_previous_from_cache"] = ("BOOLEAN", {"default": False, "hidden": True})
+        optional["draw_previous_scope"] = ("STRING", {"default": "", "hidden": True})
+        optional["draw_previous_chain_key"] = ("STRING", {"default": "", "hidden": True})
+        optional["draw_previous_index"] = (
+            "INT",
+            {"default": 0, "min": 0, "max": 100000, "hidden": True},
+        )
         return {
             "required": {
                 "prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": ""}),
@@ -13225,6 +13327,10 @@ class MiniMaxH3EasySequenceSegment:
                 ),
             },
             "optional": optional,
+            "hidden": {
+                "extra_pnginfo": "EXTRA_PNGINFO",
+                "unique_id": "UNIQUE_ID",
+            },
         }
 
     @classmethod
@@ -13283,12 +13389,40 @@ class MiniMaxH3EasySequenceSegment:
         previous_segment=None,
         guide_image=None,
         guide_audio=None,
+        sequence_scope="",
+        draw_previous_from_cache=False,
+        draw_previous_scope="",
+        draw_previous_chain_key="",
+        draw_previous_index=0,
+        extra_pnginfo=None,
+        unique_id=None,
         **kwargs,
     ):
         inline_state_value = kwargs.pop("inline_media_state", "")
+        cache_scope = _sequence_runtime_scope(extra_pnginfo, sequence_scope)
+        node_id = str(unique_id or "")
         guide_frame_idx, inline_state_value = _normalize_sequence_guide_frame(
             guide_frame_idx, inline_state_value
         )
+        use_cached_previous = draw_previous_from_cache is True or str(draw_previous_from_cache).strip().lower() in {"1", "true", "yes", "on"}
+        if use_cached_previous and previous_segment is not None:
+            if previous_segment != "__aicg3d_cached_previous__":
+                raise ValueError("单段抽卡的上一段缓存标记不正确，请重新点击当前段落的“抽卡时段”")
+            previous_index = int(draw_previous_index or 0)
+            previous_chain_key = str(draw_previous_chain_key or "").strip()
+            if previous_index <= 0 or not previous_chain_key:
+                raise ValueError("单段抽卡缺少上一段缓存索引，请重新点击当前段落的“抽卡时段”")
+            previous_scope = _sequence_runtime_scope(
+                extra_pnginfo, draw_previous_scope or sequence_scope
+            )
+            previous_segment = _sequence_cache_read(
+                previous_scope, previous_chain_key, previous_index
+            )
+            if previous_segment is None:
+                raise ValueError(
+                    f"找不到第 {previous_index} 段的可用缓存。请先完整运行一次整条段落链，"
+                    "再进行单段抽卡；重启 ComfyUI 后也需要重新完整运行一次。"
+                )
         if previous_segment is not None and not isinstance(previous_segment, MiniMaxH3SequenceSegment):
             raise ValueError("previous_segment 只能接本插件「视频段落」节点的 segment 输出")
         # 全局设置只在第 1 段接：后面的段落顺着 previous_segment 用同一份配置。
@@ -13304,6 +13438,12 @@ class MiniMaxH3EasySequenceSegment:
         if not isinstance(bundle, MiniMaxH3Bundle):
             raise ValueError("全局设置里没有可用的 MiniMax H3 模型组合")
         index = 1 if previous_segment is None else int(previous_segment.index) + 1
+        chain_key = (
+            str(getattr(previous_segment, "chain_key", "") or getattr(previous_segment, "node_id", ""))
+            if previous_segment is not None
+            else node_id
+        )
+        chain_key = chain_key or f"segment:{index}"
         position = index - 1
         # 这一段在整条时间轴上的起点：前面每一段交付的帧数之和。
         timeline_start = 0 if previous_segment is None else (
@@ -13558,7 +13698,11 @@ class MiniMaxH3EasySequenceSegment:
                 previous=previous_segment,
                 timeline_start=timeline_start,
                 source_audio=source_audio,
+                cache_scope=cache_scope,
+                chain_key=chain_key,
+                node_id=node_id,
             )
+            _sequence_cache_store(result)
             return (result,)
         finally:
             reporter.finish(done)
@@ -13587,7 +13731,10 @@ class MiniMaxH3EasySequenceCombine:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "final_segment": (SEQUENCE_SEGMENT_TYPE,),
+                "final_segment": (
+                    "*",
+                    {"tooltip": "接最后一段的 segment；抽卡缓存合成模式由前端注入缓存标记。"},
+                ),
                 "filename_prefix": (
                     "STRING",
                     {
@@ -13596,7 +13743,44 @@ class MiniMaxH3EasySequenceCombine:
                     },
                 ),
             },
+            "optional": {
+                "cache_only": ("BOOLEAN", {"default": False, "hidden": True}),
+                "cache_scope": ("STRING", {"default": "", "hidden": True}),
+                "cache_segment_count": ("INT", {"default": 0, "min": 0, "max": 100000, "hidden": True}),
+                "cache_chain_key": ("STRING", {"default": "", "hidden": True}),
+            },
+            "hidden": {
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
         }
+
+    @classmethod
+    def IS_CHANGED(
+        cls,
+        final_segment=None,
+        filename_prefix=SEQUENCE_DEFAULT_FILENAME_PREFIX,
+        cache_only=False,
+        cache_scope="",
+        cache_chain_key="",
+        cache_segment_count=0,
+        extra_pnginfo=None,
+        **kwargs,
+    ):
+        """抽卡缓存变化时强制最终合成重跑，不受 ComfyUI 节点缓存影响。"""
+        use_cache_only = cache_only is True or str(cache_only).strip().lower() in {"1", "true", "yes", "on"}
+        scope = _sequence_runtime_scope(
+            extra_pnginfo,
+            cache_scope or (getattr(final_segment, "cache_scope", "") if final_segment is not None else ""),
+        )
+        chain_key = str(
+            cache_chain_key
+            or (getattr(final_segment, "chain_key", "") if final_segment is not None else "")
+            or ""
+        ).strip()
+        if not chain_key:
+            return f"{scope}:no-chain:{1 if use_cache_only else 0}"
+        revision = _sequence_cache_revision(scope, chain_key)
+        return f"{scope}:{chain_key}:{revision}:{1 if use_cache_only else 0}:{int(cache_segment_count or 0)}"
 
     @classmethod
     def _save_video(cls, video: Any, filename_prefix: str) -> tuple[str, str]:
@@ -13623,8 +13807,45 @@ class MiniMaxH3EasySequenceCombine:
         return file, subfolder
 
     @classmethod
-    def combine(cls, final_segment, filename_prefix=SEQUENCE_DEFAULT_FILENAME_PREFIX):
-        chain = _sequence_collect_chain(final_segment)
+    def combine(
+        cls,
+        final_segment=None,
+        filename_prefix=SEQUENCE_DEFAULT_FILENAME_PREFIX,
+        cache_only=False,
+        cache_scope="",
+        cache_chain_key="",
+        cache_segment_count=0,
+        extra_pnginfo=None,
+        **kwargs,
+    ):
+        use_cache_only = cache_only is True or str(cache_only).strip().lower() in {"1", "true", "yes", "on"}
+        if use_cache_only:
+            scope = _sequence_runtime_scope(extra_pnginfo, cache_scope)
+            chain_key = str(cache_chain_key or "").strip()
+            if not chain_key:
+                raise ValueError("抽卡缓存合成缺少段落链标识，请从连接好的最终合成节点重新运行")
+            expected_count = int(cache_segment_count or 0)
+            chain = _sequence_cache_read_chain(scope, chain_key, expected_count)
+            if expected_count > 0 and len(chain) != expected_count:
+                raise ValueError(
+                    f"抽卡缓存只找到 {len(chain)} 段，当前工作流需要 {expected_count} 段完整结果；"
+                    "请先完整运行一次所有段落，再进行单段抽卡和最终合成。"
+                )
+        else:
+            if final_segment is None:
+                raise ValueError("最终合成需要连接最后一段的 segment，或使用抽卡缓存合成模式")
+            chain = _sequence_collect_chain(final_segment)
+            scope = _sequence_runtime_scope(
+                extra_pnginfo,
+                cache_scope or getattr(final_segment, "cache_scope", "") or getattr(chain[0], "cache_scope", ""),
+            )
+            chain_key = str(
+                cache_chain_key
+                or getattr(final_segment, "chain_key", "")
+                or getattr(chain[0], "chain_key", "")
+                or getattr(chain[0], "node_id", "")
+                or ""
+            ).strip()
         config = chain[0].config
         bundle = config.bundle
         if not isinstance(bundle, MiniMaxH3Bundle):

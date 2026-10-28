@@ -21,7 +21,7 @@ from aiohttp import web
 import aicg3d.prompt_guides as guide_lib
 import aicg3d.skills as skill_lib
 
-VERSION = "1.1.19"
+VERSION = "1.1.20"
 PROJECT_NAME = "短剧工作台"
 PROJECT_DESCRIPTION = "无限时长视频的 MiniMax H3 ComfyUI 工作流与插件"
 REPOSITORY_URL = "https://github.com/JGRFW/comfyui-AICG3D"

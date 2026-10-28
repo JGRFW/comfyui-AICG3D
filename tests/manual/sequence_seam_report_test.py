@@ -20,7 +20,10 @@ if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
 from aicg3d_h3easy.nodes import (  # noqa: E402
+    _SEQUENCE_LIVE_CACHE,
+    _SEQUENCE_LIVE_CACHE_LOCK,
     _SequenceSeamMatcher,
+    _sequence_cache_read_chain,
     _sequence_handoff_context_frames,
 )
 
@@ -75,6 +78,23 @@ def test_real_scene_change_skips_spatial_blend() -> None:
     assert output.shape == current.shape
 
 
+def test_cache_chain_ignores_disconnected_stale_tail() -> None:
+    from types import SimpleNamespace
+
+    scope = "test:stale-tail"
+    chain_key = "root:1"
+    with _SEQUENCE_LIVE_CACHE_LOCK:
+        for index in range(1, 5):
+            _SEQUENCE_LIVE_CACHE[(scope, chain_key, index)] = SimpleNamespace(index=index)
+    try:
+        chain = _sequence_cache_read_chain(scope, chain_key, 3)
+        assert [item.index for item in chain] == [1, 2, 3]
+    finally:
+        with _SEQUENCE_LIVE_CACHE_LOCK:
+            for index in range(1, 5):
+                _SEQUENCE_LIVE_CACHE.pop((scope, chain_key, index), None)
+
+
 def test_disabled_mode_only_reports() -> None:
     matcher = _SequenceSeamMatcher(enabled=False)
     matcher.apply(_frames(0.30), 1)
@@ -95,6 +115,7 @@ def main() -> None:
         test_handoff_grid,
         test_same_shot_exposure_is_repaired,
         test_real_scene_change_skips_spatial_blend,
+        test_cache_chain_ignores_disconnected_stale_tail,
         test_disabled_mode_only_reports,
     )
     for test in tests:

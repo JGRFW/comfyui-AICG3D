@@ -12,6 +12,7 @@
 import { app } from "../../scripts/app.js";
 
 const NODE_CLASS = "AICG3D_H3PromptSegmentSplit";
+const LEGACY_NODE_CLASS = "AICG3DPromptSegmentSplit";
 /* 一次最多解析并填入多少段。段落节点够多就能一直往后加，这里只留个安全上限。 */
 const MAX_SEGMENTS = 64;
 const AUTOFILL_DELAY = 400;
@@ -597,6 +598,11 @@ async function optimizePromptScript(node, button) {
 
 /* ------------------------------------------------------------- 装到节点上 */
 
+function isPromptSplitNode(node) {
+    const type = String(node?.comfyClass || node?.type || "");
+    return type === NODE_CLASS || type === LEGACY_NODE_CLASS;
+}
+
 function install(node) {
     if (node.__aicg3dPromptSplitInstalled) return;
     node.__aicg3dPromptSplitInstalled = true;
@@ -659,7 +665,11 @@ function install(node) {
 app.registerExtension({
     name: "AICG3D.PromptSegmentSplit",
     nodeCreated(node) {
-        if (node?.comfyClass !== NODE_CLASS && node?.type !== NODE_CLASS) return;
+        if (!isPromptSplitNode(node)) return;
+        install(node);
+    },
+    loadedGraphNode(node) {
+        if (!isPromptSplitNode(node)) return;
         install(node);
     },
 });

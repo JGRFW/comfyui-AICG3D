@@ -58,6 +58,33 @@ def _h3_easy() -> tuple[dict, dict]:
     return mapping, display
 
 
+_LEGACY_H3_COMPAT_IDS = {
+    "MiniMaxH3EasyMediaLoader",
+    "MiniMaxH3EasySequenceGlobal",
+    "MiniMaxH3EasySequenceSegment",
+    "MiniMaxH3EasySequenceCombine",
+}
+
+
+def _add_legacy_h3_compat(mapping: dict, display: dict, part_mapping: dict, part_display: dict) -> None:
+    """Expose a few old MiniMaxH3Easy* IDs when no upstream pack owns them."""
+    comfy_nodes = sys.modules.get("nodes")
+    external_mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
+    for legacy_id in _LEGACY_H3_COMPAT_IDS:
+        if legacy_id in external_mappings or legacy_id in mapping or legacy_id not in part_mapping:
+            continue
+        base_class = part_mapping[legacy_id]
+        legacy_class = type(
+            f"{base_class.__name__}LegacyCompat",
+            (base_class,),
+            {"DEPRECATED": True, "__module__": base_class.__module__},
+        )
+        mapping[legacy_id] = legacy_class
+        legacy_display = part_display.get(legacy_id)
+        if legacy_display:
+            display[legacy_id] = f"{legacy_display}（旧版兼容）"
+
+
 def build() -> tuple[dict, dict]:
     part_mapping, part_display = _h3_easy()
     own_mapping, own_display = {}, {}
@@ -96,6 +123,8 @@ def build() -> tuple[dict, dict]:
         legacy_name = prompt_split.LEGACY_NODE_DISPLAY_NAME_MAPPINGS.get(node_id)
         if legacy_name:
             display[node_id] = legacy_name
+
+    _add_legacy_h3_compat(mapping, display, part_mapping, part_display)
 
     for node_id, node_class in mapping.items():
         branding.apply(node_class, node_id)

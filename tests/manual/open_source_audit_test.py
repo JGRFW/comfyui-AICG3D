@@ -112,6 +112,42 @@ def test_frontend_globals_are_namespaced() -> None:
     assert "MiniMaxH3IntegrationGH" in integration
 
 
+def test_manager_legacy_node_ids_are_registered() -> None:
+    from aicg3d.registry import _LEGACY_H3_COMPAT_IDS, build
+
+    mapping, _display = build()
+    for node_id in _LEGACY_H3_COMPAT_IDS:
+        assert node_id in mapping, node_id
+    assert "AICG3DPromptSegmentSplit" in mapping
+    assert "AICG3D_H3PromptSegmentSplit" in mapping
+
+
+def test_media_picker_and_nodes2_mode_guards() -> None:
+    ui = (PLUGIN_ROOT / "web" / "minimax_h3_easy_ui_v4.js").read_text(encoding="utf-8")
+    assert "function openMediaLoaderFilePicker" in ui
+    assert "input.className = \"h3-media-loader-file-input\"" in ui
+    assert "document.body.append(input)" in ui
+    assert "if (inlinePanel && isVueNodesMode())" in ui
+
+
+def test_sequence_draw_uses_cached_previous_contract() -> None:
+    from aicg3d_h3easy.nodes import MiniMaxH3EasySequenceSegment
+
+    optional = MiniMaxH3EasySequenceSegment.INPUT_TYPES().get("optional", {})
+    for name in (
+        "draw_previous_from_cache",
+        "draw_previous_scope",
+        "draw_previous_chain_key",
+        "draw_previous_index",
+    ):
+        assert name in optional, name
+
+    ui = (PLUGIN_ROOT / "web" / "minimax_h3_easy_ui_v4.js").read_text(encoding="utf-8")
+    assert "const sequenceDrawTargetNodes = new Map()" in ui
+    assert 'sequencePromptNode.inputs.previous_segment = "__aicg3d_cached_previous__"' in ui
+    assert "queueNodeIds: [node.id]" in ui
+
+
 def test_no_private_module_injection() -> None:
     source = (PLUGIN_ROOT / "aicg3d_h3easy" / "character_motion.py").read_text(encoding="utf-8")
     assert "sys.modules[" not in source
@@ -136,6 +172,9 @@ def main() -> None:
         test_input_file_resolution_rejects_escape,
         test_frontend_globals_are_namespaced,
         test_no_private_module_injection,
+        test_manager_legacy_node_ids_are_registered,
+        test_media_picker_and_nodes2_mode_guards,
+        test_sequence_draw_uses_cached_previous_contract,
         test_jpeg_payload_is_a_valid_data_url,
     )
     for test in tests:

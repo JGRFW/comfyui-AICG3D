@@ -220,6 +220,10 @@
 2.  **启动服务**：重启 ComfyUI。
 3.  **定位节点**：在右键菜单中找到 **AICG3D** 分类即可开始创作。
 
+推荐直接在 **ComfyUI Manager / Comfy Registry** 搜索 `AICG3D`、`短剧工作台` 或 `MiniMax H3` 安装。正常安装会自动处理 Python 依赖；安装完成后重启 ComfyUI，并在浏览器执行 `Ctrl+F5`。
+
+本插件已内置资源库、分段提示词解析和 H3 核心节点，**不需要另外安装 `ComfyUI-MiniMaxH3-Easy` 或独立的 `ComfyUI-AICG3D-PromptSplit`**。同时安装上游 Easy 插件时，本插件会保留自己的 `AICG3D_H3*` 节点，避免同名节点互相覆盖。
+
 ### FFmpeg 运行依赖（13 号工作流最后合成必需）
 
 13 号无限长视频工作流的「最终合成视频」需要 FFmpeg。插件会优先使用 `imageio-ffmpeg`，其次查找系统 `PATH` 中的 `ffmpeg.exe`，也可通过 `VHS_FORCE_FFMPEG_PATH` 指定路径。
@@ -239,7 +243,8 @@ python.exe -m pip install -r requirements.txt
 - 12、13 号工作流里的 `Label (rgthree)` 只是画布注释；缺少 [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) 时不影响后端生成，但建议安装以正常显示标签。
 
 
-> **💡 迁移指南**：由于采用了强制前缀，若您迁移旧版工作流，请将原有的 MiniMaxH3Easy 节点手动替换为对应的 AICG3D_H3_ 节点。
+
+> **💡 迁移说明**：新工作流使用 `AICG3D_H3*` 命名空间。旧工作流常用到的 `MiniMaxH3EasyMediaLoader`、`MiniMaxH3EasySequenceGlobal`、`MiniMaxH3EasySequenceSegment` 和 `MiniMaxH3EasySequenceCombine` 已提供自动兼容注册；只有遇到未覆盖的旧节点时，才需要手动替换为对应的 `AICG3D_H3*` 节点。
 
 ## 🤝 核心贡献者与致谢 (Core Contributors & Acknowledgements)
 
@@ -255,3 +260,14 @@ python.exe -m pip install -r requirements.txt
 ## 📜 开源协议
 
 本项目遵循 GNU GPL v3.0 或更高版本（GPL-3.0-or-later）协议开源。
+## 🆕 v1.1.20 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.20.md](release_notes/RELEASE_NOTES_v1.1.20.md)。
+
+- **管理器安装兼容修复**：补齐旧版 `MiniMaxH3Easy*` 资源库和段落节点 ID，旧工作流不再因为缺少节点而显示白板。
+- **分段提示词解析恢复**：新旧节点 ID 都安装“一键填入全部视频段落”和“✦ 优化提示词”按钮，并在工作流加载后兜底初始化。
+- **资源库上传恢复**：修复 Nodes 2.0 资源面板的父容器尺寸和前端归属判断，上传、图片/音频/视频列表和清空按钮保持可用。
+- **Nodes 2.0 布局修复**：资源库面板固定在节点内部 320px 区域滚动，不再溢出节点或盖住其他节点。
+- **单段抽卡修复**：点击任意“抽卡时段”只采样当前段，上一段从本进程缓存读取；右上角运行只做最终合成。
+- **干净安装验证**：已实测媒体上传、旧/新分段解析节点、三段自动填入、第一段文本编辑和提示词框尺寸保持。
+- **注册与发布审计**：Python 全量编译、前端全量语法检查、Registry 发布校验和 10 项开源安全与兼容回归测试通过。

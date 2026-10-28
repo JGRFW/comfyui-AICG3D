@@ -35,6 +35,7 @@ const RENDER_PASS1_CLASS = "MiniMaxH3EasyRenderPass1";
 const RENDER_PASS2_CLASS = "MiniMaxH3EasyRenderPass2";
 /* AICG3D 无限段落顺序生成：视频段落只用一条 previous_segment 线串起来。 */
 const SEQUENCE_SEGMENT_CLASS = "MiniMaxH3EasySequenceSegment";
+const SEQUENCE_RESOURCE_PANEL_HEIGHT = 320;
 /* 全局设置节点：分辨率 / 宽高比 / 帧率等全局参数，画布宽高由分辨率算出来只读显示。 */
 const SEQUENCE_GLOBAL_CLASS = "MiniMaxH3EasySequenceGlobal";
 const PROMPT_SEGMENT_SPLIT_CLASS = "MiniMaxH3EasyPromptSegmentSplit";
@@ -60,6 +61,18 @@ const LEGACY_TEXT_ONLY_MEDIA_MODES_PROP = "minimax_h3_text_only_media_modes";
 const PROMPT_DOC_PROP = "minimax_h3_prompt_reference_doc";
 const PROMPT_VIEW_PROP = "minimax_h3_prompt_view_mode";
 const PROMPT_AUTO_MARKER_PROP = "minimax_h3_auto_prompt_marker";
+const SEQUENCE_GRAPH_SCOPE_PROP = "aicg3d_h3_sequence_cache_scope";
+let sequenceDrawEventsInstalled = false;
+let sequenceQueueHookInstalled = false;
+let sequenceStitchPending = false;
+let sequenceStitchGraph = null;
+let sequenceCombineInFlight = false;
+let sequenceCombinePromptId = null;
+const sequenceDrawSessions = new Map();
+const sequenceDrawTargetNodes = new Map();
+const sequenceCacheOnlyNodes = new Set();
+const sequenceCacheOnlyCounts = new Map();
+const sequenceCacheOnlyChainKeys = new Map();
 const PROMPT_OPTIMIZER_SETTINGS_ENDPOINT = "/aicg3d/h3easy/prompt-optimizer/settings";
 const PROMPT_OPTIMIZER_LOCAL_MODELS_ENDPOINT = "/aicg3d/h3easy/prompt-optimizer/local-models";
 const PROMPT_OPTIMIZER_ENGINE_API = "api";
@@ -784,7 +797,7 @@ function nodeMatchesClass(node, className, displayName, installedMarker) {
     /* 上游同名插件注册的节点实例不认：两套节点的类名一模一样，只比类名会让
        本插件的面板叠到上游那份节点上。 */
     const rawClass = String(node.comfyClass ?? node.type ?? node.constructor?.comfyClass ?? node.constructor?.type ?? "");
-    if (rawClass && isUpstreamH3NodeId(rawClass)) return false;
+    if (rawClass && isUpstreamH3NodeId(rawClass, node.constructor?.nodeData || null)) return false;
     const candidates = [
         h3ClassName(node.comfyClass),
         h3ClassName(node.type),
@@ -3445,6 +3458,41 @@ function patchGraphToPrompt() {
         const promptData = await original.apply(this, arguments);
         const output = promptData?.output || {};
         for (const node of app.graph?._nodes || []) {
+            // 无限段落：把稳定的工作流缓存作用域写进每一个提交；最终合成在
+            // “只合成”模式下会临时移除 final_segment 连线，避免重跑上游段落。
+            const sequencePromptNode = output[String(node.id)];
+            if (sequencePromptNode && isSequenceSegmentNode(node)) {
+                sequencePromptNode.inputs ||= {};
+                sequencePromptNode.inputs.sequence_scope = sequenceGraphScope(node.graph || app.graph);
+                const drawTarget = sequenceDrawTargetNodes.get(String(node.id));
+                if (drawTarget) {
+                    sequencePromptNode.inputs.sequence_scope = drawTarget.scope;
+                    if (Number(drawTarget.index) > 1) {
+                        // 单段抽卡必须切断上一段依赖，否则 ComfyUI 会把整条前半链
+                        // 作为本次输出节点的依赖重新执行。后端会从本次进程内的段落
+                        // 缓存恢复上一段，只采样当前目标段。
+                        sequencePromptNode.inputs.previous_segment = "__aicg3d_cached_previous__";
+                        sequencePromptNode.inputs.draw_previous_from_cache = true;
+                        sequencePromptNode.inputs.draw_previous_chain_key = String(drawTarget.chainKey || "");
+                        sequencePromptNode.inputs.draw_previous_index = Math.max(1, Number(drawTarget.index) - 1);
+                    }
+                    sequencePromptNode.inputs.draw_previous_scope = String(drawTarget.scope || "");
+                }
+            }
+            if (sequencePromptNode && sequenceSlotIndex(node.inputs, "final_segment") >= 0) {
+                sequencePromptNode.inputs ||= {};
+                sequencePromptNode.inputs.cache_scope = sequenceGraphScope(node.graph || app.graph);
+                if (sequenceCacheOnlyNodes.has(String(node.id))) {
+                    sequencePromptNode.inputs.final_segment = "__aicg3d_cache_only__";
+                    sequencePromptNode.inputs.cache_only = true;
+                    sequencePromptNode.inputs.cache_segment_count = Number(sequenceCacheOnlyCounts.get(String(node.id)) || 0);
+                    sequencePromptNode.inputs.cache_chain_key = String(sequenceCacheOnlyChainKeys.get(String(node.id)) || "");
+                } else {
+                    sequencePromptNode.inputs.cache_only = false;
+                    delete sequencePromptNode.inputs.cache_segment_count;
+                    delete sequencePromptNode.inputs.cache_chain_key;
+                }
+            }
             // Segment Refine has its own inputs and is intentionally excluded
             // from the main/context media patch above. Its localized combo
             // labels still need to be converted back to backend enum values.
@@ -9049,6 +9097,18 @@ function existingSequenceNext(node) {
 
 
 function removeSequenceInlinePanel(node) {
+    for (const host of node?.__h3InlineMediaHosts || []) {
+        const original = host?.__h3SequenceResourceHostOriginal;
+        if (!host || !original) continue;
+        host.style.height = original.height;
+        host.style.minHeight = original.minHeight;
+        host.style.maxHeight = original.maxHeight;
+        host.style.overflow = original.overflow;
+        host.style.gridTemplateRows = original.gridTemplateRows;
+        host.classList?.remove("h3-sequence-resource-host");
+        host.__h3SequenceResourceHostOriginal = null;
+    }
+    node.__h3InlineMediaHosts = [];
     const widget = node?.__h3InlineMediaPanelWidget;
     if (widget) {
         try { widget.element?.remove?.(); } catch (error) { /* already detached */ }
@@ -9150,14 +9210,7 @@ function openSequenceMediaPopup(node) {
     upload.className = "h3-media-loader-upload";
     upload.textContent = TEXT.mediaLoaderUpload;
     upload.addEventListener("click", () => {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = "image/*,audio/*,video/*";
-        input.multiple = true;
-        input.addEventListener("change", () => {
-            mediaLoaderUpload(node, input).catch((error) => console.error("Inline media upload failed", error));
-        }, { once: true });
-        input.click();
+        openMediaLoaderFilePicker(node, "Inline media upload failed");
     });
     const close = document.createElement("button");
     close.type = "button";
@@ -9243,7 +9296,7 @@ function nativeLinkOriginId(graph, input) {
 function refreshSequenceNextButton(node) {
     const button = node?.__h3SequenceNextButton;
     if (!button) return;
-    button.textContent = existingSequenceNext(node) ? "打开下一段" : "添加下一段";
+    button.textContent = existingSequenceNext(node) ? "增加下一段" : "添加下一段";
 }
 
 
@@ -9472,13 +9525,13 @@ function installSequenceActionRow(node) {
         style.id = "h3-sequence-action-styles";
         style.textContent = `
           .lg-node-widgets.h3-sequence-widget-grid{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px !important;}
-          .lg-node-widgets.h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px minmax(180px,320px) !important;}
+          .lg-node-widgets.h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px ${SEQUENCE_RESOURCE_PANEL_HEIGHT}px !important;}
         `;
         document.head.append(style);
     }
     const row = document.createElement("div");
     row.className = "h3-sequence-actions";
-    row.style.cssText = "position:relative;z-index:10;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:26px;align-content:center;align-items:center;gap:5px;width:100%;height:32px;min-height:32px;max-height:32px;box-sizing:border-box;padding:3px 6px;pointer-events:auto;";
+    row.style.cssText = "position:relative;z-index:10;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));grid-template-rows:26px;align-content:center;align-items:center;gap:4px;width:100%;height:32px;min-height:32px;max-height:32px;box-sizing:border-box;padding:3px 5px;pointer-events:auto;";
     row.addEventListener("pointerdown", (event) => event.stopPropagation());
     const makeButton = (label, tone, handler) => {
         const button = document.createElement("button");
@@ -9501,6 +9554,11 @@ function installSequenceActionRow(node) {
     refreshSequenceNextButton(node);
     refreshSequenceMissingMediaIndicator(node);
     makeButton("删除这一段", "danger", () => deleteSequenceSegment(node));
+    node.__h3SequenceDrawButton = makeButton("抽卡时段", "primary", () => startSequenceDraw(node));
+    node.__h3SequenceStopButton = makeButton("停止抽卡", "danger", () => stopSequenceDraw(node));
+    node.__h3SequenceDrawButton.title = "只重复生成当前段落；其他段落保持最后一次结果";
+    node.__h3SequenceStopButton.title = "停止当前段落的连续抽卡，保留已完成结果";
+    refreshSequenceDrawButtons(node);
     let domWidget = null;
     const applyHeight = () => {
         if (!domWidget) return false;
@@ -9573,6 +9631,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         // 段落节点同样要有个能贴素材、能写 @ 引用的提示词框：AICG3D 素材库点选
         // 就是往这里写引用。
         mediaLoaderHideStateWidget(getWidget(node, "inline_media_state"));
+        mediaLoaderHideStateWidget(getWidget(node, "sequence_scope"));
         installSequenceActionRow(node);
         scheduleSequenceSegmentPromptLayout(node);
         schedulePromptSplitSegmentLimitSync(160);
@@ -9591,6 +9650,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         this.__h3SequencePromptLayoutTimer = null;
         if (this.__h3SequenceGridTimer) clearTimeout(this.__h3SequenceGridTimer);
         this.__h3SequenceGridTimer = null;
+        if (this.__h3DrawSession) finishSequenceDrawSession(this);
         closeSequenceMediaPopup(this);
         return originalRemoved?.apply(this, arguments);
     };
@@ -10990,12 +11050,30 @@ function mediaLoaderUploadFiles(node, fileList) {
     return queued;
 }
 
-async function mediaLoaderUpload(node, input) {
-    try {
-        await mediaLoaderUploadFiles(node, input?.files || []);
-    } finally {
-        if (input) input.value = "";
+
+function openMediaLoaderFilePicker(node, errorLabel) {
+    if (!node || typeof document === "undefined" || !document.body) return false;
+    let input = document.querySelector("input.h3-media-loader-file-input");
+    if (!input) {
+        input = document.createElement("input");
+        input.type = "file";
+        input.className = "h3-media-loader-file-input";
+        input.accept = "image/*,audio/*,video/*";
+        input.multiple = true;
+        input.tabIndex = -1;
+        input.setAttribute("aria-hidden", "true");
+        input.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+        document.body.append(input);
     }
+    input.value = "";
+    input.onchange = () => {
+        const files = Array.from(input.files || []);
+        input.value = "";
+        if (!files.length) return;
+        mediaLoaderUploadFiles(node, files).catch((error) => console.error(errorLabel, error));
+    };
+    input.click();
+    return true;
 }
 
 function mediaLoaderDataTransferHasFiles(dataTransfer) {
@@ -11479,17 +11557,40 @@ function mediaLoaderResize(node) {
         const widgetHeight = Math.max(1, contentHeight + 8);
         node.__h3MediaLoaderMinWidgetHeight = widgetHeight;
         const inlinePanel = node.__h3InlineMediaPanelWidget === domWidget;
-        const layoutHeight = inlinePanel ? Math.max(1, Math.min(360, widgetHeight)) : widgetHeight;
+        const layoutHeight = inlinePanel ? SEQUENCE_RESOURCE_PANEL_HEIGHT : widgetHeight;
 
         // Restore the fill layout after measuring. LiteGraph gives a DOM widget
         // its extra height through computedHeight when the user resizes the node.
-        panel.style.height = "100%";
-        panel.style.minHeight = `${contentHeight}px`;
-        panel.style.maxHeight = "100%";
-        panel.style.flex = "1 1 auto";
+        panel.style.height = inlinePanel ? `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : "100%";
+        panel.style.minHeight = inlinePanel ? `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : `${contentHeight}px`;
+        panel.style.maxHeight = inlinePanel ? `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : "100%";
+        panel.style.flex = inlinePanel ? `0 0 ${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : "1 1 auto";
+        if (inlinePanel && isVueNodesMode()) {
+            node.__h3InlineMediaHosts ||= [];
+            let host = panel.parentElement;
+            for (let depth = 0; host && depth < 5; depth += 1, host = host.parentElement) {
+                if (!host.__h3SequenceResourceHostOriginal) {
+                    host.__h3SequenceResourceHostOriginal = {
+                        height: host.style.height,
+                        minHeight: host.style.minHeight,
+                        maxHeight: host.style.maxHeight,
+                        overflow: host.style.overflow,
+                        gridTemplateRows: host.style.gridTemplateRows,
+                    };
+                }
+                if (!node.__h3InlineMediaHosts.includes(host)) node.__h3InlineMediaHosts.push(host);
+                host.classList?.add("h3-sequence-resource-host");
+                host.style.minHeight = "0px";
+                host.style.height = `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
+                host.style.maxHeight = `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
+                host.style.overflow = "hidden";
+                if (getComputedStyle(host).display.includes("grid")) host.style.gridTemplateRows = "100%";
+                if (host.classList?.contains("lg-node-widget")) break;
+            }
+        }
         domWidget.options ||= {};
         const getWidgetHeight = () => inlinePanel
-            ? Math.max(1, Math.min(360, Number(node.__h3MediaLoaderMinWidgetHeight) || layoutHeight))
+            ? SEQUENCE_RESOURCE_PANEL_HEIGHT
             : Math.max(1, Number(node.__h3MediaLoaderMinWidgetHeight) || widgetHeight);
         // No fixed computeSize or maxHeight here. This is the same growable DOM
         // widget contract used by the batch text-card node: extra node height is
@@ -11718,14 +11819,7 @@ function installMediaLoaderNode(nodeType, nodeData) {
         upload.textContent = TEXT.mediaLoaderUpload;
         upload.title = TEXT.mediaLoaderUpload;
         upload.addEventListener("click", () => {
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "image/*,audio/*,video/*";
-            input.multiple = true;
-            input.addEventListener("change", () => {
-                mediaLoaderUpload(node, input).catch((error) => console.error("Media Loader upload failed", error));
-            }, { once: true });
-            input.click();
+            openMediaLoaderFilePicker(node, "Media Loader upload failed");
         });
         const actions = document.createElement("div");
         actions.className = "h3-media-loader-toolbar-actions";
@@ -11905,6 +11999,8 @@ function install() {
     installed = true;
     patchCanvas();
     patchGraphToPrompt();
+    installSequenceDrawEvents();
+    installSequenceQueueHook();
     patchEditorKeyHandling();
     installNativePromptControlTracking();
     installNativeThemeWatcher();
@@ -13009,4 +13105,268 @@ function mediaLoaderOpenTrimEditor(node, group, filename) {
     });
     mediaLoaderActiveTrimOverlay = { overlay, close };
     update();
+}
+function sequenceGraphScope(graph = app.graph) {
+    if (!graph) return "aicg3d:h3:unknown";
+    graph.extra ||= {};
+    let scope = String(graph.extra[SEQUENCE_GRAPH_SCOPE_PROP] || "").trim();
+    if (!scope) {
+        const random = globalThis.crypto?.randomUUID?.().slice(0, 12) || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        scope = `aicg3d:${random}`;
+        graph.extra[SEQUENCE_GRAPH_SCOPE_PROP] = scope;
+    }
+    return scope;
+}
+
+function sequenceChainRoot(node) {
+    let current = node;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const previous = previousSequenceSegment(current);
+        if (!previous) break;
+        current = previous;
+    }
+    return current || node;
+}
+
+function sequenceCombineChainKey(combine) {
+    const graph = combine?.graph || app.graph;
+    const input = (combine?.inputs || []).find((slot) => String(slot?.name || "") === "final_segment");
+    const sourceId = nativeLinkOriginId(graph, input);
+    const source = sourceId != null ? graph?.getNodeById?.(Number(sourceId)) : null;
+    const root = sequenceChainRoot(source);
+    return root ? String(root.id) : "";
+}
+
+function sequenceCombineTargetIds(graph = app.graph) {
+    const targets = [];
+    for (const combine of sequenceCombineNodes(graph)) {
+        const input = (combine.inputs || []).find((slot) => String(slot?.name || "") === "final_segment");
+        if (input?.link == null) continue;
+        const chainKey = sequenceCombineChainKey(combine);
+        if (!chainKey) continue;
+        const sourceId = nativeLinkOriginId(graph, input);
+        const source = sourceId != null ? graph?.getNodeById?.(Number(sourceId)) : null;
+        const segmentCount = source ? sequenceSegmentOrdinal(source) : 0;
+        targets.push({ node: combine, chainKey, segmentCount });
+    }
+    return targets;
+}
+
+function sequenceRandomSeed() {
+    return Math.max(1, Math.floor(Math.random() * 4294967294) + 1);
+}
+
+function refreshSequenceDrawButtons(node) {
+    const session = node?.__h3DrawSession;
+    const draw = node?.__h3SequenceDrawButton;
+    const stop = node?.__h3SequenceStopButton;
+    if (!draw || !stop) return;
+    const active = Boolean(session?.active);
+    draw.textContent = active && session?.running ? "抽卡中" : "抽卡时段";
+    draw.disabled = active;
+    stop.disabled = !active;
+    draw.style.opacity = active ? ".55" : "1";
+    stop.style.opacity = active ? "1" : ".55";
+}
+
+function finishSequenceDrawSession(node, detail = "") {
+    const session = node?.__h3DrawSession;
+    if (session?.retryTimer) clearTimeout(session.retryTimer);
+    if (node) {
+        node.__h3DrawSession = null;
+        sequenceDrawSessions.delete(String(node.id));
+        refreshSequenceDrawButtons(node);
+    }
+    if (detail) toast(detail, "ok");
+}
+
+async function queueSequenceDrawOnce(node, session) {
+    if (!session?.active || session.stopRequested || node.__h3DrawSession !== session) return;
+    if (app.processingQueue) {
+        if (session.retryTimer) clearTimeout(session.retryTimer);
+        session.retryTimer = setTimeout(() => queueSequenceDrawOnce(node, session), 650);
+        return;
+    }
+    session.queued = true;
+    session.running = false;
+    session.promptId = null;
+    setWidgetValue(node, "seed", sequenceRandomSeed());
+    node.graph?.change?.();
+    refreshSequenceDrawButtons(node);
+    let accepted = false;
+    const graph = node.graph || app.graph;
+    const root = sequenceChainRoot(node);
+    sequenceDrawTargetNodes.set(String(node.id), {
+        scope: sequenceGraphScope(graph),
+        chainKey: String(root?.id || ""),
+        index: sequenceSegmentOrdinal(node),
+    });
+    try {
+        accepted = await app.queuePrompt(0, 1, { queueNodeIds: [node.id] });
+    } catch (error) {
+        console.error("[AICG3D] 单段抽卡提交失败", error);
+        finishSequenceDrawSession(node, `第 ${sequenceSegmentOrdinal(node)} 段抽卡提交失败`);
+        toast(String(error?.message || error || "抽卡提交失败"), "error");
+        return;
+    } finally {
+        sequenceDrawTargetNodes.delete(String(node.id));
+    }
+    if (node.__h3DrawSession !== session || !session.active) return;
+    if (accepted === false) {
+        session.queued = false;
+        if (!session.stopRequested) session.retryTimer = setTimeout(() => queueSequenceDrawOnce(node, session), 650);
+    }
+}
+
+function startSequenceDraw(node) {
+    if (!isSequenceSegmentNode(node)) return false;
+    if (node.__h3DrawSession?.active) {
+        toast("这一段正在抽卡，先点“停止抽卡”再重新开始", "warn");
+        return false;
+    }
+    const session = { active: true, queued: false, running: false, stopRequested: false, promptId: null, retryTimer: null };
+    node.__h3DrawSession = session;
+    sequenceDrawSessions.set(String(node.id), session);
+    refreshSequenceDrawButtons(node);
+    toast(`开始抽卡第 ${sequenceSegmentOrdinal(node)} 段；本次只抽一次，其他段落保持不变`, "ok");
+    queueSequenceDrawOnce(node, session).catch((error) => {
+        console.error("[AICG3D] 抽卡循环异常", error);
+        finishSequenceDrawSession(node, "抽卡循环已停止");
+    });
+    return true;
+}
+
+function stopSequenceDraw(node, { interrupt = true, silent = false } = {}) {
+    const session = node?.__h3DrawSession;
+    if (!session) return false;
+    session.stopRequested = true;
+    if (session.retryTimer) {
+        clearTimeout(session.retryTimer);
+        session.retryTimer = null;
+    }
+    if (!session.running) {
+        finishSequenceDrawSession(node, silent ? "" : "已停止抽卡，当前段保留最后一次结果");
+        return true;
+    }
+    refreshSequenceDrawButtons(node);
+    if (interrupt && session.promptId) api.interrupt(session.promptId).catch(() => {});
+    if (!silent) toast("正在停止当前抽卡，保留已经完成的结果", "warn");
+    return true;
+}
+function installSequenceDrawEvents() {
+    if (sequenceDrawEventsInstalled) return;
+    sequenceDrawEventsInstalled = true;
+    api.addEventListener("execution_start", (event) => {
+        const promptId = String(event?.detail?.prompt_id || "");
+        for (const node of app.graph?._nodes || []) {
+            const session = node?.__h3DrawSession;
+            if (!session?.active || !session.queued || session.running) continue;
+            session.queued = false;
+            session.running = true;
+            session.promptId = promptId || null;
+            refreshSequenceDrawButtons(node);
+        }
+        if (sequenceCombineInFlight && !sequenceCombinePromptId) sequenceCombinePromptId = promptId || null;
+    });
+    api.addEventListener("execution_success", (event) => {
+        const promptId = String(event?.detail?.prompt_id || "");
+        for (const node of [...(app.graph?._nodes || [])]) {
+            const session = node?.__h3DrawSession;
+            if (!session?.running) continue;
+            if (session.promptId && promptId && session.promptId !== promptId) continue;
+            session.running = false;
+            session.queued = false;
+            session.promptId = null;
+            sequenceStitchPending = true;
+            sequenceStitchGraph = node.graph || app.graph;
+            finishSequenceDrawSession(
+                node,
+                session.stopRequested
+                    ? "已停止抽卡，点击右上角运行只做最终合成"
+                    : `第 ${sequenceSegmentOrdinal(node)} 段抽卡完成，再次点击“抽卡时段”可继续抽卡`,
+            );
+        }
+        if (sequenceCombineInFlight && (!sequenceCombinePromptId || !promptId || sequenceCombinePromptId === promptId)) {
+            sequenceCombineInFlight = false;
+            sequenceCombinePromptId = null;
+            sequenceStitchPending = false;
+            sequenceStitchGraph = null;
+            toast("最终拼接完成，其他段落没有重新生成", "ok");
+        }
+    });
+    const fail = (event, interrupted) => {
+        const promptId = String(event?.detail?.prompt_id || "");
+        for (const node of [...(app.graph?._nodes || [])]) {
+            const session = node?.__h3DrawSession;
+            if (!session?.running && !session?.queued) continue;
+            if (session.promptId && promptId && session.promptId !== promptId) continue;
+            finishSequenceDrawSession(node, interrupted ? "抽卡已停止" : "抽卡失败，请查看 ComfyUI 错误信息");
+        }
+        if (sequenceCombineInFlight) {
+            sequenceCombineInFlight = false;
+            sequenceCombinePromptId = null;
+            toast(interrupted ? "最终合成已中断" : "最终合成失败，保留抽卡缓存，可直接重试", interrupted ? "warn" : "error");
+        }
+    };
+    api.addEventListener("execution_error", (event) => fail(event, false));
+    api.addEventListener("execution_interrupted", (event) => fail(event, true));
+}
+
+function installSequenceQueueHook() {
+    if (sequenceQueueHookInstalled || typeof app.queuePrompt !== "function") return;
+    sequenceQueueHookInstalled = true;
+    const originalQueuePrompt = app.queuePrompt;
+    app.queuePrompt = async function sequenceCacheAwareQueuePrompt(...args) {
+        let options = args[2];
+        if (Array.isArray(options)) options = { queueNodeIds: options };
+        else options = options && typeof options === "object" ? { ...options } : {};
+        const explicitTargets = options.queueNodeIds || options.partialExecutionTargets;
+        const graph = app.graph;
+        let cacheOnlyIds = [];
+        if (!(Array.isArray(explicitTargets) && explicitTargets.length) && sequenceStitchPending && sequenceStitchGraph === graph) {
+            const targets = sequenceCombineTargetIds(graph);
+            if (targets.length) {
+                cacheOnlyIds = targets.map((item) => String(item.node.id));
+                sequenceCacheOnlyNodes.clear();
+                sequenceCacheOnlyChainKeys.clear();
+                sequenceCacheOnlyCounts.clear();
+                for (const item of targets) {
+                    sequenceCacheOnlyNodes.add(String(item.node.id));
+                    sequenceCacheOnlyChainKeys.set(String(item.node.id), item.chainKey);
+                    sequenceCacheOnlyCounts.set(String(item.node.id), item.segmentCount);
+                }
+                options.queueNodeIds = cacheOnlyIds;
+                args[2] = options;
+                sequenceCombineInFlight = true;
+                sequenceCombinePromptId = null;
+                toast("抽卡已完成，本次运行只合成缓存视频，其他段落保持不变", "ok");
+            }
+        }
+        try {
+            const queued = await originalQueuePrompt.apply(this, args);
+            if (cacheOnlyIds.length && queued === false) {
+                sequenceCombineInFlight = false;
+                sequenceCombinePromptId = null;
+            }
+            return queued;
+        } catch (error) {
+            if (sequenceCombineInFlight) {
+                sequenceCombineInFlight = false;
+                sequenceCombinePromptId = null;
+            }
+            throw error;
+        } finally {
+            if (cacheOnlyIds.length) {
+                queueMicrotask(() => {
+                    for (const id of cacheOnlyIds) sequenceCacheOnlyNodes.delete(id);
+                    for (const id of cacheOnlyIds) {
+                        sequenceCacheOnlyChainKeys.delete(id);
+                        sequenceCacheOnlyCounts.delete(id);
+                    }
+                });
+            }
+        }
+    };
 }

@@ -51,8 +51,9 @@ function packNameOfModule(moduleName) {
 }
 
 /* 上游那份的节点 ID：本插件已经改用带前缀的 ID 时，MiniMaxH3Easy* 就归对方。 */
-export function isUpstreamH3NodeId(nodeId) {
+export function isUpstreamH3NodeId(nodeId, nodeData = null) {
     const text = String(nodeId ?? "");
+    if (nodeData && String(nodeData?.name || "") === text && isOwnH3NodeData(nodeData)) return false;
     if (!text.startsWith(UPSTREAM_NODE_PREFIX)) return false;
     const prefixed = NODE_ID_PREFIX + text.slice(UPSTREAM_NODE_PREFIX.length);
     return Boolean(globalThis.LiteGraph?.registered_node_types?.[prefixed]);
@@ -64,7 +65,7 @@ export function isOwnH3NodeData(nodeData) {
     if (!name.startsWith(NODE_ID_PREFIX) && !name.startsWith(UPSTREAM_NODE_PREFIX)) return false;
     if (name.startsWith(NODE_ID_PREFIX)) return true;
     const packName = packNameOfModule(nodeData?.python_module);
-    if (packName && OWN_PACK_NAME) return packName === OWN_PACK_NAME;
+    if (packName && OWN_PACK_NAME) return packName.toLowerCase() === OWN_PACK_NAME.toLowerCase();
     // 拿不到包名时退回到"注册表里有没有带前缀的节点"：只要见到过就说明
     // MiniMaxH3Easy* 归上游。没见到就先按老行为处理，且不缓存这个中间结论。
     if (!ownNodesArePrefixed && ownPrefixedNodesRegistered()) ownNodesArePrefixed = true;

@@ -14,12 +14,16 @@ from __future__ import annotations
 CATEGORY_H3 = "AICG3D/H3 工作流"
 CATEGORY_INTEGRATION = "AICG3D/H3 集成"
 CATEGORY_TEXT = "AICG3D/提示词与 Skill"
+CATEGORY_POSE = "AICG3D/图像与姿势"
+CATEGORY_VOICE = "AICG3D/语音"
 
 # 每个分组的主色，前端用同一套色板绘制节点头部与面板。
 GROUP_COLORS = {
     CATEGORY_H3: "#3f6fa8",
     CATEGORY_INTEGRATION: "#7a5bb5",
     CATEGORY_TEXT: "#2f8f7f",
+    CATEGORY_POSE: "#8f5bb5",
+    CATEGORY_VOICE: "#b06d35",
 }
 
 _H3_EASY_PREFIXES = ("MiniMaxH3Easy", "AICG3D_H3")
@@ -39,6 +43,14 @@ _TEXT_NODE_IDS = {
     "AICG3D_PromptPreset",
     "AICG3D_SkillLoader",
 }
+_POSE_NODE_IDS = {
+    "AICG3D_PoseQwen21",
+    "AICG3D_PoseQwen21PoseSelect",
+}
+_VOICE_NODE_IDS = {
+    "AICG3D_SparkTTSRun",
+    "AICG3D_SparkTTSClone",
+}
 
 
 def category_for(node_id: str) -> str:
@@ -46,6 +58,10 @@ def category_for(node_id: str) -> str:
         return CATEGORY_INTEGRATION
     if node_id in _TEXT_NODE_IDS:
         return CATEGORY_TEXT
+    if node_id in _POSE_NODE_IDS:
+        return CATEGORY_POSE
+    if node_id in _VOICE_NODE_IDS:
+        return CATEGORY_VOICE
     if node_id.startswith(_H3_EASY_PREFIXES):
         return CATEGORY_H3
     return CATEGORY_TEXT
@@ -71,5 +87,6 @@ DISPLAY_PREFIX = {
     CATEGORY_H3: "",
     CATEGORY_INTEGRATION: "",
     CATEGORY_TEXT: "",
+    CATEGORY_VOICE: "",
 }
 

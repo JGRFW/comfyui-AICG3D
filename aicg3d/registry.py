@@ -5,6 +5,8 @@
 """AICG3D 的统一节点注册表。"""
 from __future__ import annotations
 
+import importlib
+import os
 import sys
 
 # 绝不使用 "." 相对导入
@@ -58,12 +60,115 @@ def _h3_easy() -> tuple[dict, dict]:
     return mapping, display
 
 
+def _sparktts_nodes() -> tuple[dict, dict]:
+    """Load the bundled Spark-TTS nodes without requiring an external plugin."""
+    try:
+        import aicg3d_sparktts
+    except Exception as exc:
+        print(f"[AICG3D] Bundled Spark-TTS unavailable: {exc}")
+        return {}, {}
+    return (
+        dict(aicg3d_sparktts.NODE_CLASS_MAPPINGS),
+        dict(aicg3d_sparktts.NODE_DISPLAY_NAME_MAPPINGS),
+    )
+
+
 _LEGACY_H3_COMPAT_IDS = {
     "MiniMaxH3EasyMediaLoader",
     "MiniMaxH3EasySequenceGlobal",
     "MiniMaxH3EasySequenceSegment",
     "MiniMaxH3EasySequenceCombine",
 }
+
+
+def _find_pose_plugin_module():
+    """Locate the comfyui-aicg3d-PoseSwap plugin module.
+
+    ComfyUI registers custom-node packages under a path-derived name
+    (module_path.replace('.', '_x_')), so `importlib.import_module("comfyui-aicg3d-PoseSwap")`
+    does not resolve the already-loaded package. Strategy, in order:
+    1. Scan sys.modules for the package whose __file__ lives in a comfyui-aicg3d-PoseSwap dir
+       (covers normal ComfyUI startup when this plugin loads after the sibling).
+    2. Load the plugin's __init__.py directly from custom_nodes on disk, so the pose
+       nodes work even when comfyui-AICG3D imports before comfyui-aicg3d-PoseSwap.
+    """
+    for name, module in list(sys.modules.items()):
+        if module is None:
+            continue
+        module_file = getattr(module, "__file__", None) or ""
+        if "comfyui-aicg3d-PoseSwap" in module_file.replace("\\", "/") and "__init__.py" in module_file:
+            return module
+    try:
+        import folder_paths
+        base = folder_paths.get_folder_paths("custom_nodes")
+    except Exception:
+        base = []
+    for custom_nodes_dir in base:
+        pkg_dir = os.path.join(custom_nodes_dir, "comfyui-aicg3d-PoseSwap")
+        init_file = os.path.join(pkg_dir, "__init__.py")
+        if not os.path.isfile(init_file):
+            continue
+        try:
+            import importlib.util
+            import types
+            pkg_name = "comfyui-aicg3d-PoseSwap"
+            # 注册父包，让 __init__.py 里的 "from . import pose_data" 相对导入可解析
+            pkg = types.ModuleType(pkg_name)
+            pkg.__path__ = [pkg_dir]
+            pkg.__package__ = pkg_name
+            sys.modules[pkg_name] = pkg
+            data_file = os.path.join(pkg_dir, "pose_data.py")
+            if os.path.isfile(data_file):
+                data_spec = importlib.util.spec_from_file_location(pkg_name + ".pose_data", data_file)
+                data_mod = importlib.util.module_from_spec(data_spec)
+                sys.modules[pkg_name + ".pose_data"] = data_mod
+                data_spec.loader.exec_module(data_mod)
+            init_spec = importlib.util.spec_from_file_location(pkg_name, init_file)
+            init_mod = importlib.util.module_from_spec(init_spec)
+            sys.modules[pkg_name] = init_mod
+            init_spec.loader.exec_module(init_mod)
+            return init_mod
+        except Exception as exc:
+            print(f"[AICG3D] Could not load comfyui-aicg3d-PoseSwap from disk: {exc}")
+            return None
+    try:
+        return importlib.import_module("comfyui-aicg3d-PoseSwap")
+    except Exception as exc:
+        print(f"[AICG3D] PoseQwen21 nodes unavailable (install comfyui-aicg3d-PoseSwap): {exc}")
+        return None
+
+
+def _pose_qwen21() -> tuple[dict, dict]:
+    """Adopt the standalone comfyui-aicg3d-PoseSwap nodes under the AICG3D namespace.
+
+    Uses a lazy import so AICG3D loads even when the sibling plugin is missing
+    or fails to import (older ComfyUI core without native Qwen 2.1 nodes).
+    """
+    plugin = _find_pose_plugin_module()
+    if plugin is None:
+        return {}, {}
+
+    mapping = {}
+    display = {}
+    for node_id in ("PoseQwen21PoseSelect", "PoseQwen21GarmentSelect", "PoseQwen21", "PoseQwen21PoseSwap"):
+        base = getattr(plugin, node_id, None)
+        if base is None:
+            continue
+        child = type(
+            f"{base.__name__}AICG3D",
+            (base,),
+            {"__module__": base.__module__},
+        )
+        child.CATEGORY = branding.CATEGORY_POSE
+        own_id = f"AICG3D_{node_id}"
+        mapping[own_id] = child
+        display[own_id] = {
+            "PoseQwen21PoseSelect": "AICG3D PoseSwap → 姿势姿态控制",
+            "PoseQwen21GarmentSelect": "AICG3D PoseSwap → 服装选择",
+            "PoseQwen21": "AICG3D PoseSwap → Qwen2.1 姿态换姿生成",
+            "PoseQwen21PoseSwap": "AICG3D PoseSwap → Qwen Edit 2511 换装生成",
+        }[node_id]
+    return mapping, display
 
 
 def _add_legacy_h3_compat(mapping: dict, display: dict, part_mapping: dict, part_display: dict) -> None:
@@ -111,6 +216,18 @@ def build() -> tuple[dict, dict]:
     mapping.update(prompt_split.NODE_CLASS_MAPPINGS)
     display.update(prompt_split.NODE_DISPLAY_NAME_MAPPINGS)
 
+    spark_mapping, spark_display = _sparktts_nodes()
+    mapping.update(spark_mapping)
+    display.update(spark_display)
+
+    pose_mapping, pose_display = _pose_qwen21()
+    for node_id, node_class in pose_mapping.items():
+        if node_id in mapping:
+            continue
+        mapping[node_id] = node_class
+        if node_id in pose_display:
+            display[node_id] = pose_display[node_id]
+
     # Keep old workflows working without competing for the generic upstream ID.
     # If another PromptSplit plugin already registered it, ours uses only the
     # namespaced ID and cannot overwrite that plugin's class.
@@ -123,6 +240,19 @@ def build() -> tuple[dict, dict]:
         legacy_name = prompt_split.LEGACY_NODE_DISPLAY_NAME_MAPPINGS.get(node_id)
         if legacy_name:
             display[node_id] = legacy_name
+
+    try:
+        import aicg3d_sparktts
+
+        for node_id, node_class in aicg3d_sparktts.LEGACY_NODE_CLASS_MAPPINGS.items():
+            if node_id in mapping or node_id in external_mappings:
+                continue
+            mapping[node_id] = node_class
+            legacy_name = aicg3d_sparktts.LEGACY_NODE_DISPLAY_NAME_MAPPINGS.get(node_id)
+            if legacy_name:
+                display[node_id] = legacy_name
+    except Exception:
+        pass
 
     _add_legacy_h3_compat(mapping, display, part_mapping, part_display)
 

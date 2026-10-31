@@ -110,7 +110,22 @@ git rm -r skills prompt_guides
 
 ---
 
-## 4. 提示词模板库 `prompt_presets/`
+## 4. SparkAudio Spark-TTS / ComfyUI_SparkTTS — Apache License 2.0
+
+| 项 | 内容 |
+|---|---|
+| 原始项目 | SparkAudio/Spark-TTS；ComfyUI 集成参考 billwuhao/ComfyUI_SparkTTS |
+| 原始仓库 | https://github.com/SparkAudio/Spark-TTS ；https://github.com/billwuhao/ComfyUI_SparkTTS |
+| 涉及目录 | `aicg3d_sparktts/`（推理源码、模型定义、音频工具、节点封装、内置说话人参考音频） |
+| 许可证 | Apache License 2.0，全文见 `third_party/LICENSE-ComfyUI_SparkTTS-Apache-2.0.txt` |
+| 修改情况 | **已修改 2026-10-31**：内部包命名空间隔离为 `aicg3d_sparktts`；移除麦克风录音节点依赖；推理和 Transformers 改为延迟加载；增加 Windows 小写 `tts` 目录兼容、模型完整性检测、中文缺失提示、确定性年龄 token、临时参考音频安全清理、AICG3D 命名空间节点 ID 和前端状态接口 |
+
+插件随包提供 5 个 `Step-Audio-speakers` 参考 WAV。`Spark-TTS-0.5B` 模型权重不随插件分发，用户需从 Hugging Face 单独下载并遵守模型许可。
+
+---
+
+
+## 5. 提示词模板库 `prompt_presets/`
 
 | 项 | 内容 |
 |---|---|
@@ -132,7 +147,7 @@ git rm -r prompt_presets
 
 ---
 
-## 5. 不随本插件分发的第三方内容
+## 6. 不随本插件分发的第三方内容
 
 - **模型权重**（MiniMax H3 主模型、文本编码器、VAE、Qwen3-VL 等）不随本插件分发，需由用户
   自行获取并遵守其各自许可证。MiniMax H3 模型本身的许可见
@@ -142,7 +157,7 @@ git rm -r prompt_presets
 
 ---
 
-## 6. 已移除的第三方代码 —— comfyUI-llama-TE（tl2012tl）
+## 7. 已移除的第三方代码 —— comfyUI-llama-TE（tl2012tl）
 
 | 项 | 内容 |
 |---|---|
@@ -163,7 +178,7 @@ git rm -r prompt_presets
 
 ---
 
-## 7. 运行时会调用的第三方服务
+## 8. 运行时会调用的第三方服务
 
 提示词优化功能可以调用下列第三方 API，需要用户**自备密钥**。启用后，你的提示词以及
 所选附件素材会被发送到对应服务：
@@ -181,7 +196,7 @@ git rm -r prompt_presets
 
 ---
 
-## 8. 免责声明
+## 9. 免责声明
 
 - 本插件是**非官方**第三方项目，与 MiniMax、上海稀宇科技有限公司及其关联公司**无任何
   隶属、合作或背书关系**。

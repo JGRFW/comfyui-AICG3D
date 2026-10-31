@@ -2,14 +2,23 @@
 name = "aicg3d-h3-suite"
 description = "AICG3D 短剧工作台：面向 MiniMax H3 的无限时长视频、智能分段、独立素材库与无缝合成 ComfyUI 工作流。"
 readme = "README.md"
-keywords = ["AICG3D", "短剧工作台", "MiniMax H3", "ComfyUI", "无限时长视频", "无限长视频", "无限分段生视频", "AI 短剧", "AI video", "infinite video", "storyboard", "DMAD", "四步加速"]
-version = "1.1.21"
+keywords = ["AICG3D", "短剧工作台", "MiniMax H3", "ComfyUI", "无限时长视频", "无限长视频", "无限分段生视频", "AI 短剧", "AI video", "infinite video", "storyboard", "DMAD", "四步加速", "角色音色"]
+version = "1.1.22"
 license = {file = "LICENSE"}
 dependencies = [
   "imageio-ffmpeg",
   "psutil>=5.9",
   "requests>=2.28",
   "aiohttp>=3.11.8",
+  "edge-tts>=7.0.0",
+  "omegaconf>=2.3",
+  "packaging>=24.0",
+  "soundfile>=0.12",
+  "soxr>=0.5.0.post1",
+  "einx>=0.3.0",
+  "einops>=0.8.0",
+  "librosa>=0.10",
+  "transformers>=4.45",
 ]
 
 [project.urls]
@@ -24,3 +33,9 @@ Icon = "https://raw.githubusercontent.com/JGRFW/comfyui-AICG3D/main/assets/aicg3
 
 [project.license-files]
 include = ["LICENSE", "THIRD_PARTY_NOTICES.md", "third_party/*.txt"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"aicg3d_sparktts" = ["assets/Step-Audio-speakers/*.wav", "assets/Step-Audio-speakers/*.WAV", "assets/Step-Audio-speakers/speakers_info.json"]

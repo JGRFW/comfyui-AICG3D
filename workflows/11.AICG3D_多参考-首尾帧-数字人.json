@@ -1,8 +1,8 @@
 {
   "id": "f85c8784-876d-4487-a217-0a6fe2ac7f4e",
   "revision": 5,
-  "last_node_id": 1025,
-  "last_link_id": 141,
+  "last_node_id": 1026,
+  "last_link_id": 142,
   "nodes": [
     {
       "id": 941,
@@ -880,6 +880,13 @@
             "name": "digital_human_rife_clear_cache"
           },
           "link": null
+        },
+        {
+          "label": "voice_cast",
+          "localized_name": "角色音色库",
+          "name": "voice_cast",
+          "type": "AICG3D_CHARACTER_VOICE_CAST",
+          "link": 142
         }
       ],
       "outputs": [
@@ -1304,6 +1311,48 @@
         "steps": 8,
         "shift": 12
       }
+    },
+    {
+      "id": 1026,
+      "type": "AICG3D_H3CharacterVoiceLibrary",
+      "pos": [
+        -680,
+        1050
+      ],
+      "size": [
+        620,
+        700
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "角色音色",
+          "localized_name": "角色音色",
+          "name": "voice_cast",
+          "type": "AICG3D_CHARACTER_VOICE_CAST",
+          "links": [
+            142
+          ]
+        },
+        {
+          "label": "报告",
+          "localized_name": "报告",
+          "name": "report_json",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AICG3D_H3CharacterVoiceLibrary",
+        "cnr_id": "aicg3d-h3-suite"
+      },
+      "widgets_values": [
+        "{\"version\":1,\"roles\":[{\"id\":\"girl\",\"name\":\"女孩\",\"mode\":\"described\",\"description\":\"稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"female\",\"pitch\":\"high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"boy\",\"name\":\"男孩\",\"mode\":\"described\",\"description\":\"稚嫩清脆的少年童声，音色明亮有精神，语调自然，情绪变化真实，不做成年人低音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"male\",\"pitch\":\"medium_high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"heroine\",\"name\":\"女主角\",\"mode\":\"described\",\"description\":\"年轻成年女性声音，清澈温柔，音色细腻稳定，古风台词自然端庄，情绪表达克制而清楚。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"female\",\"pitch\":\"medium\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"hero\",\"name\":\"男主角\",\"mode\":\"described\",\"description\":\"年轻成年男性声音，低稳温厚，咬字清晰有力量，情绪推进自然，不夸张吼叫。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_woman\",\"name\":\"老太太\",\"mode\":\"described\",\"description\":\"年长女性声音，略带岁月沙哑和轻微气声，语速偏慢，咬字仍然清楚，情绪自然不夸张。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"female\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_man\",\"name\":\"老爷子\",\"mode\":\"described\",\"description\":\"年长男性声音，低沉宽厚，带轻微沙哑和岁月感，语速偏慢，威严但自然。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false}]}"
+      ],
+      "title": "MiniMax H3 Aicg 角色音色库"
     }
   ],
   "links": [
@@ -1362,6 +1411,14 @@
       951,
       1,
       "MINIMAX_H3_MEDIA_BUNDLE"
+    ],
+    [
+      142,
+      1026,
+      0,
+      951,
+      22,
+      "AICG3D_CHARACTER_VOICE_CAST"
     ]
   ],
   "groups": [

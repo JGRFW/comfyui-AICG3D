@@ -4,3 +4,12 @@ imageio-ffmpeg
 psutil>=5.9
 requests>=2.28
 aiohttp>=3.11.8
+edge-tts>=7.0.0
+omegaconf>=2.3
+packaging>=24.0
+soundfile>=0.12
+soxr>=0.5.0.post1
+einx>=0.3.0
+einops>=0.8.0
+librosa>=0.10
+transformers>=4.45

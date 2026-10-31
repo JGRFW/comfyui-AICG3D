@@ -9,6 +9,7 @@
 | `LICENSE-ComfyUI-MiniMaxH3-Easy-MIT.txt` | `aicg3d_h3easy/`、`web/minimax_h3_easy_ui_v4.js` | MIT |
 | `LICENSE-Goohai-MiniMax-H3_Integration-GPL-3.0-or-later.txt` | `aicg3d_h3goohai/`、`web/minimax_h3_integration.js`、`web/audio/done.mp3` | GPL-3.0-or-later（原始声明） |
 | `LICENSE-MiniMax-H3-Community.txt` | `skills/`、`prompt_guides/` 中的 MiniMax H3 官方提示词内容 | MiniMax H3 Community License Agreement |
+| `LICENSE-ComfyUI_SparkTTS-Apache-2.0.txt` | `aicg3d_sparktts/`（Spark-TTS 推理源码与 ComfyUI 集成修改） | Apache License 2.0 |
 
 ## 为什么 `LICENSE` 是 GPL-3.0 全文
 

@@ -18,6 +18,7 @@ const AICG3D_SKILLS_PROMPT_TITLE = "H3 多参考提示词推理";
 const LOADER_CLASS = "MiniMaxH3EasyLoader";
 const ADAPTER_CLASS = "MiniMaxH3EasyModelAdapter";
 const MEDIA_LOADER_CLASS = "MiniMaxH3EasyMediaLoader";
+const CHARACTER_VOICE_LIBRARY_CLASS = "MiniMaxH3EasyCharacterVoiceLibrary";
 const MEDIA_BRIDGE_CLASS = "MiniMaxH3EasyMediaBridge";
 const MEDIA_SPLITTER_CLASS = "MiniMaxH3EasyMediaSplitter";
 const SEGMENT_RENDER_CLASS = "MiniMaxH3EasySegmentRender";
@@ -992,6 +993,10 @@ function isMediaSplitter(node) {
 
 function isMediaLoader(node) {
     return nodeMatchesClass(node, MEDIA_LOADER_CLASS, TEXT.mediaLoaderTitle, "__h3EasyMediaLoaderInstalled");
+}
+
+function isCharacterVoiceLibraryNode(node) {
+    return nodeMatchesClass(node, CHARACTER_VOICE_LIBRARY_CLASS, "MiniMax H3 Aicg 角色音色库", "__h3CharacterVoiceLibraryInstalled");
 }
 
 function isMediaBridgeOutput(node, sourceSlot = 0, sourceType = "") {

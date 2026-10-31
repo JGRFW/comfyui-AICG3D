@@ -221,6 +221,7 @@ MEDIA_SPLITTER_EMPTY_OUTPUT_MODES = (
     MEDIA_SPLITTER_EMPTY_OUTPUT_ALLOW_NONE,
 )
 MEDIA_BUNDLE_TYPE = "MINIMAX_H3_MEDIA_BUNDLE"
+CHARACTER_VOICE_CAST_TYPE = "AICG3D_CHARACTER_VOICE_CAST"
 SEGMENT_RESULT_TYPE = "MINIMAX_H3_SEGMENTS"
 SEGMENT_STEP_TYPE = "MINIMAX_H3_SEGMENT_STEP"
 SEGMENT_SAMPLE_SETUP_TYPE = "MINIMAX_H3_SEGMENT_SAMPLE_SETUP"
@@ -3519,6 +3520,34 @@ class MiniMaxH3MediaBundle:
     items: tuple[_MediaInput, ...]
 
 
+@dataclass(frozen=True)
+class MiniMaxH3CharacterVoiceRole:
+    """One stable character voice identity inside a voice cast."""
+
+    role_id: str
+    name: str
+    mode: str
+    description: str
+    language: str
+    age: str
+    gender: str
+    pitch: str
+    pace: str
+    picture_index: int = 0
+    reference_filename: str = ""
+    reference_item: _MediaInput | None = None
+    reference_start: float = 0.0
+    reference_duration: float = 0.0
+    rights_confirmed: bool = False
+
+
+@dataclass(frozen=True)
+class MiniMaxH3CharacterVoiceCast:
+    """Six stable role voices consumed by the sequence segment nodes."""
+
+    roles: tuple[MiniMaxH3CharacterVoiceRole, ...]
+
+
 MEDIA_LOADER_GROUPS = (
     # The loader is an unrestricted media library. Downstream nodes apply the
     # relevant single-shot or context-sequence budget when they consume it.
@@ -3752,6 +3781,246 @@ class MiniMaxH3EasyMediaLoader:
                 input_index += 1
                 items.append(_MediaInput(input_index, media_type, value))
         return (MiniMaxH3MediaBundle(tuple(items)),)
+
+
+_VOICE_CAST_DEFAULTS = (
+    {
+        "id": "girl",
+        "name": "女孩",
+        "description": "稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。",
+        "language": "Chinese",
+        "age": "child",
+        "gender": "female",
+        "pitch": "high",
+        "pace": "natural",
+    },
+    {
+        "id": "boy",
+        "name": "男孩",
+        "description": "稚嫩清脆的少年童声，音色明亮有精神，语调自然，情绪变化真实，不做成年人低音。",
+        "language": "Chinese",
+        "age": "child",
+        "gender": "male",
+        "pitch": "medium_high",
+        "pace": "natural",
+    },
+    {
+        "id": "heroine",
+        "name": "女主角",
+        "description": "年轻成年女性声音，清澈温柔，音色细腻稳定，古风台词自然端庄，情绪表达克制而清楚。",
+        "language": "Chinese",
+        "age": "young_adult",
+        "gender": "female",
+        "pitch": "medium",
+        "pace": "natural",
+    },
+    {
+        "id": "hero",
+        "name": "男主角",
+        "description": "年轻成年男性声音，低稳温厚，咬字清晰有力量，情绪推进自然，不夸张吼叫。",
+        "language": "Chinese",
+        "age": "young_adult",
+        "gender": "male",
+        "pitch": "low",
+        "pace": "natural",
+    },
+    {
+        "id": "old_woman",
+        "name": "老太太",
+        "description": "年长女性声音，略带岁月沙哑和轻微气声，语速偏慢，咬字仍然清楚，情绪自然不夸张。",
+        "language": "Chinese",
+        "age": "elder",
+        "gender": "female",
+        "pitch": "low",
+        "pace": "slow",
+    },
+    {
+        "id": "old_man",
+        "name": "老爷子",
+        "description": "年长男性声音，低沉宽厚，带轻微沙哑和岁月感，语速偏慢，威严但自然。",
+        "language": "Chinese",
+        "age": "elder",
+        "gender": "male",
+        "pitch": "low",
+        "pace": "slow",
+    },
+)
+
+
+def _voice_cast_bool(value: Any) -> bool:
+    return value is True or str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _voice_cast_normalize_state(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            value = {}
+    raw_roles = value.get("roles") if isinstance(value, Mapping) else None
+    by_id = {
+        str(item.get("id") or ""): item
+        for item in raw_roles or []
+        if isinstance(item, Mapping)
+    }
+    roles = []
+    for default in _VOICE_CAST_DEFAULTS:
+        raw = by_id.get(default["id"], {})
+        reference_entry_input = {
+            "filename": str(raw.get("reference") or ""),
+            "start": raw.get("reference_start") or 0,
+        }
+        try:
+            requested_duration = float(raw.get("reference_duration") or 0)
+        except (TypeError, ValueError):
+            requested_duration = 0.0
+        if math.isfinite(requested_duration) and requested_duration > 0:
+            reference_entry_input["duration"] = requested_duration
+        reference = _media_loader_normalize_state({
+            "audios": [reference_entry_input]
+        })["audio"]
+        reference_entry = reference[0] if reference else {}
+        reference_start = float(reference_entry.get("start") or 0.0)
+        reference_duration = float(reference_entry.get("duration") or 0.0)
+        if reference_duration <= 0 and reference_entry.get("end") is not None:
+            reference_duration = max(0.0, float(reference_entry.get("end") or 0.0) - reference_start)
+        try:
+            picture_index = int(raw.get("picture_index") or 0)
+        except (TypeError, ValueError, OverflowError):
+            picture_index = 0
+        picture_index = max(0, min(9, picture_index))
+        mode = str(raw.get("mode") or "described").strip().lower()
+        if mode not in {"described", "reference"}:
+            mode = "described"
+        roles.append({
+            "id": default["id"],
+            "name": str(raw.get("name") or default["name"]).strip() or default["name"],
+            "mode": mode,
+            "description": str(raw.get("description") or default["description"]).strip() or default["description"],
+            "language": str(raw.get("language") or default["language"]).strip() or default["language"],
+            "age": str(raw.get("age") or default["age"]).strip() or default["age"],
+            "gender": str(raw.get("gender") or default["gender"]).strip() or default["gender"],
+            "pitch": str(raw.get("pitch") or default["pitch"]).strip() or default["pitch"],
+            "pace": str(raw.get("pace") or default["pace"]).strip() or default["pace"],
+            "picture_index": picture_index,
+            "reference": str(reference_entry.get("filename") or ""),
+            "reference_start": reference_start,
+            "reference_duration": reference_duration,
+            "rights_confirmed": _voice_cast_bool(raw.get("rights_confirmed")),
+        })
+    return {"version": 1, "roles": roles}
+
+
+class MiniMaxH3EasyCharacterVoiceLibrary:
+    """Six stable character voices for the infinite sequence workflow."""
+
+    CATEGORY = "AICG3D/H3 工作流"
+    FUNCTION = "load"
+    RETURN_TYPES = (CHARACTER_VOICE_CAST_TYPE, "STRING")
+    RETURN_NAMES = ("voice_cast", "report_json")
+    DESCRIPTION = (
+        "六个角色的固定音色库。描述音色可生成多声线试听并自动固定为参考音频；也支持直接使用 5～15 秒音频克隆音色。"
+        "在提示词中插入 @角色1～@角色6，节点就会只把本次出现的角色锁进 H3 参考条件。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "voice_state": ("STRING", {"default": "", "multiline": False}),
+            },
+        }
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, voice_state="", **_kwargs):
+        for role in _voice_cast_normalize_state(voice_state)["roles"]:
+            if role["mode"] != "reference":
+                continue
+            if not role["reference"]:
+                return f"角色「{role['name']}」选择了克隆音色，但没有参考音频"
+            if not role["rights_confirmed"]:
+                return f"角色「{role['name']}」使用克隆音色前必须确认拥有声音使用权"
+            try:
+                _media_loader_input_path(role["reference"])
+            except ValueError as exc:
+                return str(exc)
+        return True
+
+    @classmethod
+    def IS_CHANGED(cls, voice_state="", **_kwargs):
+        state = _voice_cast_normalize_state(voice_state)
+        signature = []
+        for role in state["roles"]:
+            stat_key = None
+            if role["reference"]:
+                try:
+                    stat = os.stat(_media_loader_input_path(role["reference"]))
+                    stat_key = (stat.st_mtime_ns, stat.st_size)
+                except (OSError, ValueError):
+                    stat_key = None
+            signature.append((role, stat_key))
+        return repr(signature)
+
+    def load(self, voice_state=""):
+        state = _voice_cast_normalize_state(voice_state)
+        roles = []
+        report_roles = []
+        for role in state["roles"]:
+            reference_item = None
+            if role["mode"] == "reference":
+                if not role["reference"] or not role["rights_confirmed"]:
+                    raise ValueError(f"角色「{role['name']}」的克隆音色配置不完整")
+                entry = {
+                    "filename": role["reference"],
+                    "start": role["reference_start"],
+                }
+                if role["reference_duration"] > 0:
+                    entry["end"] = role["reference_start"] + role["reference_duration"]
+                bundle = MiniMaxH3EasyMediaLoader().load(
+                    json.dumps({"audios": [entry]}, ensure_ascii=True)
+                )[0]
+                reference_item = bundle.items[0] if bundle.items else None
+                if reference_item is None:
+                    raise ValueError(f"角色「{role['name']}」的参考音频无法读取")
+                waveform = reference_item.value.get("waveform") if isinstance(reference_item.value, Mapping) else None
+                sample_rate = float(reference_item.value.get("sample_rate") or 0) if isinstance(reference_item.value, Mapping) else 0.0
+                duration = float(waveform.shape[-1]) / sample_rate if waveform is not None and sample_rate > 0 else 0.0
+                if duration < 1.0:
+                    raise ValueError(f"角色「{role['name']}」的参考音频至少需要 1 秒")
+                if duration > 15.05:
+                    raise ValueError(f"角色「{role['name']}」的参考音频超过 15 秒，请设置截取时长")
+            roles.append(MiniMaxH3CharacterVoiceRole(
+                role_id=role["id"],
+                name=role["name"],
+                mode=role["mode"],
+                description=role["description"],
+                language=role["language"],
+                age=role["age"],
+                gender=role["gender"],
+                pitch=role["pitch"],
+                pace=role["pace"],
+                picture_index=role["picture_index"],
+                reference_filename=role["reference"],
+                reference_item=reference_item,
+                reference_start=role["reference_start"],
+                reference_duration=role["reference_duration"],
+                rights_confirmed=role["rights_confirmed"],
+            ))
+            report_roles.append({
+                "id": role["id"],
+                "name": role["name"],
+                "mode": role["mode"],
+                "picture_index": role["picture_index"],
+                "reference": role["reference"],
+            })
+        cast = MiniMaxH3CharacterVoiceCast(tuple(roles))
+        report = {
+            "roles": len(roles),
+            "reference_voices": sum(1 for role in roles if role.mode == "reference"),
+            "described_voices": sum(1 for role in roles if role.mode == "described"),
+            "role_details": report_roles,
+        }
+        return (cast, json.dumps(report, ensure_ascii=False, separators=(",", ":")))
 
 
 class MiniMaxH3EasyMediaBridge:
@@ -5854,6 +6123,168 @@ def bind_segment_media(text: str, items: list[_MediaInput]) -> tuple[list[_Media
     return chosen, rewritten
 
 
+def _voice_mention_pattern(token: str) -> re.Pattern[str]:
+    """Match an @role token without activating longer names or IDs."""
+    return re.compile(
+        rf"(?<![\w@-]){re.escape(token)}(?![\w-])",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+
+
+def _apply_character_voice_cast(
+    prompt: str,
+    items: list[_MediaInput],
+    voice_cast: MiniMaxH3CharacterVoiceCast | None,
+    *,
+    allow_reference_audio: bool = True,
+) -> tuple[list[_MediaInput], str]:
+    """Bind only the role voices explicitly mentioned as @角色 in this shot."""
+    if not isinstance(voice_cast, MiniMaxH3CharacterVoiceCast):
+        return items, str(prompt or "")
+    source = str(prompt or "")
+    active = []
+    for position, role in enumerate(voice_cast.roles, start=1):
+        patterns = [
+            _voice_mention_pattern(f"@角色{position}"),
+            _voice_mention_pattern(f"@{role.name}"),
+            _voice_mention_pattern(f"@{role.role_id}"),
+        ]
+        if any(pattern.search(source) for pattern in patterns):
+            active.append((position, role, patterns))
+    if not active:
+        return items, source
+
+    picture_owners: dict[int, str] = {}
+    image_count = sum(1 for item in items if item.media_type == "image")
+    for position, role, _patterns in active:
+        picture_index = max(0, min(9, int(role.picture_index or 0)))
+        if picture_index <= 0:
+            continue
+        if picture_index in picture_owners:
+            raise ValueError(
+                f"图像{picture_index}同时绑定了 @角色{picture_owners[picture_index]} 和 @角色{position}。"
+                "同一张人物参考图只能绑定一个角色声线。"
+            )
+        if image_count and picture_index > image_count:
+            raise ValueError(
+                f"@角色{position} 绑定了图像{picture_index}，但本段素材库只有 {image_count} 张图像。"
+            )
+        if image_count == 0:
+            raise ValueError(
+                f"@角色{position} 绑定了图像{picture_index}，但本段没有图像参考。"
+            )
+        picture_owners[picture_index] = str(position)
+
+    result_items = list(items)
+    audio_ordinal = sum(1 for item in result_items if item.media_type == "audio")
+    reference_ordinals: dict[str, int] = {}
+    age_labels = {"child": "儿童", "young_adult": "青年", "adult": "成年", "middle_age": "中年", "elder": "老年"}
+    gender_labels = {"female": "女性", "male": "男性", "neutral": "中性"}
+    pitch_labels = {"very_low": "很低", "low": "偏低", "medium_low": "中低", "medium": "适中", "medium_high": "中高", "high": "偏高", "very_high": "很高"}
+    pace_labels = {"very_slow": "很慢", "slow": "偏慢", "natural": "自然", "fast": "偏快", "very_fast": "很快"}
+    lock_lines = [
+        "[VOICE_CASTING_METADATA | SILENT | NOT_DIALOGUE]",
+        "This block configures voice identity only. Never speak, read aloud, subtitle, or paraphrase it.",
+        "A speaker may vocalize only the exact dialogue inside <d>...</d>; do not invent speech.",
+    ]
+    has_reference_voice = False
+    for position, role, patterns in active:
+        speaker = f"S{position}"
+        description_text = str(role.description or "")
+        age_match = re.search(r"(?<!\d)(\d{1,3})\s*岁", description_text)
+        numeric_age = int(age_match.group(1)) if age_match else 0
+        if numeric_age:
+            effective_age = (
+                "child" if numeric_age <= 12
+                else "teenager" if numeric_age <= 19
+                else "young_adult" if numeric_age <= 35
+                else "middle_age" if numeric_age <= 59
+                else "elder"
+            )
+        elif any(token in description_text for token in ("幼童", "幼儿", "小孩", "宝宝", "童声", "童音", "奶声", "稚嫩")):
+            effective_age = "child"
+        elif any(token in description_text for token in ("青少年", "青春期", "少年", "少女", "十几岁")):
+            effective_age = "teenager"
+        elif any(token in description_text for token in ("中年", "四十多", "五十多", "40多", "50多", "沧桑")):
+            effective_age = "middle_age"
+        elif any(token in description_text for token in ("年长", "岁月", "苍老", "老年", "老人", "花甲", "古稀")):
+            effective_age = "elder"
+        else:
+            effective_age = role.age
+        if any(token in description_text for token in ("女性", "女孩", "女人", "女主", "妈妈", "母亲", "姐姐", "妹妹", "阿姨", "奶奶", "外婆", "女士")):
+            effective_gender = "female"
+        elif any(token in description_text for token in ("男性", "男孩", "男人", "男主", "爸爸", "父亲", "哥哥", "弟弟", "叔叔", "爷爷", "外公", "男士")):
+            effective_gender = "male"
+        else:
+            effective_gender = role.gender
+        effective_pitch = (
+            "very_high" if effective_age == "child"
+            else "high" if effective_age == "teenager"
+            else "low" if effective_age == "middle_age"
+            else "very_low" if effective_age == "elder"
+            else role.pitch
+        )
+        if role.mode == "reference":
+            descriptor = (
+                f"{speaker} = {role.name}; timbre is defined only by the attached "
+                "reference audio; do not infer timbre from role name or written metadata."
+            )
+        else:
+            descriptor = (
+                f"{speaker} = {role.name}; language {role.language}; "
+                f"{age_labels.get(effective_age, effective_age)}/{gender_labels.get(effective_gender, effective_gender)}; "
+                f"pitch {pitch_labels.get(effective_pitch, effective_pitch)}, pace {pace_labels.get(role.pace, role.pace)}; "
+                f"fixed timbre: {role.description}"
+            )
+        picture_index = max(0, min(9, int(role.picture_index or 0)))
+        if picture_index > 0:
+            descriptor += (
+                f"; visual binding: <Picture {picture_index}> is the visible character whose only voice is {speaker}. "
+                f"Assign the corresponding Subject to {speaker}; never use another S voice for this picture, "
+                f"and never assign {speaker} to a different visible character."
+            )
+        if role.mode == "reference":
+            has_reference_voice = True
+            if not allow_reference_audio:
+                raise ValueError(
+                    "当前模式不能使用克隆音色参考音频；请改用描述音色，"
+                    "或切换到「Ref2VA 全能参考」并添加至少一张人物画面参考。"
+                )
+            if role.reference_item is None:
+                raise ValueError(f"角色「{role.name}」缺少克隆参考音频")
+            reference_key = role.reference_filename or f"role:{role.role_id}"
+            marker = reference_ordinals.get(reference_key)
+            if marker is None:
+                if audio_ordinal >= MAX_AUDIOS:
+                    raise ValueError(
+                        f"本段同时启用了超过 {MAX_AUDIOS} 个克隆角色音色。"
+                        "H3 单次参考最多接受 3 条音频，请拆段或把部分角色改为描述音色。"
+                    )
+                result_items.append(role.reference_item)
+                audio_ordinal += 1
+                marker = audio_ordinal
+                reference_ordinals[reference_key] = marker
+            descriptor += (
+                f"; timbre reference <Audio {marker}>. Timbre only: do not copy its speech, "
+                f"do not use it as ambience, and never transfer it to another speaker."
+            )
+        lock_lines.append(descriptor)
+        for pattern in sorted(patterns, key=lambda item: len(item.pattern), reverse=True):
+            source = pattern.sub(f"{speaker}（{role.name}）", source)
+    if has_reference_voice and not any(
+        item.media_type in {"image", "video"} for item in result_items
+    ):
+        raise ValueError(
+            "本段启用了克隆角色音色，但素材库没有可用的图片或视频。"
+            "H3 参考生成至少需要 1 个画面参考；请先添加人物参考图，或把该角色改为描述音色。"
+        )
+    lock_lines.append(
+        "Keep each S-number voice fixed across all segments and never swap voices between roles. "
+        "The following scene may speak only text written inside <d>...</d>; production notes are silent."
+    )
+    return result_items, "\n".join(lock_lines) + "\n\n" + source
+
+
 def bind_reference_media(text: str, items: list[_MediaInput]) -> tuple[list[_MediaInput], str]:
     """Narrow one reference call to the media its prompt actually mentions.
 
@@ -6256,6 +6687,10 @@ class MiniMaxH3Easy:
     def INPUT_TYPES(cls):
         rife_models, rife_default = _rife_model_choices()
         optional = {
+            "voice_cast": (
+                CHARACTER_VOICE_CAST_TYPE,
+                {"tooltip": "可选。连接「MiniMax H3 Aicg 角色音色库」；使用 @角色1～@角色6 触发。数字人锁定音频模式以驱动音轨本身为准。"},
+            ),
             "media": ("*",),
             "prompt_optimizer_resources": ("STRING", {"default": "", "hidden": True}),
             "prompt_optimizer_marker": ("STRING", {"default": "", "hidden": True}),
@@ -6443,6 +6878,19 @@ class MiniMaxH3Easy:
             bool(kwargs.get("prompt_optimizer_prompt_connected", False)),
         )
         prompt = optimization.prompt
+        voice_cast = kwargs.get("voice_cast")
+        if isinstance(voice_cast, MiniMaxH3CharacterVoiceCast):
+            if mode == MODE_DIGITAL_HUMAN:
+                print(
+                    "[MiniMax H3 Aicg] 数字人锁定音频模式使用驱动音轨作为最终音色，角色音色库不会覆盖原音轨。"
+                )
+            else:
+                items, prompt = _apply_character_voice_cast(
+                    prompt,
+                    list(items),
+                    voice_cast,
+                    allow_reference_audio=mode == MODE_REFERENCE,
+                )
         if mode == MODE_DIGITAL_HUMAN:
             visual_items, source_audio = _extract_digital_human_audio(items, "MiniMax H3 Aicg")
             visual_items, prompt = bind_reference_media(prompt, visual_items)
@@ -12777,6 +13225,7 @@ class MiniMaxH3SequenceSegment:
     # 数字人模式下随段落链传下去的驱动音轨（原始 waveform），
     # 合成时直接用它当最终音轨，不再逐段写模型生成的音频。
     source_audio: Mapping[str, Any] | None = None
+    voice_cast: MiniMaxH3CharacterVoiceCast | None = None
     #: 单段抽卡运行时使用的稳定工作流作用域和链路标识。缓存只在当前
     #: ComfyUI 进程内使用，重启后自动退回 ComfyUI 自身的节点缓存。
     cache_scope: str = ""
@@ -13263,6 +13712,10 @@ class MiniMaxH3EasySequenceSegment:
             # 画布上就只剩「段落 → 段落」一条线，段数再多也不会织成蜘蛛网。
             "sequence_config": (SEQUENCE_CONFIG_TYPE,),
             "previous_segment": (SEQUENCE_SEGMENT_TYPE,),
+            "voice_cast": (
+                CHARACTER_VOICE_CAST_TYPE,
+                {"tooltip": "可选。连接「MiniMax H3 Aicg 角色音色库」；后续段落会自动继承。"},
+            ),
             "media": ("*",),
             "inline_media_state": ("STRING", {"default": "", "multiline": False}),
             "guide_image": (
@@ -13387,6 +13840,7 @@ class MiniMaxH3EasySequenceSegment:
         seed=0,
         guide_frame_idx=0,
         previous_segment=None,
+        voice_cast=None,
         guide_image=None,
         guide_audio=None,
         sequence_scope="",
@@ -13425,6 +13879,7 @@ class MiniMaxH3EasySequenceSegment:
                 )
         if previous_segment is not None and not isinstance(previous_segment, MiniMaxH3SequenceSegment):
             raise ValueError("previous_segment 只能接本插件「视频段落」节点的 segment 输出")
+        active_voice_cast = voice_cast if isinstance(voice_cast, MiniMaxH3CharacterVoiceCast) else None
         # 全局设置只在第 1 段接：后面的段落顺着 previous_segment 用同一份配置。
         config = sequence_config
         if config is None and previous_segment is not None:
@@ -13522,8 +13977,12 @@ class MiniMaxH3EasySequenceSegment:
                 # 没接音频就没有可锁的音轨，直接按普通流程跑，不报错。
                 digital_human = False
 
+        items, prompt_text = _apply_character_voice_cast(
+            prompt_text, list(items), active_voice_cast
+        )
         if items:
             items, prompt_text = bind_reference_media(prompt_text, items)
+        if items:
             _sync_reference_video_cache_scope(items)
             _validate_reference_media(items, f"视频段落 {index}")
             model = config.model if config.model is not None else bundle.model_for("ref2va")
@@ -13698,6 +14157,7 @@ class MiniMaxH3EasySequenceSegment:
                 previous=previous_segment,
                 timeline_start=timeline_start,
                 source_audio=source_audio,
+                voice_cast=active_voice_cast,
                 cache_scope=cache_scope,
                 chain_key=chain_key,
                 node_id=node_id,
@@ -13955,6 +14415,7 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasyAccel": accel_lib.MiniMaxH3EasyAccel,
     "MiniMaxH3EasyModelAdapter": MiniMaxH3EasyModelAdapter,
     "MiniMaxH3EasyMediaLoader": MiniMaxH3EasyMediaLoader,
+    "MiniMaxH3EasyCharacterVoiceLibrary": MiniMaxH3EasyCharacterVoiceLibrary,
     "MiniMaxH3EasyMediaBridge": MiniMaxH3EasyMediaBridge,
     "MiniMaxH3EasyMediaSplitter": MiniMaxH3EasyMediaSplitter,
     "MiniMaxH3Easy": MiniMaxH3Easy,
@@ -13989,6 +14450,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasyAccel": "MiniMax H3 Aicg 加速设置",
     "MiniMaxH3EasyModelAdapter": "MiniMax H3 Aicg 模型中转",
     "MiniMaxH3EasyMediaLoader": "MiniMax H3 Aicg资源库",
+    "MiniMaxH3EasyCharacterVoiceLibrary": "MiniMax H3 Aicg 角色音色库",
     "MiniMaxH3EasyMediaBridge": "MiniMax H3 Aicg 媒体中转",
     "MiniMaxH3EasyMediaSplitter": "MiniMax H3 Aicg 媒体拆分",
     "MiniMaxH3Easy": "MiniMax H3 Aicg",
@@ -14136,4 +14598,3 @@ def _face_anchor_composite(source_hwc, anchor_hwc, out_w: int, out_h: int):
     region = frame[top:bottom, left:right, :]
     frame[top:bottom, left:right, :] = region * (1.0 - mask) + patch * mask
     return h3._resize(frame[None], out_w, out_h, "center")[0]
-

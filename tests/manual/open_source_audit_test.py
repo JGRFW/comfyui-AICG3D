@@ -22,10 +22,12 @@ if str(PLUGIN_ROOT) not in sys.path:
 def test_node_categories_and_integration_registration() -> None:
     from aicg3d.branding import CATEGORY_H3, CATEGORY_INTEGRATION, CATEGORY_TEXT, category_for
     from aicg3d.registry import build
+    from aicg3d.branding import CATEGORY_VOICE
 
     assert category_for("AICG3D_H3Loader") == CATEGORY_H3
     assert category_for("AICG3D_H3PromptSegmentSplit") == CATEGORY_TEXT
     assert category_for("AICG3D_H3IntegrationGH") == CATEGORY_INTEGRATION
+    assert category_for("AICG3D_SparkTTSRun") == CATEGORY_VOICE
 
     mapping, _display = build()
     assert "AICG3D_H3Loader" in mapping
@@ -120,6 +122,8 @@ def test_manager_legacy_node_ids_are_registered() -> None:
         assert node_id in mapping, node_id
     assert "AICG3DPromptSegmentSplit" in mapping
     assert "AICG3D_H3PromptSegmentSplit" in mapping
+    assert "AICG3D_SparkTTSRun" in mapping
+    assert "AICG3D_SparkTTSClone" in mapping
 
 
 def test_media_picker_and_nodes2_mode_guards() -> None:

@@ -40,8 +40,23 @@ jobs:
             echo "::notice title=Comfy Registry not configured::Add REGISTRY_ACCESS_TOKEN in repository Actions secrets."
           fi
 
-      - name: Publish custom node
+      - name: Check whether this package version is already uploaded
         if: steps.registry-token.outputs.configured == 'true'
+        id: registry-package
+        shell: bash
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          URL="https://cdn.comfy.org/aicg3d/aicg3d-h3-suite/$VERSION/node.zip"
+          if curl --fail --silent --show-error --location --head "$URL" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Registry package already uploaded::Skipping duplicate version upload; verification will continue."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish custom node
+        if: steps.registry-token.outputs.configured == 'true' && steps.registry-package.outputs.exists != 'true'
         uses: Comfy-Org/publish-node-action@main
         with:
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
@@ -49,8 +64,9 @@ jobs:
       - name: Verify Registry package contents
         if: steps.registry-token.outputs.configured == 'true'
         shell: bash
+        env:
+          VERSION: ${{ steps.registry-package.outputs.version }}
         run: |
-          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           python - "${VERSION}" <<'PY'
           import io
           import sys

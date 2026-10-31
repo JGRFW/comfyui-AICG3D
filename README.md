@@ -1,4 +1,4 @@
-<img width="1735" height="964" alt="屏幕截图 2026-10-23 193931" src="https://github.com/user-attachments/assets/12e0430b-2694-466d-abc1-e59c53afd5ac" />
+<img width="1836" height="747" alt="image" src="https://github.com/user-attachments/assets/bd80c58a-9433-476a-b6d1-1d6c0e835517" />
 <img width="1902" height="701" alt="屏幕截图 2026-10-23 210816" src="https://github.com/user-attachments/assets/43a3f73e-5519-4518-92de-1435f17b87fb" />
 <img width="2154" height="846" alt="屏幕截图 2026-10-23 205631" src="https://github.com/user-attachments/assets/b1abcf32-c77d-4947-af86-1c6600b2133b" />
 

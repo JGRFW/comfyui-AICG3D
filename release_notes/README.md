@@ -1,9 +1,10 @@
 # 版本说明
 
-当前版本：`v1.1.22`
+当前版本：`v1.1.23`
 
 | 版本 | 说明 |
 | --- | --- |
+| v1.1.23 | [内置 Spark-TTS、可选角色音色库与克隆模式精简界面](RELEASE_NOTES_v1.1.23.md) |
 | v1.1.22 | [固定六角色音色库、内置 Spark-TTS 与单段抽卡继承](RELEASE_NOTES_v1.1.22.md) |
 | v1.1.21 | [Registry 发布包中文工作流遗漏修复](RELEASE_NOTES_v1.1.21.md) |
 | v1.1.20 | [管理器安装、旧工作流兼容与 Nodes 2.0 修复](RELEASE_NOTES_v1.1.20.md) |

@@ -22,7 +22,7 @@ import aicg3d.prompt_guides as guide_lib
 import aicg3d.skills as skill_lib
 from aicg3d_sparktts.model_status import spark_model_status
 
-VERSION = "1.1.22"
+VERSION = "1.1.23"
 PROJECT_NAME = "短剧工作台"
 PROJECT_DESCRIPTION = "无限时长视频的 MiniMax H3 ComfyUI 工作流与插件"
 REPOSITORY_URL = "https://github.com/JGRFW/comfyui-AICG3D"

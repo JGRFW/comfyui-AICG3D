@@ -23,9 +23,9 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
-## 🆕 v1.1.22 更新摘要
+## 🆕 v1.1.23 更新摘要
 
-完整说明见 [RELEASE_NOTES_v1.1.22.md](release_notes/RELEASE_NOTES_v1.1.22.md)。
+完整说明见 [RELEASE_NOTES_v1.1.23.md](release_notes/RELEASE_NOTES_v1.1.23.md)。
 
 - **固定六角色音色库**：女孩、男孩、女主角、男主角、老太太、老爷子各有独立声线座位；支持描述音色和 5～15 秒参考音频克隆。
 - **跨段音色锁定**：在提示词写 `@角色1`～`@角色6` 才会启用对应座位音色；角色显示名可自由修改，引用标记永远不变。

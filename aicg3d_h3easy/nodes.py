@@ -47,6 +47,7 @@ try:
         SAMPLING_PLAN_TYPE,
         SELFLIFT_KIND,
         MiniMaxH3SamplingPlan,
+        _resize_keyframe_conditioning,
         _zero_conditioning as _zero_h3_conditioning,
         sample_with_plan as sample_with_sampling_plan,
     )
@@ -65,6 +66,9 @@ except Exception:
 
     def _zero_h3_conditioning(conditioning):
         raise RuntimeError("SelfLift sampling strategies are unavailable in this ComfyUI build")
+
+    def _resize_keyframe_conditioning(conditioning, _height, _width):
+        return conditioning
 
 
 import requests
@@ -7954,6 +7958,21 @@ RENDER_CLEANUP_UNLOAD = "卸载模型"
 RENDER_CLEANUP_CACHE = "释放缓存"
 RENDER_CLEANUP_NONE = "不处理"
 RENDER_CLEANUP_CHOICES = (RENDER_CLEANUP_UNLOAD, RENDER_CLEANUP_CACHE, RENDER_CLEANUP_NONE)
+SELFLIFT_MAX_REFINE_SIGMA = 0.30
+
+
+def _limit_secondary_refine_sigmas(sigmas: torch.Tensor, transition_step: int, output_scale: float) -> torch.Tensor:
+    """Keep enlarged second-pass sampling from rebuilding the source scene."""
+    if float(output_scale) <= 1.0 + 1e-6 or sigmas.numel() <= transition_step:
+        return sigmas
+    if float(sigmas[int(transition_step)]) <= SELFLIFT_MAX_REFINE_SIGMA:
+        return sigmas
+    limited = sigmas.clone()
+    limited[int(transition_step):] = torch.clamp(
+        limited[int(transition_step):],
+        max=SELFLIFT_MAX_REFINE_SIGMA,
+    )
+    return limited
 
 
 def _memory_snapshot() -> Optional[dict[str, float]]:
@@ -8034,11 +8053,29 @@ def _resolve_selflift_upscaler(value: Any) -> str:
     if text and not text.startswith("("):
         return text
     choices = _digital_human_upscaler_choices()
-    preferred = "minimax_h3_latent_upscaler_3d_fp16.safetensors"
-    if preferred in choices:
-        return preferred
+    for preferred in (
+        "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
+        "minimax_h3_latent_upscaler_3d_fp16.safetensors",
+    ):
+        if preferred in choices:
+            return preferred
     detected = [name for name in choices if not _is_none_model(name)]
     return detected[0] if detected else NONE_MODEL
+
+
+def _resolve_h3_secondary_upscaler(value: Any) -> str:
+    """Prefer the validated V2 H3 upscaler when an old V1 selection is loaded."""
+    selected = _resolve_selflift_upscaler(value)
+    choices = _digital_human_upscaler_choices()
+    v1 = "minimax_h3_latent_upscaler_3d_fp16.safetensors"
+    v2 = "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors"
+    if selected == v1 and v2 in choices:
+        print(
+            "[MiniMax H3 Aicg] 已自动从 V1 切换到 V2 Latent 放大器；"
+            "V1 容易在二采时改变人物和环境结构。"
+        )
+        return v2
+    return selected
 
 
 def _apply_native_minimax_h3_guide(
@@ -8120,16 +8157,16 @@ class MiniMaxH3EasyRenderAdvanced:
     DESCRIPTION = (
         "一条龙出片：采样 + 视频解码 + 音频解码 + 合成，只输出一条 VIDEO。"
         "接 MiniMax H3 Aicg 的 h3_context，输出直接连 SaveVideo。"
+        "开启浅空间二次采样后，会自动潜空间放大到设定倍数并补跑第二段高清采样。"
         "可选接入引导图片/音频，内部复用原生 MiniMaxH3AddGuide 锚定指定帧。"
     )
 
     @classmethod
     def INPUT_TYPES(cls):
         digital_upscalers = _digital_human_upscaler_choices()
-        preferred_upscaler = "minimax_h3_latent_upscaler_3d_fp16.safetensors"
-        digital_default_upscaler = (
-            preferred_upscaler if preferred_upscaler in digital_upscalers else digital_upscalers[0]
-        )
+        digital_default_upscaler = _resolve_selflift_upscaler(None)
+        if digital_default_upscaler not in digital_upscalers:
+            digital_default_upscaler = digital_upscalers[0]
         return {
             "required": {
                 "h3_context": ("MINIMAX_H3_CONTEXT",),
@@ -8178,24 +8215,40 @@ class MiniMaxH3EasyRenderAdvanced:
                     "BOOLEAN",
                     {
                         "default": True,
-                        "tooltip": "潜空间放大开关：开 = 先低清潜空间采样，再用潜空间放大器提升清晰度，最后回到目标分辨率补采；关 = 使用普通采样。适用于所有单段生成模式。",
+                        "tooltip": (
+                            "二次采样浅空间放大：开 = 首采完成后，用 H3 3D 潜空间放大器把画面提升到设定倍数，"
+                            "再跑第二段扩散采样重建高清细节；关 = 只跑普通单段采样。"
+                        ),
+                    },
+                ),
+                "digital_human_upscale_scale": (
+                    "FLOAT",
+                    {
+                        "default": 1.5,
+                        "min": 1.0,
+                        "max": 4.0,
+                        "step": 0.05,
+                        "tooltip": (
+                            "二次采样后的高清输出倍数：1.5 = 宽高各放大 1.5 倍并执行第二段扩散采样；"
+                            "1.0 = 保持原分辨率但仍进行二次采样精修。"
+                        ),
                     },
                 ),
                 "digital_human_cfg": (
                     "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "潜空间放大阶段的提示词引导强度；默认 1.0 与普通采样一致。"},
+                    {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "H3 二采使用 BasicGuider，固定按 CFG 1.0 运行；此控件保留用于兼容旧工作流。"},
                 ),
                 "digital_human_transition_step": (
                     "INT",
-                    {"default": 5, "min": 1, "max": 100, "step": 1, "tooltip": "低清潜空间阶段执行多少步后切换到目标分辨率；会按实际采样步数自动调整。"},
+                    {"default": 4, "min": 1, "max": 100, "step": 1, "tooltip": "第二阶段高清重采样步数；建议 4～6 步，步数越高细节越充分、耗时也越长。"},
                 ),
                 "digital_human_lowres_scale": (
                     "FLOAT",
-                    {"default": 0.5, "min": 0.25, "max": 1.0, "step": 0.05, "tooltip": "低清潜空间阶段相对目标分辨率的比例；0.5 表示宽高各用一半。"},
+                    {"default": 0.35, "min": 0.05, "max": 1.0, "step": 0.01, "tooltip": "第二阶段高清重采样的 denoise；建议 0.30～0.35，越低越保留首采人物与环境，越高会补充更多细节。"},
                 ),
                 "digital_human_upscaler_model": (
                     digital_upscalers,
-                    {"default": digital_default_upscaler, "tooltip": "把低清潜空间提升到目标分辨率所用的 H3 3D Latent 放大器；none 使用内置潜空间插值。"},
+                    {"default": digital_default_upscaler, "tooltip": "首采后只放大视频 latent 的 H3 3D 放大器；优先使用 minimax_h3_latent_upscaler_3d_fp16_V2，音频 latent 保持原样。"},
                 ),
                 "sample_preview": (
                     "BOOLEAN",
@@ -8236,11 +8289,11 @@ class MiniMaxH3EasyRenderAdvanced:
                 ),
                 "digital_human_lowres_model": (
                     "MODEL",
-                    {"tooltip": "低清潜空间阶段的模型；不接时使用渲染器 model 输入。"},
+                    {"tooltip": "首段采样的模型；不接时使用渲染器 model 输入。"},
                 ),
                 "digital_human_highres_model": (
                     "MODEL",
-                    {"tooltip": "目标分辨率补采阶段的模型；不接时沿用低清模型。"},
+                    {"tooltip": "潜空间放大后第二段高清采样使用的模型；不接时沿用首采模型。"},
                 ),
             },
         }
@@ -8253,6 +8306,7 @@ class MiniMaxH3EasyRenderAdvanced:
             "digital_human_selflift", "digital_human_cfg",
             "digital_human_transition_step", "digital_human_lowres_scale",
             "digital_human_upscaler_model",
+            "digital_human_upscale_scale",
             "digital_human_lowres_model", "digital_human_highres_model",
             "sample_preview",
         )
@@ -8384,6 +8438,7 @@ class MiniMaxH3EasyRenderAdvanced:
         highres_model: Any = None,
         external_sampler: Any = None,
         external_sigmas: Any = None,
+        output_scale: float = 1.0,
         mode_label: str = "潜空间放大",
     ):
         """Build one shared Euler SelfLift execution for every render mode."""
@@ -8451,6 +8506,16 @@ class MiniMaxH3EasyRenderAdvanced:
             resolved_transition += 1
         if resolved_transition >= step_count:
             raise ValueError("当前采样调度没有可用的高清补采起点，请增加步数或提高 denoise")
+        if float(output_scale) > 1.0 + 1e-6 and float(sigmas_tensor[resolved_transition]) > SELFLIFT_MAX_REFINE_SIGMA:
+            limited_sigmas = _limit_secondary_refine_sigmas(
+                sigmas_tensor, resolved_transition, output_scale
+            )
+            if limited_sigmas is not sigmas_tensor:
+                sigmas_tensor = limited_sigmas
+                print(
+                    f"[MiniMax H3 Aicg] {mode_label}二采重绘强度已限制为 "
+                    f"sigma={SELFLIFT_MAX_REFINE_SIGMA:.2f}，保持首采人物与环境结构。"
+                )
         if resolved_transition != int(transition_step or 1):
             print(
                 f"[MiniMax H3 Aicg] {mode_label}过渡步数自动调整为 "
@@ -8462,8 +8527,12 @@ class MiniMaxH3EasyRenderAdvanced:
             cfg=float(cfg),
             transition_step=resolved_transition,
             lowres_scale=float(lowres_scale),
-            correction_ratio=0.0,
-            correction_min=0.5,
+            output_scale=max(1.0, min(4.0, float(output_scale))),
+            # For real output enlargement, anchor the lifted latent strongly to the
+            # decoded first-pass video. This keeps identity, composition and scene
+            # geometry while the learned upscaler only contributes residual detail.
+            correction_ratio=1.0 if output_scale > 1.0 + 1e-6 else 0.0,
+            correction_min=0.85 if output_scale > 1.0 + 1e-6 else 0.5,
             correction_max=1.0,
             upscaler_model=_resolve_selflift_upscaler(upscaler_model),
             upscaler_device="cuda",
@@ -8478,6 +8547,68 @@ class MiniMaxH3EasyRenderAdvanced:
             sampling_plan,
             sampling_steps,
         )
+
+    @classmethod
+    def _run_secondary_sample(
+        cls,
+        *,
+        first_latent: Any,
+        first_conditioning: Any,
+        h3_context: MiniMaxH3Context,
+        highres_model: Any,
+        seed: Any,
+        sampler_name: Any,
+        scheduler: Any,
+        second_steps: Any,
+        second_denoise: Any,
+        upscaler_model: Any,
+        output_scale: Any,
+        sampler: Any = None,
+        on_step: Any = None,
+        on_preview: Any = None,
+    ):
+        """Complete a full first pass, then refine the upscaled video latent."""
+        from aicg3d_h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+
+        scale = max(1.0, min(4.0, float(output_scale or 1.5)))
+        steps = max(1, min(6, int(second_steps or 4)))
+        denoise = max(0.05, min(0.35, float(second_denoise or 0.35)))
+        device = "cuda" if getattr(highres_model.load_device, "type", "cpu") == "cuda" else "cpu"
+        upscaler_model = _resolve_h3_secondary_upscaler(upscaler_model)
+        video_latent, audio_latent = MiniMaxH3EasyRenderPass2._upscale_video_latent(
+            first_latent,
+            upscaler_model,
+            scale,
+            device,
+            "fp16",
+            True,
+            highres_model,
+        )
+        (second_conditioning,) = MiniMaxH3EasySecondPassConditioning.rebuild_from_conditioning(
+            first_conditioning,
+            h3_context,
+            {"samples": video_latent},
+        )
+        second_input = _segment_pack_latent(video_latent, audio_latent)
+        print(
+            f"[MiniMax H3 Aicg] 二次采样放大 {scale:g}x："
+            f"{steps} 步，denoise={denoise:.2f}，音频 latent 原样保留。"
+        )
+        (second_latent,) = AICG3DSamplerAdvanced().sample(
+            highres_model,
+            second_conditioning,
+            second_input,
+            seed,
+            sampler_name,
+            scheduler,
+            steps,
+            denoise,
+            sampler=sampler,
+            sigmas=None,
+            on_step=on_step,
+            on_preview=on_preview,
+        )
+        return second_latent
 
     @classmethod
     def _render_digital_human_long(
@@ -8495,9 +8626,10 @@ class MiniMaxH3EasyRenderAdvanced:
         guide_frame_idx: Any = 0,
         digital_human_selflift: bool = True,
         digital_human_cfg: float = 1.0,
-        digital_human_transition_step: int = 5,
-        digital_human_lowres_scale: float = 0.5,
+        digital_human_transition_step: int = 4,
+        digital_human_lowres_scale: float = 0.35,
         digital_human_upscaler_model: str = "none",
+        digital_human_upscale_scale: float = 1.5,
         digital_human_lowres_model: Any = None,
         digital_human_highres_model: Any = None,
         external_sampler: Any = None,
@@ -8524,65 +8656,22 @@ class MiniMaxH3EasyRenderAdvanced:
         ref_image_size = str(plan.get("ref_image_size") or REF_IMAGE_MATCH)
         rife_settings = dict(plan.get("rife") or {})
         rife_enabled = bool(rife_settings.get("enabled", False))
-        selflift_enabled = bool(digital_human_selflift)
-        sampling_plan = None
+        output_scale = max(1.0, min(4.0, float(digital_human_upscale_scale or 1.5)))
         effective_steps = max(1, int(steps or 1))
-        sample_model = digital_human_lowres_model or model
-        highres_model = digital_human_highres_model or sample_model
-        avatar_sampler_class = cls._avatar_selflift_class() if selflift_enabled else None
-        use_avatar_selflift = selflift_enabled and avatar_sampler_class is not None
-        if use_avatar_selflift and _is_none_model(_resolve_selflift_upscaler(digital_human_upscaler_model)):
-            print(
-                "[MiniMax H3 Aicg] SelfLift-Avatar 需要潜空间放大器；"
-                "当前选择 none，数字人本次回退到内置逐段 SelfLift。"
+        refine_enabled = bool(digital_human_selflift)
+        sample_model, highres_model = cls._resolve_selflift_models(
+            model, digital_human_lowres_model, digital_human_highres_model
+        )
+        sampler_obj = external_sampler or comfy.samplers.sampler_object(sampler_name)
+        if external_sigmas is None:
+            sigmas_tensor = AICG3DSamplerAdvanced.calculate_sigmas(
+                sample_model, scheduler, effective_steps, denoise
             )
-            use_avatar_selflift = False
-
-        if selflift_enabled:
-            if use_avatar_selflift:
-                sampler_obj = comfy.samplers.sampler_object("euler")
-                effective_steps = max(2, int(steps or 1))
-                sigmas_tensor = AICG3DSamplerAdvanced.calculate_sigmas(
-                    sample_model, scheduler, effective_steps, denoise
-                )
-                print(
-                    "[MiniMax H3 Aicg] 数字人长音频使用 SelfLift-Avatar + Euler；"
-                    "高清阶段自动启用显存感知分块。外部 SAMPLER / SIGMAS 本次不参与。"
-                )
-            else:
-                (
-                    sample_model,
-                    highres_model,
-                    sampler_obj,
-                    sigmas_tensor,
-                    sampling_plan,
-                    effective_steps,
-                ) = cls._build_selflift_resources(
-                    model,
-                    sampler_name,
-                    scheduler,
-                    steps,
-                    denoise,
-                    digital_human_cfg,
-                    digital_human_transition_step,
-                    digital_human_lowres_scale,
-                    digital_human_upscaler_model,
-                    digital_human_lowres_model,
-                    digital_human_highres_model,
-                    external_sampler,
-                    external_sigmas,
-                    mode_label="数字人潜空间放大",
-                )
         else:
-            sampler_obj = external_sampler or comfy.samplers.sampler_object(sampler_name)
-            if external_sigmas is None:
-                sigmas_tensor = AICG3DSamplerAdvanced.calculate_sigmas(
-                    sample_model, scheduler, effective_steps, denoise
-                )
-            else:
-                sigmas_tensor = external_sigmas
-
-        total_sample_steps = effective_steps * segment_count
+            sigmas_tensor = external_sigmas
+        second_steps = max(1, min(6, int(digital_human_transition_step or 4)))
+        second_denoise = max(0.05, min(0.35, float(digital_human_lowres_scale or 0.35)))
+        total_sample_steps = (effective_steps + (second_steps if refine_enabled else 0)) * segment_count
         reporter.begin_sample(total_sample_steps)
         preview_bar = comfy.utils.ProgressBar(total_sample_steps) if on_preview is not None else None
         completed_steps = 0
@@ -8644,49 +8733,35 @@ class MiniMaxH3EasyRenderAdvanced:
                     preview_bar.update_absolute(completed_steps, total_sample_steps, preview)
                 return preview
 
-            if use_avatar_selflift:
-                sampled = cls._run_avatar_selflift(
-                    avatar_sampler_class,
-                    lowres_model=sample_model,
+            (first_latent,) = AICG3DSamplerAdvanced().sample(
+                sample_model,
+                conditioning,
+                latent,
+                segment_seed,
+                sampler_name,
+                scheduler,
+                effective_steps,
+                denoise,
+                sampler=sampler_obj,
+                sigmas=sigmas_tensor,
+                on_step=lambda *_args: callback(0, None, None, 0),
+                on_preview=on_preview,
+            )
+            sampled = first_latent
+            if refine_enabled:
+                sampled = cls._run_secondary_sample(
+                    first_latent=first_latent,
+                    first_conditioning=conditioning,
+                    h3_context=h3_context,
                     highres_model=highres_model,
-                    positive=conditioning,
-                    video_vae=h3_context.video_vae,
-                    latent=latent,
-                    sampler=sampler_obj,
-                    sigmas=sigmas_tensor,
                     seed=segment_seed,
-                    cfg=digital_human_cfg,
-                    transition_step=digital_human_transition_step,
-                    lowres_scale=digital_human_lowres_scale,
+                    sampler_name=sampler_name,
+                    scheduler=scheduler,
+                    second_steps=second_steps,
+                    second_denoise=second_denoise,
                     upscaler_model=digital_human_upscaler_model,
-                )
-                completed_steps += effective_steps
-                reporter.update_sample(completed_steps, total_sample_steps)
-            elif selflift_enabled:
-                sampled = sample_with_sampling_plan(
-                    sampling_plan,
-                    model=sample_model,
-                    highres_model=highres_model,
-                    positive=conditioning,
-                    latent=latent,
+                    output_scale=output_scale,
                     sampler=sampler_obj,
-                    sigmas=sigmas_tensor,
-                    seed=segment_seed,
-                    video_vae=h3_context.video_vae,
-                    callback=callback,
-                )
-            else:
-                (sampled,) = AICG3DSamplerAdvanced().sample(
-                    sample_model,
-                    conditioning,
-                    latent,
-                    segment_seed,
-                    sampler_name,
-                    scheduler,
-                    effective_steps,
-                    denoise,
-                    sampler=sampler_obj,
-                    sigmas=sigmas_tensor,
                     on_step=lambda *_args: callback(0, None, None, 0),
                     on_preview=on_preview,
                 )
@@ -8734,7 +8809,7 @@ class MiniMaxH3EasyRenderAdvanced:
                 f"[MiniMax H3 Aicg] 数字人长音频 {index + 1}/{segment_count} 完成："
                 f"时间轴 {start_frame}-{start_frame + requested_frames} 帧。"
             )
-            del sampled, video_latent, frames
+            del first_latent, sampled, video_latent, frames
             comfy.model_management.soft_empty_cache()
 
         if not output_frames:
@@ -8765,12 +8840,13 @@ class MiniMaxH3EasyRenderAdvanced:
         guide_audio=None,
         digital_human_selflift=True,
         digital_human_cfg=1.0,
-        digital_human_transition_step=5,
-        digital_human_lowres_scale=0.5,
+        digital_human_transition_step=4,
+        digital_human_lowres_scale=0.35,
         digital_human_upscaler_model="none",
         digital_human_lowres_model=None,
         digital_human_highres_model=None,
         sample_preview=False,
+        digital_human_upscale_scale=1.5,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
@@ -8825,6 +8901,7 @@ class MiniMaxH3EasyRenderAdvanced:
                     digital_human_transition_step=digital_human_transition_step,
                     digital_human_lowres_scale=digital_human_lowres_scale,
                     digital_human_upscaler_model=digital_human_upscaler_model,
+                    digital_human_upscale_scale=digital_human_upscale_scale,
                     digital_human_lowres_model=digital_human_lowres_model,
                     digital_human_highres_model=digital_human_highres_model,
                     external_sampler=sampler,
@@ -8832,65 +8909,53 @@ class MiniMaxH3EasyRenderAdvanced:
                 )
             else:
                 if bool(digital_human_selflift):
-                    (
+                    sample_model, highres_model = self._resolve_selflift_models(
+                        model, digital_human_lowres_model, digital_human_highres_model
+                    )
+                    first_steps = _external_sampling_steps(sigmas, steps)
+                    second_steps = max(1, min(6, int(digital_human_transition_step or 4)))
+                    second_denoise = max(0.05, min(0.35, float(digital_human_lowres_scale or 0.35)))
+                    total_steps = first_steps + second_steps
+                    reporter.begin_sample(total_steps)
+
+                    def first_step(done, _total):
+                        reporter.update_sample(min(first_steps, int(done or 0)), total_steps)
+
+                    def second_step(done, _total):
+                        reporter.update_sample(
+                            first_steps + min(second_steps, int(done or 0)),
+                            total_steps,
+                        )
+
+                    (first_latent,) = AICG3DSamplerAdvanced().sample(
                         sample_model,
-                        highres_model,
-                        sampler_obj,
-                        sigmas_tensor,
-                        sampling_plan,
-                        sampling_steps,
-                    ) = self._build_selflift_resources(
-                        model,
+                        conditioning,
+                        h3_context.latent,
+                        noise_seed,
                         sampler_name,
                         scheduler,
                         steps,
                         denoise,
-                        digital_human_cfg,
-                        digital_human_transition_step,
-                        digital_human_lowres_scale,
-                        digital_human_upscaler_model,
-                        digital_human_lowres_model,
-                        digital_human_highres_model,
-                        sampler,
-                        sigmas,
-                        mode_label="潜空间放大",
+                        sampler=sampler,
+                        sigmas=sigmas,
+                        on_step=first_step,
+                        on_preview=on_preview,
                     )
-                    reporter.begin_sample(sampling_steps)
-                    preview_bar = (
-                        comfy.utils.ProgressBar(sampling_steps)
-                        if on_preview is not None else None
-                    )
-                    completed_steps = 0
-
-                    def callback(_step, clean, _state, _total):
-                        nonlocal completed_steps
-                        completed_steps += 1
-                        reporter.update_sample(completed_steps, sampling_steps)
-                        preview_image = None
-                        if on_preview is not None:
-                            try:
-                                preview_image = on_preview(
-                                    clean, completed_steps, sampling_steps
-                                )
-                            except Exception:
-                                preview_image = None
-                        if preview_bar is not None:
-                            preview_bar.update_absolute(
-                                completed_steps, sampling_steps, preview_image
-                            )
-                        return preview_image
-
-                    sampled = sample_with_sampling_plan(
-                        sampling_plan,
-                        model=sample_model,
+                    sampled = self._run_secondary_sample(
+                        first_latent=first_latent,
+                        first_conditioning=conditioning,
+                        h3_context=h3_context,
                         highres_model=highres_model,
-                        positive=conditioning,
-                        latent=h3_context.latent,
-                        sampler=sampler_obj,
-                        sigmas=sigmas_tensor,
-                        seed=int(noise_seed) & 0xFFFFFFFFFFFFFFFF,
-                        video_vae=h3_context.video_vae,
-                        callback=callback,
+                        seed=noise_seed,
+                        sampler_name=sampler_name,
+                        scheduler=scheduler,
+                        second_steps=second_steps,
+                        second_denoise=second_denoise,
+                        upscaler_model=digital_human_upscaler_model,
+                        output_scale=digital_human_upscale_scale,
+                        sampler=sampler,
+                        on_step=second_step,
+                        on_preview=on_preview,
                     )
                 else:
                     sampling_steps = _external_sampling_steps(sigmas, steps)
@@ -9019,7 +9084,8 @@ def _unpack_pass1(pass1: Any) -> tuple[Any, Any]:
         if latent is not None and context is not None:
             return latent, context
     raise ValueError(
-        "请把 AICG-渲染器（一采）的「一采数据」输出接到这个节点的 pass1 输入"
+        "请把 AICG-渲染器（一采）的「一采数据」，或上一颗二采放大节点的「二采数据」，"
+        "接到这个节点的 pass1 输入"
     )
 
 
@@ -9085,8 +9151,8 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
 
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "render"
-    RETURN_TYPES = ("VIDEO", PASS1_PAYLOAD_TYPE)
-    RETURN_NAMES = ("video", "pass1")
+    RETURN_TYPES = (PASS1_PAYLOAD_TYPE, "VIDEO")
+    RETURN_NAMES = ("pass1", "video")
     DESCRIPTION = (
         "一采一条龙：采样 -> 解码 + 合成，输出成片 VIDEO 和一条「一采数据」。"
         "接 MiniMax H3 Aicg 的 h3_context，成片直接连 SaveVideo；"
@@ -9158,6 +9224,25 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
                         ),
                     },
                 ),
+                "decode_first_pass": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": (
+                            "开 = 一采后顺便解码成 VIDEO，可单独保存一采成片；"
+                            "关 = 只输出一采 latent 给二采，跳过 VAEDecode/合成，连续二采更快。"
+                        ),
+                    },
+                ),
+                "run_nonce": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 0xFFFFFFFFFFFFFFFF,
+                        "tooltip": "内部缓存序号：右上角完整运行时自动更新，用于强制重新一采。"
+                    },
+                ),
             },
             "optional": {
                 "model": ("MODEL",),
@@ -9174,8 +9259,12 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        keys = ("noise_seed", "sampler_name", "scheduler", "steps", "denoise", "sampler", "sigmas",
-                "sample_preview", "preview_interval")
+        keys = (
+            "noise_seed", "sampler_name", "scheduler", "steps", "denoise",
+            "sampler", "sigmas", "sample_preview", "preview_interval",
+            "decode_first_pass",
+            "run_nonce",
+        )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
     def render(
@@ -9189,6 +9278,8 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         sample_preview=RENDER_PREVIEW_OFF,
         preview_interval=RENDER_PREVIEW_INTERVAL,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
+        decode_first_pass=True,
+        run_nonce=0,
         model=None,
         sampler=None,
         sigmas=None,
@@ -9244,12 +9335,16 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
                 on_preview=on_preview,
             )
 
-            # ---- 解码 + 合成：出片，顺手把 latent 与上下文打包给下游的二采放大 ----
+            # ---- 可选解码：连通二采时可以跳过，直接把一采 latent 交给下游 ----
+            if not bool(decode_first_pass):
+                done = True
+                return ({"latent": first_latent, "context": h3_context}, None)
+
             reporter.begin_decode()
             frames, audio = self._decode_av(h3_context, first_latent)
             video = self._compose_video(h3_context, frames, audio)
             done = True
-            return (video, {"latent": first_latent, "context": h3_context})
+            return ({"latent": first_latent, "context": h3_context}, video)
         finally:
             reporter.finish(done)
             _release_render_resources(cleanup_after_run)
@@ -9273,12 +9368,13 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
 
     CATEGORY = "AICG3D/H3 工作流"
     FUNCTION = "render"
-    RETURN_TYPES = ("VIDEO", "VIDEO")
-    RETURN_NAMES = ("video", "first_pass_video")
+    RETURN_TYPES = (PASS1_PAYLOAD_TYPE, "VIDEO", "VIDEO")
+    RETURN_NAMES = ("pass_data", "first_pass_video", "video")
     DESCRIPTION = (
         "二采放大一条龙：拆 AV latent -> Latent 3D 放大 -> 拼回 AV latent -> "
         "二采条件 -> 二采采样 -> 解码 + 合成，只输出一条 VIDEO。"
         "接 AICG-渲染器（一采）的「一采数据」，输出直接连 SaveVideo；"
+        "「二采数据」输出二采后的真实 latent，可继续接下一颗二采放大节点，实现多级放大；"
         "二采重画力度看 second_pass_denoise（0.4~0.6 最稳）。"
     )
 
@@ -9373,31 +9469,6 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                         "tooltip": "重叠区里真正做过渡的长度：0 = 硬拼，不能大于重叠。",
                     },
                 ),
-                "sample_preview": (
-                    list(RENDER_PREVIEW_CHOICES),
-                    {
-                        "default": RENDER_PREVIEW_OFF,
-                        "tooltip": (
-                            "开：二采每一步都把中间结果走 ComfyUI 原生预览通道推给前端，"
-                            "实时采样画面直接显示在这个节点上（右侧图片流面板同样能看到），"
-                            "代价是每步多一次预览解码；关：只留底部那条百分比进度条。"
-                        ),
-                    },
-                ),
-                "preview_interval": (
-                    "INT",
-                    {
-                        "default": RENDER_PREVIEW_INTERVAL,
-                        "min": 1,
-                        "max": 1000,
-                        "step": 1,
-                        "tooltip": (
-                            "每隔多少步推一张预览图（1 = 每步都推）。"
-                            "调大能省掉预览解码与前端刷新的开销，采样更快、画面刷新更慢；"
-                            "第一步与整段采样的最后一步始终会推一张，方便看开局与成图。"
-                        ),
-                    },
-                ),
                 "latent_upscale_model": (cls._upscale_model_choices(),),
                 "upscale_scale": (
                     "FLOAT",
@@ -9437,6 +9508,31 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                             "卸载模型 = 连模型一起卸出显存并回收内存，占用最低，但下次运行要重新加载；"
                             "释放缓存 = 只把 PyTorch 缓存的显存还给驱动并回收内存，模型留在显存里，下次跑得快；"
                             "不处理 = 保持 ComfyUI 默认行为。"
+                        ),
+                    },
+                ),
+                "sample_preview": (
+                    list(RENDER_PREVIEW_CHOICES),
+                    {
+                        "default": RENDER_PREVIEW_OFF,
+                        "tooltip": (
+                            "开：二采每一步都把中间结果走 ComfyUI 原生预览通道推给前端，"
+                            "实时采样画面直接显示在这个节点上（右侧图片流面板同样能看到），"
+                            "代价是每步多一次预览解码；关：只留底部那条百分比进度条。"
+                        ),
+                    },
+                ),
+                "preview_interval": (
+                    "INT",
+                    {
+                        "default": RENDER_PREVIEW_INTERVAL,
+                        "min": 1,
+                        "max": 1000,
+                        "step": 1,
+                        "tooltip": (
+                            "每隔多少步推一张预览图（1 = 每步都推）。"
+                            "调大能省掉预览解码与前端刷新的开销，采样更快、画面刷新更慢；"
+                            "第一步与整段采样的最后一步始终会推一张，方便看开局与成图。"
                         ),
                     },
                 ),
@@ -9725,7 +9821,11 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                 first_frames, first_audio = self._decode_av(h3_context, first_latent)
                 first_pass_video = self._compose_video(h3_context, first_frames, first_audio)
             done = True
-            return (video, first_pass_video)
+            return (
+                {"latent": second_latent, "context": h3_context},
+                first_pass_video,
+                video,
+            )
         finally:
             reporter.finish(done)
             # 采样与解码的大张量到这里已经交出去了，收尾时释放显存与内存。
@@ -12356,7 +12456,18 @@ class MiniMaxH3EasySecondPassConditioning:
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
 
-        conditioning = node_helpers.conditioning_set_values(h3_context.conditioning, {})
+        return cls.rebuild_from_conditioning(
+            h3_context.conditioning,
+            h3_context,
+            second_pass_video_latent,
+        )
+
+    @classmethod
+    def rebuild_from_conditioning(cls, conditioning, h3_context, second_pass_video_latent):
+        """Rebuild a specific conditioning, including optional AddGuide edits."""
+        if not isinstance(h3_context, MiniMaxH3Context):
+            raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
+        conditioning = node_helpers.conditioning_set_values(conditioning, {})
         if not h3_context.keyframe_sources:
             return (conditioning,)
 
@@ -13209,6 +13320,12 @@ class MiniMaxH3SequenceConfig:
     #: 可选的外部采样器 / sigma 调度；连接后优先于 sampler_name / scheduler / steps。
     sampler: Any = None
     sigmas: Any = None
+    #: 每段一采完成后的 V2 高清二采；不改动跨段衔接使用的一采基准 latent。
+    second_pass: bool = False
+    second_pass_model: str = "none"
+    second_pass_scale: float = 1.5
+    second_pass_steps: int = 4
+    second_pass_denoise: float = 0.35
 
 
 @dataclass(frozen=True)
@@ -13533,6 +13650,18 @@ class MiniMaxH3EasySequenceGlobal:
                         ),
                     },
                 ),
+                # 末尾追加，旧工作流的全局设置控件位置不变。
+                "second_pass": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "开启后每一段先完整一采，再用 V2 Latent 放大器提升到 1.5 倍，"
+                            "保持音频 latent 不变并执行 4 步、0.35 降噪的第二次采样。"
+                            "跨段衔接仍使用一采的原始尺寸 latent，不会影响下一段。"
+                        ),
+                    },
+                ),
             },
             "optional": {
                 "model": ("MODEL",),
@@ -13565,6 +13694,7 @@ class MiniMaxH3EasySequenceGlobal:
             "audio_mode", "vram_tier",
             "exposure_lock",
             "keep_full",
+            "second_pass",
             "sampler", "sigmas",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
@@ -13591,6 +13721,7 @@ class MiniMaxH3EasySequenceGlobal:
         vram_tier=VRAM_TIER_AUTO,
         exposure_lock=SEQUENCE_EXPOSURE_LOCK_ON,
         keep_full=True,
+        second_pass=False,
         model=None,
         sampler=None,
         sigmas=None,
@@ -13616,6 +13747,12 @@ class MiniMaxH3EasySequenceGlobal:
             SEQUENCE_HANDOFF_MIN_FRAMES,
             min(SEQUENCE_HANDOFF_MAX_FRAMES, int(handoff_frames or SEQUENCE_HANDOFF_DEFAULT_FRAMES)),
         )
+        secondary_model = _resolve_h3_secondary_upscaler(None)
+        if bool(second_pass) and _is_none_model(secondary_model):
+            raise ValueError(
+                "已开启二采高清放大，但没有找到 H3 Latent 放大器。请把 V2 模型放到 "
+                "ComfyUI/models/latent_upscale_models 后再运行。"
+            )
         config = MiniMaxH3SequenceConfig(
             bundle=h3_bundle,
             resolution=str(resolution),
@@ -13642,6 +13779,11 @@ class MiniMaxH3EasySequenceGlobal:
                 else SEQUENCE_EXPOSURE_LOCK_ON
             ),
             keep_full=bool(keep_full),
+            second_pass=bool(second_pass),
+            second_pass_model=secondary_model,
+            second_pass_scale=1.5,
+            second_pass_steps=4,
+            second_pass_denoise=0.35,
             model=model,
             sampler=sampler,
             sigmas=sigmas,
@@ -13654,6 +13796,7 @@ class MiniMaxH3EasySequenceGlobal:
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
             f"接缝处理「{config.exposure_lock}」；"
             f"保完整「{'开' if config.keep_full else '关'}」；"
+            f"二采高清「{'开' if config.second_pass else '关'}」；"
             f"外部采样器「{'已连接' if config.sampler is not None else '未连接'}」；"
             f"外部 Sigmas「{'已连接' if config.sigmas is not None else '未连接'}」。"
         )
@@ -13830,6 +13973,56 @@ class MiniMaxH3EasySequenceSegment:
             f"（{config.context_frames} 帧 / {config.continuity_mode}）"
         )
         return state
+
+    @classmethod
+    def _apply_sequence_second_pass(
+        cls,
+        sampled: Any,
+        conditioning: Any,
+        config: MiniMaxH3SequenceConfig,
+        model: Any,
+        seed: Any,
+        on_step: Any = None,
+        on_preview: Any = None,
+    ):
+        """Keep continuity on the first-pass grid and return the refined output."""
+        continuity_video, _audio = _segment_latent_streams(sampled)
+        if not config.second_pass:
+            return sampled, continuity_video
+
+        from aicg3d_h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
+
+        device = "cuda" if getattr(model.load_device, "type", "cpu") == "cuda" else "cpu"
+        upscaled_video, upscaled_audio = MiniMaxH3EasyRenderPass2._upscale_video_latent(
+            sampled,
+            config.second_pass_model,
+            config.second_pass_scale,
+            device,
+            "fp16",
+            True,
+            model,
+        )
+        second_conditioning = _resize_keyframe_conditioning(
+            conditioning,
+            int(upscaled_video.shape[-2]),
+            int(upscaled_video.shape[-1]),
+        )
+        second_input = _segment_pack_latent(upscaled_video, upscaled_audio)
+        (refined,) = AICG3DSamplerAdvanced().sample(
+            model,
+            second_conditioning,
+            second_input,
+            int(seed) & 0xFFFFFFFFFFFFFFFF,
+            config.sampler_name,
+            config.scheduler,
+            config.second_pass_steps,
+            config.second_pass_denoise,
+            sampler=config.sampler,
+            sigmas=None,
+            on_step=on_step,
+            on_preview=on_preview,
+        )
+        return refined, continuity_video
 
     @classmethod
     def sample_segment(
@@ -14106,7 +14299,9 @@ class MiniMaxH3EasySequenceSegment:
                     f"「{'已连接' if config.sampler is not None else '未连接'}」和外部 Sigma"
                     f"「{'已连接' if config.sigmas is not None else '未连接'}」，实际 {sampling_steps} 步。"
                 )
-            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, sampling_steps)
+            second_steps = int(config.second_pass_steps or 4) if config.second_pass else 0
+            total_steps = sampling_steps + second_steps
+            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, total_steps)
             (sampled,) = AICG3DSamplerAdvanced().sample(
                 model,
                 conditioning,
@@ -14118,15 +14313,33 @@ class MiniMaxH3EasySequenceSegment:
                 config.denoise,
                 sampler=config.sampler,
                 sigmas=config.sigmas,
-                on_step=reporter.update_stage,
+                on_step=lambda done, _total: reporter.update_stage(
+                    min(int(done or 0), sampling_steps), total_steps
+                ),
                 on_preview=on_preview,
             )
+            sampled, continuity_video_stream = cls._apply_sequence_second_pass(
+                sampled,
+                conditioning,
+                config,
+                model,
+                seed,
+                on_step=lambda done, _total: reporter.update_stage(
+                    sampling_steps + min(int(done or 0), second_steps), total_steps
+                ),
+                on_preview=on_preview,
+            )
+            if config.second_pass:
+                print(
+                    f"[MiniMax H3 Aicg] 视频段落 {index}：V2 二采 {config.second_pass_scale:g}x，"
+                    f"{config.second_pass_steps} 步 / denoise {config.second_pass_denoise:.2f}，音频原样保留"
+                )
             video_stream, audio_stream = _segment_latent_streams(sampled)
             motion_context_tail_latent = None
             if continuity_mode == CONTEXT_CONTINUITY_LATENT:
                 # 下一段要用的尾帧 latent 先切好（CPU，几 MB），段落之间就不用再来回搬运画面。
                 motion_context_tail_latent = _segment_motion_context_tail_from_latent(
-                    video_stream, context_length,
+                    continuity_video_stream, context_length,
                 )
             sample = MiniMaxH3SegmentSample(
                 video_latent=video_stream.detach().to("cpu").contiguous(),

@@ -395,13 +395,14 @@ const TEXT = {
     guideImageLabel: ZH_BROWSER ? "\u5f15\u5bfc\u56fe\u7247" : "Guide image",
     guideAudioLabel: ZH_BROWSER ? "\u5f15\u5bfc\u97f3\u9891" : "Guide audio",
     guideFrameLabel: ZH_BROWSER ? "\u5f15\u5bfc\u5e27\u4f4d\u7f6e" : "Guide frame index",
-    digitalHumanSelfLiftLabel: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u653e\u5927" : "Latent upscale",
-    digitalHumanCfgLabel: ZH_BROWSER ? "\u653e\u5927 CFG" : "Upscale CFG",
-    digitalHumanTransitionLabel: ZH_BROWSER ? "\u8fc7\u6e21\u6b65\u6570" : "Transition step",
-    digitalHumanLowresScaleLabel: ZH_BROWSER ? "\u4f4e\u6e05\u6bd4\u4f8b" : "Low-res scale",
+    digitalHumanSelfLiftLabel: ZH_BROWSER ? "\u4e8c\u6b21\u91c7\u6837\u6d45\u7a7a\u95f4\u653e\u5927" : "Two-pass latent upscale",
+    digitalHumanCfgLabel: ZH_BROWSER ? "\u4e8c\u91c7 CFG\uff08\u56fa\u5b9a 1.0\uff09" : "Second-pass CFG (fixed 1.0)",
+    digitalHumanTransitionLabel: ZH_BROWSER ? "\u4e8c\u91c7\u91c7\u6837\u6b65\u6570" : "Second-pass steps",
+    digitalHumanLowresScaleLabel: ZH_BROWSER ? "\u4e8c\u91c7\u964d\u566a" : "Second-pass denoise",
+    digitalHumanUpscaleScaleLabel: ZH_BROWSER ? "\u9ad8\u6e05\u653e\u5927\u500d\u6570" : "HD upscale factor",
     digitalHumanUpscalerLabel: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u653e\u5927\u5668" : "Latent upscaler",
-    digitalHumanLowresModelLabel: ZH_BROWSER ? "\u4f4e\u6e05\u6a21\u578b" : "Low-res model",
-    digitalHumanHighresModelLabel: ZH_BROWSER ? "\u9ad8\u6e05\u6a21\u578b" : "High-res model",
+    digitalHumanLowresModelLabel: ZH_BROWSER ? "\u9996\u91c7\u6a21\u578b" : "First-pass model",
+    digitalHumanHighresModelLabel: ZH_BROWSER ? "\u4e8c\u91c7\u6a21\u578b" : "Second-pass model",
     digitalHumanRifeLabel: ZH_BROWSER ? "\u6570\u5b57\u4eba RIFE \u667a\u80fd\u63d2\u5e27" : "Digital Human RIFE",
     digitalHumanRifeModelLabel: ZH_BROWSER ? "RIFE \u6a21\u578b\u68c0\u67e5\u70b9" : "RIFE model checkpoint",
     digitalHumanRifeMultiplierLabel: ZH_BROWSER ? "RIFE \u63d2\u5e27\u500d\u6570" : "RIFE multiplier",
@@ -413,6 +414,8 @@ const TEXT = {
     renderVideo: ZH_BROWSER ? "\u6210\u7247\u89c6\u9891" : "Video",
     renderPass1Title: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u4e00\u91c7\uff09" : "AICG Render (Pass 1)",
     renderPass1Data: ZH_BROWSER ? "\u4e00\u91c7\u6570\u636e" : "Pass-1 data",
+    renderPass2Data: ZH_BROWSER ? "\u4e8c\u91c7\u6570\u636e" : "Pass-2 data",
+    decodeFirstPassLabel: ZH_BROWSER ? "\u4e00\u91c7\u89e3\u7801\u89c6\u9891" : "Decode first-pass video",
     renderPass2Title: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u4e8c\u91c7\u653e\u5927\uff09" : "AICG Render (Pass 2)",
     renderFirstPassVideo: ZH_BROWSER ? "\u4e00\u91c7\u6210\u7247" : "First-pass video",
     pass2SeedLabel: ZH_BROWSER ? "\u4e8c\u91c7\u79cd\u5b50" : "Pass-2 seed",
@@ -425,7 +428,7 @@ const TEXT = {
     renderPreviewIdle: ZH_BROWSER ? "\u8fd0\u884c\u4e2d\u8fd9\u91cc\u663e\u793a\u5b9e\u65f6\u9884\u89c8" : "Live preview appears here while running",
     renderProgressSample: ZH_BROWSER ? "\u91c7\u6837\u4e2d" : "Sampling",
     renderProgressDecode: ZH_BROWSER ? "\u89e3\u7801\u4e0e\u5408\u6210\u4e2d" : "Decoding",
-    renderProgressUpscale: ZH_BROWSER ? "Latent \u653e\u5927\u4e2d" : "Latent upscaling",
+    renderProgressUpscale: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u4e8c\u6b21\u91c7\u6837\u653e\u5927\u4e2d" : "Two-pass latent upscaling",
     renderProgressSampleSecond: ZH_BROWSER ? "\u4e8c\u91c7\u91c7\u6837\u4e2d" : "Second pass sampling",
     renderProgressDone: ZH_BROWSER ? "\u5b8c\u6210" : "Done",
     renderProgressElapsed: ZH_BROWSER ? "\u5df2\u7528" : "Elapsed",
@@ -463,6 +466,7 @@ const TEXT = {
     vramPolicy: ZH_BROWSER ? "\u663e\u5b58\u6536\u5c3e" : "VRAM cleanup",
     vramTier: ZH_BROWSER ? "\u663e\u5b58\u6863\u4f4d" : "VRAM tier",
     sequenceConfig: ZH_BROWSER ? "\u5168\u5c40\u8bbe\u7f6e" : "Global settings",
+    sequenceSecondPassLabel: ZH_BROWSER ? "\u4e8c\u91c7\u9ad8\u6e05\u653e\u5927" : "Two-pass HD upscale",
     sequenceSegmentOutput: ZH_BROWSER ? "\u89c6\u9891\u6bb5\u843d" : "Video segment",
     aicg3dNoTarget: ZH_BROWSER
         ? "\u8bf7\u5148\u628a AICG3D\u8d44\u6e90\u5e93 \u8fde\u63a5\u5230\u4e3b\u8282\u70b9\u6216\u89c6\u9891\u6bb5\u843d\u7684 AICG3D \u53e3\uff0c\u4e3b\u8282\u70b9\u8fd8\u9700\u5207\u5230\u53c2\u8003\u6216\u5206\u6bb5\u6a21\u5f0f\u3002"
@@ -1362,12 +1366,14 @@ function localizeNodeInstance(node) {
             steps: TEXT.stepsLabel,
             denoise: TEXT.denoiseLabel,
             cleanup_after_run: TEXT.cleanupLabel,
+            decode_first_pass: TEXT.decodeFirstPassLabel,
             guide_frame_idx: TEXT.guideFrameLabel,
             digital_human_selflift: TEXT.digitalHumanSelfLiftLabel,
             digital_human_cfg: TEXT.digitalHumanCfgLabel,
             digital_human_transition_step: TEXT.digitalHumanTransitionLabel,
             digital_human_lowres_scale: TEXT.digitalHumanLowresScaleLabel,
             digital_human_upscaler_model: TEXT.digitalHumanUpscalerLabel,
+            digital_human_upscale_scale: TEXT.digitalHumanUpscaleScaleLabel,
             second_pass_seed: TEXT.pass2SeedLabel,
             second_pass_denoise: TEXT.pass2DenoiseLabel,
             tiled_sampling: TEXT.pass2TiledLabel,
@@ -1401,9 +1407,36 @@ function localizeNodeInstance(node) {
         }
         for (const output of node.outputs || []) {
             const outputName = String(output.name || "").toLowerCase();
-            if (outputName === "video") setLocalizedSlotLabel(output, TEXT.renderVideo);
+            if (outputName === "video") setLocalizedSlotLabel(output, isPass1 ? TEXT.renderFirstPassVideo : TEXT.renderVideo);
             if (outputName === "pass1") setLocalizedSlotLabel(output, TEXT.renderPass1Data);
             if (outputName === "first_pass_video") setLocalizedSlotLabel(output, TEXT.renderFirstPassVideo);
+            if (outputName === "pass_data") setLocalizedSlotLabel(output, TEXT.renderPass2Data);
+        }
+        if (isPass1 && Array.isArray(node.inputs)) {
+            const modelIndex = node.inputs.findIndex((input) => input?.name === "model");
+            const contextIndex = node.inputs.findIndex((input) => input?.name === "h3_context");
+            if (modelIndex > contextIndex && contextIndex >= 0) {
+                const [modelInput] = node.inputs.splice(modelIndex, 1);
+                const nextContextIndex = node.inputs.findIndex((input) => input?.name === "h3_context");
+                node.inputs.splice(nextContextIndex, 0, modelInput);
+                if (Array.isArray(node._inputs) && node._inputs !== node.inputs) {
+                    const rawModelIndex = node._inputs.findIndex((input) => input?.name === "model");
+                    if (rawModelIndex >= 0) {
+                        const [rawModelInput] = node._inputs.splice(rawModelIndex, 1);
+                        const rawContextIndex = node._inputs.findIndex((input) => input?.name === "h3_context");
+                        node._inputs.splice(rawContextIndex, 0, rawModelInput);
+                    }
+                }
+                node._widgetSlotsDirty = true;
+                node.setDirtyCanvas?.(true, true);
+            }
+        }
+        if (!isPass1 && !isPass2) {
+            const upscaler = getWidget(node, "digital_human_upscaler_model");
+            const choices = Array.isArray(upscaler?.options?.values) ? upscaler.options.values : [];
+            const v2 = choices.find((value) => String(value).includes("minimax_h3_latent_upscaler_3d_fp16_V2"));
+            const v1 = choices.find((value) => String(value) === "minimax_h3_latent_upscaler_3d_fp16.safetensors");
+            if (v2 && (!upscaler.value || String(upscaler.value) === v1)) upscaler.value = v2;
         }
         return;
     }
@@ -4022,7 +4055,7 @@ function installMediaSourceNode(nodeType, nodeData) {
         watchMediaSourceNode(this);
         return result;
     };
-    const originalConfigure = nodeType.prototype.onConfigure;
+const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3MediaSource(info) {
         const result = originalConfigure?.apply(this, arguments);
         watchMediaSourceNode(this);
@@ -9021,6 +9054,7 @@ const SEQUENCE_GLOBAL_WIDGET_LABELS = {
     vram_tier: TEXT.vramTier,
     exposure_lock: "跨段曝光锁定",
     keep_full: "保完整（工作台）",
+    second_pass: TEXT.sequenceSecondPassLabel,
     // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
     prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
 };
@@ -12478,6 +12512,193 @@ function drawRenderProgress(node, ctx) {
     ctx.restore();
 }
 function installRenderNode(nodeType, nodeData) {
+    const migratePass2PreviewWidgetOrder = (info) => {
+        const values = info?.widgets_values;
+        if (!Array.isArray(values) || values.length < 20) return;
+        const previewChoices = new Set(["\u5173", "\u5f00"]);
+        if (!previewChoices.has(String(values[11] ?? ""))) return;
+        const [preview, interval] = values.splice(11, 2);
+        values.push(preview, interval);
+    };
+
+    const migrateLegacyPass1OutputMetadata = (node, info) => {
+        if (!Array.isArray(info?.outputs) || info.outputs.length < 2) return;
+        const firstName = String(info.outputs[0]?.name || "").toLowerCase();
+        const secondName = String(info.outputs[1]?.name || "").toLowerCase();
+        if (!["first_pass_video", "video"].includes(firstName) || secondName !== "pass1") return;
+        [info.outputs[0], info.outputs[1]] = [info.outputs[1], info.outputs[0]];
+        node.__h3Pass1LinkSlotsNeedMigration = true;
+    };
+    const migrateLegacyPass2OutputMetadata = (node, info) => {
+        if (!Array.isArray(info?.outputs) || info.outputs.length < 3) return;
+        const desiredNames = ["pass_data", "first_pass_video", "video"];
+        const byName = new Map();
+        for (const [index, output] of info.outputs.entries()) {
+            byName.set(String(output?.name || "").toLowerCase(), { index, output });
+        }
+        if (!desiredNames.every((name) => byName.has(name))) return;
+        const currentNames = info.outputs.map((output) => String(output?.name || "").toLowerCase());
+        if (desiredNames.every((name, index) => currentNames[index] === name)) return;
+
+        const slotMap = {};
+        const canonical = desiredNames.map((name, newSlot) => {
+            const entry = byName.get(name);
+            slotMap[entry.index] = newSlot;
+            return entry.output;
+        });
+        const managed = new Set(desiredNames);
+        info.outputs = [
+            ...canonical,
+            ...info.outputs.filter((output) => !managed.has(String(output?.name || "").toLowerCase())),
+        ];
+        node.__h3Pass2OutputSlotMap = slotMap;
+        node.__h3Pass2LinkSlotsNeedMigration = true;
+    };
+    const migrateLegacyOutputLinkSlots = (node, linkMarker, slotMap = null) => {
+        if (!node?.[linkMarker]) return;
+        const graph = node.graph || app.graph;
+        const rawLinks = graph?.links;
+        const linkEntries = Array.isArray(rawLinks)
+            ? rawLinks
+            : rawLinks instanceof Map
+                ? [...rawLinks.values()]
+                : rawLinks && typeof rawLinks === "object" ? Object.values(rawLinks) : [];
+        let changed = false;
+        for (const link of linkEntries) {
+            if (!link) continue;
+            const originId = Number(Array.isArray(link)
+                ? link[1]
+                : link.origin_id ?? link.originId ?? link.from_id ?? link.fromId);
+            if (originId !== Number(node.id)) continue;
+            const originSlot = Number(Array.isArray(link)
+                ? link[2]
+                : link.origin_slot ?? link.originSlot ?? link.from_slot ?? link.fromSlot);
+            let nextSlot;
+            if (slotMap) {
+                if (!Object.prototype.hasOwnProperty.call(slotMap, originSlot)) continue;
+                nextSlot = Number(slotMap[originSlot]);
+            } else {
+                if (originSlot !== 0 && originSlot !== 1) continue;
+                nextSlot = originSlot === 0 ? 1 : 0;
+            }
+            if (!Number.isInteger(nextSlot) || nextSlot === originSlot) continue;
+            if (Array.isArray(link)) {
+                link[2] = nextSlot;
+            } else if (Object.prototype.hasOwnProperty.call(link, "origin_slot")) {
+                link.origin_slot = nextSlot;
+            } else if (Object.prototype.hasOwnProperty.call(link, "originSlot")) {
+                link.originSlot = nextSlot;
+            } else if (Object.prototype.hasOwnProperty.call(link, "from_slot")) {
+                link.from_slot = nextSlot;
+            } else {
+                link.fromSlot = nextSlot;
+            }
+            changed = true;
+        }
+        delete node[linkMarker];
+        if (changed) {
+            node.setDirtyCanvas?.(true, true);
+            graph?.setDirtyCanvas?.(true, true);
+            graph?.change?.();
+        }
+    };
+    nodeType.__h3MigrateLegacyPass1LinkSlots = (node) => migrateLegacyOutputLinkSlots(node, "__h3Pass1LinkSlotsNeedMigration");
+    nodeType.__h3MigrateLegacyPass2LinkSlots = (node) => {
+        const slotMap = node.__h3Pass2OutputSlotMap || null;
+        migrateLegacyOutputLinkSlots(node, "__h3Pass2LinkSlotsNeedMigration", slotMap);
+        delete node.__h3Pass2OutputSlotMap;
+    };
+
+    const installRenderFullRunHook = () => {
+        if (installRenderFullRunHook.installed || typeof app.queuePrompt !== "function") return;
+        installRenderFullRunHook.installed = true;
+        const originalQueuePrompt = app.queuePrompt;
+        app.queuePrompt = async function renderFullRunQueuePrompt(...args) {
+            let options = args[2];
+            if (Array.isArray(options)) options = { queueNodeIds: options };
+            else options = options && typeof options === "object" ? options : {};
+            const targets = options.queueNodeIds || options.partialExecutionTargets;
+            if (!(Array.isArray(targets) && targets.length)) {
+                for (const graphNode of app.graph?._nodes || []) {
+                    if (h3ClassName(graphNode?.type || graphNode?.comfyClass) !== RENDER_PASS1_CLASS) continue;
+                    const nonce = getWidget(graphNode, "run_nonce");
+                    if (!nonce) continue;
+                    setWidgetValue(graphNode, "run_nonce", Number(nonce.value || 0) + 1);
+                    graphNode.graph?.change?.();
+                }
+            }
+            return originalQueuePrompt.apply(this, args);
+        };
+    };
+    const installPass2RerunButton = (node) => {
+        if (!node || node.__h3Pass2RerunWidget) return;
+        const run = async () => {
+            if (typeof app.queuePrompt !== "function") return;
+            if (app.processingQueue) {
+                toast("当前还有任务在运行，等完成后再重跑二采", "warn");
+                return;
+            }
+            const nextSeed = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+            setWidgetValue(node, "second_pass_seed", nextSeed);
+            node.graph?.change?.();
+            node.setDirtyCanvas?.(true, true);
+            try {
+                const accepted = await app.queuePrompt(0, 1, { queueNodeIds: [node.id] });
+                if (accepted === false) toast("二采任务未进入队列", "warn");
+                else toast("仅重跑二采：复用上一次一采缓存", "ok");
+            } catch (error) {
+                console.error("[AICG3D] 仅重跑二采失败", error);
+                toast(String(error?.message || error || "二采提交失败"), "error");
+            }
+        };
+        const widget = node.addWidget?.("button", "仅重跑二采", null, run);
+        if (!widget) return;
+        widget.serialize = false;
+        setWidgetOption(widget, "serialize", false);
+        node.__h3Pass2RerunWidget = widget;
+    };
+    const migrateAdvancedWidgetOrder = (info) => {
+        const values = info?.widgets_values;
+        if (!Array.isArray(values) || values.length < 5) return;
+        const named = info?.widgets_values_named;
+        if (named && Object.prototype.hasOwnProperty.call(named, "digital_human_upscale_scale")) return;
+        let scale;
+        if (values.length <= 6) {
+            scale = 1.5;
+            values.splice(1, 0, scale);
+        } else if (
+            values.length >= 7
+            && typeof values[5] === "boolean"
+            && typeof values[6] === "number"
+        ) {
+            scale = values.splice(6, 1)[0];
+            values.splice(1, 0, scale);
+        }
+        if (named && typeof named === "object" && scale !== undefined) {
+            named.digital_human_upscale_scale = scale;
+        }
+    };
+    const normalizeAdvancedTwoPassValues = (info) => {
+        const named = info?.widgets_values_named;
+        const values = info?.widgets_values;
+        const clamp = (value, minimum, maximum, fallback) => {
+            const parsed = Number(value);
+            const source = Number.isFinite(parsed) ? parsed : fallback;
+            return Math.max(minimum, Math.min(maximum, source));
+        };
+        const steps = clamp(named?.digital_human_transition_step, 1, 6, 4);
+        const denoise = clamp(named?.digital_human_lowres_scale, 0.05, 0.35, 0.35);
+        if (named && typeof named === "object") {
+            named.digital_human_transition_step = steps;
+            named.digital_human_lowres_scale = denoise;
+            named.digital_human_cfg = 1.0;
+        }
+        if (Array.isArray(values) && values.length >= 7) {
+            values[3] = clamp(values[3], 1, 6, steps);
+            values[4] = clamp(values[4], 0.05, 0.35, denoise);
+            values[2] = 1.0;
+        }
+    };
     const className = h3ClassName(nodeData?.name);
     const isPass1 = className === RENDER_PASS1_CLASS;
     const isPass2 = className === RENDER_PASS2_CLASS;
@@ -12490,9 +12711,47 @@ function installRenderNode(nodeType, nodeData) {
             : "__h3RenderNodeInstalled";
     if (nodeType.prototype[installedMarker]) return;
     nodeType.prototype[installedMarker] = true;
+    installRenderFullRunHook();
+    const ensurePass1VideoDecoded = (node) => {
+        if (!node) return false;
+        const videoOutput = (node.outputs || []).find((output) => {
+            const name = String(output?.name || "").toLowerCase();
+            return name === "video" || name === "first_pass_video";
+        });
+        const rawLinks = Array.isArray(videoOutput?.links)
+            ? videoOutput.links
+            : videoOutput?.link == null ? [] : [videoOutput.link];
+        if (!rawLinks.length) return false;
+        const decodeWidget = getWidget(node, "decode_first_pass");
+        if (!decodeWidget || decodeWidget.value === true) return false;
+        setWidgetValue(node, "decode_first_pass", true);
+        node.graph?.change?.();
+        node.setDirtyCanvas?.(true, true);
+        return true;
+    };
+    const ensurePass2FirstPassDecoded = (node) => {
+        if (!node) return false;
+        const firstPassOutput = (node.outputs || []).find(
+            (output) => String(output?.name || "").toLowerCase() === "first_pass_video",
+        );
+        const rawLinks = Array.isArray(firstPassOutput?.links)
+            ? firstPassOutput.links
+            : firstPassOutput?.link == null ? [] : [firstPassOutput.link];
+        if (!rawLinks.length) return false;
+        const outputWidget = getWidget(node, "output_first_pass");
+        if (!outputWidget || String(outputWidget.value || "").trim() === "开") return false;
+        setWidgetValue(node, "output_first_pass", "开");
+        node.graph?.change?.();
+        node.setDirtyCanvas?.(true, true);
+        return true;
+    };
     const setup = (node, adjustHeight = true) => {
         if (!node) return;
         localizeNodeInstance(node);
+        if (isPass1) ensurePass1VideoDecoded(node);
+        if (isPass2) ensurePass2FirstPassDecoded(node);
+        if (isPass1) mediaLoaderHideStateWidget(getWidget(node, "run_nonce"));
+        if (isPass2) installPass2RerunButton(node);
         if (!isPass1 && !isPass2) return;
         const syncedWidgets = isPass1 ? ["sample_preview"] : ["tiled_sampling", "sample_preview"];
         for (const name of syncedWidgets) {
@@ -12514,8 +12773,20 @@ function installRenderNode(nodeType, nodeData) {
         setup(this);
         return result;
     };
+    const originalConnectionsChange = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function onConnectionsChangeH3Render(...args) {
+        const result = originalConnectionsChange?.apply(this, args);
+        if (isPass1) ensurePass1VideoDecoded(this);
+        else if (isPass2) ensurePass2FirstPassDecoded(this);
+        return result;
+    };
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3Render(info) {
+        if (isPass1) migrateLegacyPass1OutputMetadata(this, info);
+        if (isPass2) migratePass2PreviewWidgetOrder(info);
+        if (isPass2) migrateLegacyPass2OutputMetadata(this, info);
+        if (!isPass1 && !isPass2) migrateAdvancedWidgetOrder(info);
+        if (!isPass1 && !isPass2) normalizeAdvancedTwoPassValues(info);
         const result = originalConfigure?.apply(this, arguments);
         setup(this, false);
         return result;
@@ -12577,6 +12848,12 @@ app.registerExtension({
     loadedGraphNode(node) {
         if (isMediaLoader(node) || isSequenceSegmentNode(node)) {
             scheduleMissingMediaValidation({ prompt: true, delay: 1400 });
+        }
+        const className = h3ClassName(node?.type || node?.comfyClass);
+        if (className === RENDER_PASS1_CLASS) {
+            node.__h3MigrateLegacyPass1LinkSlots?.();
+        } else if (className === RENDER_PASS2_CLASS) {
+            node.__h3MigrateLegacyPass2LinkSlots?.();
         }
     },
 });

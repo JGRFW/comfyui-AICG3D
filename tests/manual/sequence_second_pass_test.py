@@ -1,0 +1,104 @@
+# Copyright (C) 2026 AICG3D
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""Regression checks for the Smart Drama global second-pass switch."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import torch
+
+
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+COMFY_ROOT = PLUGIN_ROOT.parents[1]
+for path in (str(COMFY_ROOT), str(PLUGIN_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from aicg3d_h3easy.nodes import (  # noqa: E402
+    MiniMaxH3EasySequenceGlobal,
+    MiniMaxH3EasySequenceSegment,
+    _segment_latent_streams,
+    _segment_pack_latent,
+)
+
+
+def main() -> None:
+    required = MiniMaxH3EasySequenceGlobal.INPUT_TYPES()["required"]
+    assert "second_pass" in required
+    assert required["second_pass"][0] == "BOOLEAN"
+    assert required["second_pass"][1]["default"] is False
+
+    first_video = torch.zeros((1, 24, 2, 4, 8), dtype=torch.float32)
+    first_audio = torch.zeros((1, 32, 2, 1), dtype=torch.float32)
+    upscaled_video = torch.zeros((1, 24, 2, 6, 12), dtype=torch.float32)
+    first_latent = _segment_pack_latent(first_video, first_audio)
+    conditioning = [[torch.zeros((1, 8), dtype=torch.float32), {}]]
+    config = SimpleNamespace(
+        second_pass=True,
+        second_pass_model="V2.safetensors",
+        second_pass_scale=1.5,
+        second_pass_steps=4,
+        second_pass_denoise=0.35,
+        sampler_name="euler",
+        scheduler="beta",
+        sampler=None,
+    )
+    second_pass = {}
+
+    def fake_sample(
+        model,
+        second_conditioning,
+        second_latent,
+        seed,
+        sampler_name,
+        scheduler,
+        steps,
+        denoise,
+        **kwargs,
+    ):
+        second_pass.update({
+            "conditioning": second_conditioning,
+            "latent": second_latent,
+            "steps": steps,
+            "denoise": denoise,
+        })
+        return (second_latent,)
+
+    with (
+        patch(
+            "aicg3d_h3easy.nodes.MiniMaxH3EasyRenderPass2._upscale_video_latent",
+            return_value=(upscaled_video, first_audio),
+        ),
+        patch(
+            "aicg3d_h3easy.nodes._resize_keyframe_conditioning",
+            return_value=conditioning,
+        ),
+        patch(
+            "aicg3d_h3easy.aicg3d_sampler.AICG3DSamplerAdvanced.sample",
+            side_effect=fake_sample,
+        ),
+    ):
+        refined, continuity_video = MiniMaxH3EasySequenceSegment._apply_sequence_second_pass(
+            first_latent,
+            conditioning,
+            config,
+            SimpleNamespace(load_device=torch.device("cpu")),
+            123,
+        )
+
+    refined_video, refined_audio = _segment_latent_streams(refined)
+    assert tuple(refined_video.shape) == tuple(upscaled_video.shape)
+    assert tuple(continuity_video.shape) == tuple(first_video.shape)
+    assert torch.equal(refined_audio, first_audio)
+    assert second_pass["steps"] == 4
+    assert abs(second_pass["denoise"] - 0.35) < 1e-6
+    print("Smart Drama second pass: ok")
+
+
+if __name__ == "__main__":
+    main()

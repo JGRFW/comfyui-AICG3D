@@ -464,7 +464,7 @@
           "name": "sampler",
           "shape": 7,
           "type": "SAMPLER",
-          "link": 134
+          "link": null
         },
         {
           "label": "外部调度器（Sigmas）",
@@ -472,7 +472,7 @@
           "name": "sigmas",
           "shape": 7,
           "type": "SIGMAS",
-          "link": 135
+          "link": null
         },
         {
           "label": "引导图片",
@@ -1228,91 +1228,6 @@
       }
     },
     {
-      "id": 1024,
-      "type": "MiniMaxH3DMADSampler",
-      "pos": [
-        -170,
-        280
-      ],
-      "size": [
-        290,
-        30
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "采样器",
-          "name": "SAMPLER",
-          "type": "SAMPLER",
-          "links": [
-            134
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "MiniMaxH3DMADSampler"
-      }
-    },
-    {
-      "id": 1025,
-      "type": "DMADSigmas",
-      "pos": [
-        -170,
-        390
-      ],
-      "size": [
-        300,
-        120
-      ],
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "steps",
-          "name": "steps",
-          "type": "INT",
-          "widget": {
-            "name": "steps"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "shift",
-          "name": "shift",
-          "type": "FLOAT",
-          "widget": {
-            "name": "shift"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "Sigmas",
-          "name": "SIGMAS",
-          "type": "SIGMAS",
-          "links": [
-            135
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "DMADSigmas"
-      },
-      "widgets_values": [
-        8,
-        12
-      ],
-      "widgets_values_named": {
-        "steps": 8,
-        "shift": 12
-      }
-    },
-    {
       "id": 1026,
       "type": "AICG3D_H3CharacterVoiceLibrary",
       "pos": [
@@ -1363,22 +1278,6 @@
       945,
       1,
       "MINIMAX_H3_CONTEXT"
-    ],
-    [
-      134,
-      1024,
-      0,
-      945,
-      2,
-      "SAMPLER"
-    ],
-    [
-      135,
-      1025,
-      0,
-      945,
-      3,
-      "SIGMAS"
     ],
     [
       141,

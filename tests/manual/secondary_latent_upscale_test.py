@@ -26,6 +26,7 @@ from aicg3d_h3easy.nodes import (  # noqa: E402
     MiniMaxH3EasyRenderPass1,
     MiniMaxH3EasyRenderAdvancedWithModel,
     _resolve_h3_secondary_upscaler,
+    _segment_av_streams,
     _segment_latent_streams,
     _segment_pack_latent,
 )
@@ -86,7 +87,9 @@ def main() -> None:
             "conditioning": second_conditioning,
             "latent": second_latent,
         })
-        return (second_latent,)
+        video, audio = _segment_latent_streams(second_latent)
+        corrupted_audio = torch.ones_like(audio)
+        return (_segment_pack_latent(video, corrupted_audio),)
 
     with (
         patch(
@@ -119,6 +122,12 @@ def main() -> None:
     refined_video, refined_audio = _segment_latent_streams(refined)
     assert tuple(refined_video.shape) == tuple(upscaled_video.shape)
     assert torch.equal(refined_audio, first_audio)
+    mask_video, mask_audio = _segment_av_streams(
+        second_pass["latent"].get("noise_mask"),
+        "Second-pass AV mask is missing",
+    )
+    assert torch.all(mask_video > 0)
+    assert torch.count_nonzero(mask_audio) == 0
     assert second_pass["steps"] == 6
     assert abs(second_pass["denoise"] - 0.35) < 1e-6
     assert second_pass["seed"] == 456

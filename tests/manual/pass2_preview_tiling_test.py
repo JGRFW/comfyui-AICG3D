@@ -27,7 +27,13 @@ from aicg3d_h3easy.nodes import (  # noqa: E402
 def main() -> None:
     required = MiniMaxH3EasyRenderPass2.INPUT_TYPES()["required"]
     order = list(required)
-    assert order[-2:] == ["sample_preview", "preview_interval"]
+    assert order[-5:] == [
+        "sample_preview",
+        "preview_interval",
+        "upscale_mode",
+        "target_width",
+        "target_height",
+    ]
     assert order.index("tiled_sampling") < order.index("latent_upscale_model")
 
     sentinel = object()

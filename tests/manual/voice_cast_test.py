@@ -5,13 +5,15 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+COMFY_ROOT = PLUGIN_ROOT.parents[1]
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+if str(COMFY_ROOT) not in sys.path:
+    sys.path.insert(0, str(COMFY_ROOT))
 
 from aicg3d_h3easy.nodes import (  # noqa: E402
     MiniMaxH3CharacterVoiceCast,

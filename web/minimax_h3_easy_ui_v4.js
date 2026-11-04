@@ -64,6 +64,7 @@ const PROMPT_VIEW_PROP = "minimax_h3_prompt_view_mode";
 const PROMPT_AUTO_MARKER_PROP = "minimax_h3_auto_prompt_marker";
 const SEQUENCE_GRAPH_SCOPE_PROP = "aicg3d_h3_sequence_cache_scope";
 let sequenceDrawEventsInstalled = false;
+let renderFullRunQueueHookInstalled = false;
 let sequenceQueueHookInstalled = false;
 let sequenceStitchPending = false;
 let sequenceStitchGraph = null;
@@ -424,7 +425,21 @@ const TEXT = {
     samplePreviewLabel: ZH_BROWSER ? "\u91c7\u6837\u9884\u89c8" : "Sampling preview",
     previewIntervalLabel: ZH_BROWSER ? "\u9884\u89c8\u95f4\u9694" : "Preview interval",
     upscalerScale: ZH_BROWSER ? "\u653e\u5927\u500d\u6570" : "Upscale scale",
+    upscaleMode: ZH_BROWSER ? "\u8f93\u51fa\u5c3a\u5bf8\u6a21\u5f0f" : "Output size mode",
+    targetWidth: ZH_BROWSER ? "\u76ee\u6807\u5bbd\u5ea6" : "Target width",
+    targetHeight: ZH_BROWSER ? "\u76ee\u6807\u9ad8\u5ea6" : "Target height",
     outputFirstPassLabel: ZH_BROWSER ? "\u9644\u5e26\u4e00\u91c7\u6210\u7247" : "Also output first pass",
+    pass2RepairEngine: ZH_BROWSER ? "\u4e8c\u91c7\u4fee\u590d\u5f15\u64ce" : "Pass-2 restoration engine",
+    pass2RepairModel: ZH_BROWSER ? "\u4fee\u590d\u6a21\u578b" : "Restoration model",
+    pass2RepairScale: ZH_BROWSER ? "\u4fee\u590d\u500d\u6570" : "Restoration scale",
+    pass2RepairBatch: ZH_BROWSER ? "\u4fee\u590d\u6279\u6b21\u5e27\u6570" : "Restoration batch frames",
+    pass2RepairOverlap: ZH_BROWSER ? "\u4fee\u590d\u65f6\u95f4\u91cd\u53e0" : "Restoration temporal overlap",
+    pass2RepairColor: ZH_BROWSER ? "\u4fee\u590d\u989c\u8272\u6821\u51c6" : "Restoration color correction",
+    pass2RepairQuality: ZH_BROWSER ? "RTX VSR \u8d28\u91cf" : "RTX VSR quality",
+    pass2RepairDevice: ZH_BROWSER ? "\u4fee\u590d\u8bbe\u5907" : "Restoration device",
+    pass2RepairBlocks: ZH_BROWSER ? "SeedVR2 BlockSwap \u6570" : "SeedVR2 blocks to swap",
+    pass2RepairOffload: ZH_BROWSER ? "\u4fee\u590d\u7a7a\u95f2\u8bbe\u5907" : "Restoration offload device",
+    pass2RepairVaeTiling: ZH_BROWSER ? "SeedVR2 VAE \u5206\u5757" : "SeedVR2 VAE tiling",
     renderPreviewIdle: ZH_BROWSER ? "\u8fd0\u884c\u4e2d\u8fd9\u91cc\u663e\u793a\u5b9e\u65f6\u9884\u89c8" : "Live preview appears here while running",
     renderProgressSample: ZH_BROWSER ? "\u91c7\u6837\u4e2d" : "Sampling",
     renderProgressDecode: ZH_BROWSER ? "\u89e3\u7801\u4e0e\u5408\u6210\u4e2d" : "Decoding",
@@ -1385,10 +1400,24 @@ function localizeNodeInstance(node) {
             preview_interval: TEXT.previewIntervalLabel,
             latent_upscale_model: TEXT.upscalerModel,
             upscale_scale: TEXT.upscalerScale,
+            upscale_mode: TEXT.upscaleMode,
+            target_width: TEXT.targetWidth,
+            target_height: TEXT.targetHeight,
             upscale_device: TEXT.upscalerDevice,
             upscale_precision: TEXT.upscalerPrecision,
             upscale_chunking: TEXT.upscalerChunking,
             output_first_pass: TEXT.outputFirstPassLabel,
+            repair_engine: TEXT.pass2RepairEngine,
+            repair_model: TEXT.pass2RepairModel,
+            repair_scale: TEXT.pass2RepairScale,
+            repair_batch_size: TEXT.pass2RepairBatch,
+            repair_temporal_overlap: TEXT.pass2RepairOverlap,
+            repair_color_correction: TEXT.pass2RepairColor,
+            repair_quality: TEXT.pass2RepairQuality,
+            repair_device: TEXT.pass2RepairDevice,
+            repair_blocks_to_swap: TEXT.pass2RepairBlocks,
+            repair_offload_device: TEXT.pass2RepairOffload,
+            repair_vae_tiling: TEXT.pass2RepairVaeTiling,
         };
         for (const widget of node.widgets || []) {
             if (widgetLabels[widget.name]) widget.label = widgetLabels[widget.name];
@@ -5967,13 +5996,83 @@ function syncRenderPassWidgets(node, { adjustHeight = true } = {}) {
     const tiled = String(getWidgetValue(node, "tiled_sampling", "") || "").trim() === "\u5f00";
     // 预览间隔同理：只有开了采样预览才有意义。
     const previewOn = String(getWidgetValue(node, "sample_preview", "") || "").trim() === "\u5f00";
+    const pass2 = isRenderPass2Node(node);
+    const upscaleMode = String(getWidgetValue(node, "upscale_mode", "") || "");
+    const targetSize = pass2 && upscaleMode.includes("\u76ee\u6807\u5206\u8fa8\u7387");
+    const repairOnly = pass2 && upscaleMode.includes("\u4ec5\u91c7\u6837\u4fee\u590d");
+    const scaleByFactor = pass2 && !targetSize && !repairOnly;
+    const repairEngine = String(getWidgetValue(node, "repair_engine", "") || "");
+    const repairSeedVR2 = pass2 && repairEngine.includes("SeedVR2");
+    const repairRtx = pass2 && repairEngine.includes("RTX VSR");
+    const repairVosr2 = pass2 && repairEngine.includes("VOSR2");
+    const repairActive = repairSeedVR2 || repairRtx || repairVosr2;
     const changed = [
         setConditionalWidgetVisible(node, getWidget(node, "tile_width"), tiled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "tile_height"), tiled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "tile_overlap"), tiled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "tile_fade"), tiled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "preview_interval"), previewOn, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_scale"), scaleByFactor, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "target_width"), targetSize, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "target_height"), targetSize, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "latent_upscale_model"), !repairOnly, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_device"), !repairOnly, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_precision"), !repairOnly, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_chunking"), !repairOnly, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_model"), repairSeedVR2 || repairVosr2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_scale"), repairActive, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_batch_size"), repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_temporal_overlap"), repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_color_correction"), repairSeedVR2 || repairVosr2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_quality"), repairRtx, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_device"), repairSeedVR2 || repairVosr2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_blocks_to_swap"), repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_offload_device"), repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_vae_tiling"), repairSeedVR2, { adjustHeight }),
     ].some(Boolean);
+    if (changed) {
+        refreshVueNodeWidgets(node);
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
+function syncAdvancedRenderSecondPassWidgets(node, { adjustHeight = true } = {}) {
+    const enabled = asBoolean(getWidgetValue(node, "digital_human_selflift", false));
+    const names = [
+        "digital_human_upscale_scale",
+        "digital_human_cfg",
+        "digital_human_transition_step",
+        "digital_human_lowres_scale",
+        "digital_human_upscaler_model",
+    ];
+    const changed = names
+        .map((name) => setConditionalWidgetVisible(node, getWidget(node, name), enabled, { adjustHeight }))
+        .some(Boolean);
+    if (changed) {
+        refreshVueNodeWidgets(node);
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
+function syncSequenceSecondPassWidgets(node, { adjustHeight = true } = {}) {
+    const enabled = asBoolean(getWidgetValue(node, "second_pass", false));
+    const names = [
+        "second_pass_model",
+        "second_pass_scale",
+        "second_pass_sampler_name",
+        "second_pass_scheduler",
+        "second_pass_steps",
+        "second_pass_denoise",
+    ];
+    const changed = names
+        .map((name) => setConditionalWidgetVisible(node, getWidget(node, name), enabled, { adjustHeight }))
+        .some(Boolean);
     if (changed) {
         refreshVueNodeWidgets(node);
         node._widgetSlotsDirty = true;
@@ -9055,6 +9154,12 @@ const SEQUENCE_GLOBAL_WIDGET_LABELS = {
     exposure_lock: "跨段曝光锁定",
     keep_full: "保完整（工作台）",
     second_pass: TEXT.sequenceSecondPassLabel,
+    second_pass_model: "二采 Latent 放大器",
+    second_pass_scale: "二采放大倍数",
+    second_pass_sampler_name: "二采采样器",
+    second_pass_scheduler: "二采调度器",
+    second_pass_steps: "二采步数",
+    second_pass_denoise: "二采降噪",
     // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
     prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
 };
@@ -9816,6 +9921,17 @@ function installSequenceGlobalNode(nodeType, nodeData) {
         localizeNodeInstance(node);
         localizeSequenceWidgets(node, SEQUENCE_GLOBAL_WIDGET_LABELS);
         configurePromptOptimizerEntryWidget(node);
+        const secondPassWidget = getWidget(node, "second_pass");
+        if (secondPassWidget && !secondPassWidget.__h3SequenceSecondPassBound) {
+            secondPassWidget.__h3SequenceSecondPassBound = true;
+            const originalCallback = secondPassWidget.callback;
+            secondPassWidget.callback = (value) => {
+                originalCallback?.call(secondPassWidget, value);
+                syncSequenceSecondPassWidgets(node);
+                node.setDirtyCanvas?.(true, true);
+            };
+        }
+        syncSequenceSecondPassWidgets(node);
         for (const input of node.inputs || []) {
             if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
             if (input.name === "sampler") setLocalizedSlotLabel(input, TEXT.externalSampler);
@@ -12610,8 +12726,8 @@ function installRenderNode(nodeType, nodeData) {
     };
 
     const installRenderFullRunHook = () => {
-        if (installRenderFullRunHook.installed || typeof app.queuePrompt !== "function") return;
-        installRenderFullRunHook.installed = true;
+        if (renderFullRunQueueHookInstalled || typeof app.queuePrompt !== "function") return;
+        renderFullRunQueueHookInstalled = true;
         const originalQueuePrompt = app.queuePrompt;
         app.queuePrompt = async function renderFullRunQueuePrompt(...args) {
             let options = args[2];
@@ -12752,8 +12868,23 @@ function installRenderNode(nodeType, nodeData) {
         if (isPass2) ensurePass2FirstPassDecoded(node);
         if (isPass1) mediaLoaderHideStateWidget(getWidget(node, "run_nonce"));
         if (isPass2) installPass2RerunButton(node);
-        if (!isPass1 && !isPass2) return;
-        const syncedWidgets = isPass1 ? ["sample_preview"] : ["tiled_sampling", "sample_preview"];
+        if (!isPass1 && !isPass2) {
+            const secondPassWidget = getWidget(node, "digital_human_selflift");
+            if (secondPassWidget && !secondPassWidget.__h3AdvancedSecondPassBound) {
+                secondPassWidget.__h3AdvancedSecondPassBound = true;
+                const originalCallback = secondPassWidget.callback;
+                secondPassWidget.callback = (value) => {
+                    originalCallback?.call(secondPassWidget, value);
+                    syncAdvancedRenderSecondPassWidgets(node);
+                    node.setDirtyCanvas?.(true, true);
+                };
+            }
+            syncAdvancedRenderSecondPassWidgets(node, { adjustHeight });
+            return;
+        }
+        const syncedWidgets = isPass1
+            ? ["sample_preview"]
+            : ["repair_engine", "tiled_sampling", "sample_preview", "upscale_mode"];
         for (const name of syncedWidgets) {
             const widget = getWidget(node, name);
             if (!widget || widget.__h3PassSyncBound) continue;

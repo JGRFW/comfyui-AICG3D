@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import random
+import time
 
 import torch
 
@@ -144,13 +145,19 @@ class AICG3DSamplerAdvanced:
         guider = nodes_custom_sampler.Guider_Basic(model)
         guider.set_conds(conditioning)
         latent = latent.copy()
-        latent["noise_mask"] = None
+        # Preserve packed AV masks. A zero audio mask means second-pass video
+        # refinement must keep the source audio rows unchanged.
 
         # 进度条按「实际采样步数」算：父节点（渲染器）会把每步回调转成前端进度条，
         # 这里的 pbar 继续走 ComfyUI 原生进度，两边互不影响。
         total_steps = max(1, len(sigmas) - 1)
         pbar = comfy.utils.ProgressBar(total_steps)
         completed_steps = 0
+        sampling_started_at = time.perf_counter()
+        print(
+            f"[MiniMax H3 Aicg] 采样开始：{sampler_name} / {scheduler}，"
+            f"共 {total_steps} 步，denoise={float(denoise):.2f}"
+        )
 
         def _progress_callback(*args):
             nonlocal completed_steps
@@ -160,6 +167,11 @@ class AICG3DSamplerAdvanced:
                     on_step(completed_steps, total_steps)
                 except Exception:
                     pass
+            elapsed = time.perf_counter() - sampling_started_at
+            print(
+                f"[MiniMax H3 Aicg] 采样进度 {completed_steps}/{total_steps}，"
+                f"已用 {elapsed:.1f}s"
+            )
             preview = None
             if on_preview is not None:
                 # 采样器回调签名是 (step, x0, x, total_steps)，这里只取第 2 个参数，
@@ -180,7 +192,7 @@ class AICG3DSamplerAdvanced:
             latent["samples"],
             sampler,
             sigmas,
-            denoise_mask=None,
+            denoise_mask=latent.get("noise_mask"),
             callback=_progress_callback,
             disable_pbar=False,
             seed=noise_seed,

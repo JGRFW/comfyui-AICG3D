@@ -22,6 +22,7 @@ for path in (str(COMFY_ROOT), str(PLUGIN_ROOT)):
 from aicg3d_h3easy.nodes import (  # noqa: E402
     MiniMaxH3EasySequenceGlobal,
     MiniMaxH3EasySequenceSegment,
+    _segment_av_streams,
     _segment_latent_streams,
     _segment_pack_latent,
 )
@@ -32,6 +33,15 @@ def main() -> None:
     assert "second_pass" in required
     assert required["second_pass"][0] == "BOOLEAN"
     assert required["second_pass"][1]["default"] is False
+    for name in (
+        "second_pass_model",
+        "second_pass_scale",
+        "second_pass_sampler_name",
+        "second_pass_scheduler",
+        "second_pass_steps",
+        "second_pass_denoise",
+    ):
+        assert name in required
 
     first_video = torch.zeros((1, 24, 2, 4, 8), dtype=torch.float32)
     first_audio = torch.zeros((1, 32, 2, 1), dtype=torch.float32)
@@ -42,6 +52,8 @@ def main() -> None:
         second_pass=True,
         second_pass_model="V2.safetensors",
         second_pass_scale=1.5,
+        second_pass_sampler_name="er_sde",
+        second_pass_scheduler="beta",
         second_pass_steps=4,
         second_pass_denoise=0.35,
         sampler_name="euler",
@@ -64,10 +76,13 @@ def main() -> None:
         second_pass.update({
             "conditioning": second_conditioning,
             "latent": second_latent,
+            "sampler_name": sampler_name,
+            "scheduler": scheduler,
             "steps": steps,
             "denoise": denoise,
         })
-        return (second_latent,)
+        video, audio = _segment_latent_streams(second_latent)
+        return (_segment_pack_latent(video, torch.ones_like(audio)),)
 
     with (
         patch(
@@ -95,6 +110,14 @@ def main() -> None:
     assert tuple(refined_video.shape) == tuple(upscaled_video.shape)
     assert tuple(continuity_video.shape) == tuple(first_video.shape)
     assert torch.equal(refined_audio, first_audio)
+    mask_video, mask_audio = _segment_av_streams(
+        second_pass["latent"].get("noise_mask"),
+        "Smart Drama second-pass AV mask is missing",
+    )
+    assert torch.all(mask_video > 0)
+    assert torch.count_nonzero(mask_audio) == 0
+    assert second_pass["sampler_name"] == "er_sde"
+    assert second_pass["scheduler"] == "beta"
     assert second_pass["steps"] == 4
     assert abs(second_pass["denoise"] - 0.35) < 1e-6
     print("Smart Drama second pass: ok")

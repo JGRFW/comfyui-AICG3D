@@ -7,7 +7,9 @@ import { api } from "../../scripts/api.js";
 
 const VOICE_LIBRARY_CLASS = "MiniMaxH3EasyCharacterVoiceLibrary";
 const SEQUENCE_SEGMENT_CLASS = "MiniMaxH3EasySequenceSegment";
-const PANEL_HEIGHT = 560;
+const MIN_NODE_WIDTH = 640;
+const MIN_NODE_HEIGHT = 740;
+const PANEL_HEIGHT = 620;
 
 const DEFAULTS = [
     { id: "girl", name: "女孩", description: "稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。", language: "Chinese", age: "child", gender: "female", pitch: "high", pace: "natural" },
@@ -518,12 +520,12 @@ function installStyles() {
         document.head.append(style);
     }
     style.textContent = `
-      .h3-voice-panel { display:flex; flex-direction:column; gap:7px; width:100%; height:100%; min-height:0; box-sizing:border-box; padding:9px; border:1px solid #303840; border-radius:6px; background:#20262c; color:#dce5eb; overflow:hidden; }
+      .h3-voice-panel { container-type:inline-size; display:flex; flex-direction:column; gap:7px; width:100%; height:100%; min-width:0; min-height:0; box-sizing:border-box; padding:9px; border:1px solid #303840; border-radius:6px; background:#20262c; color:#dce5eb; overflow:auto; overscroll-behavior:contain; }
       .h3-voice-header { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
       .h3-voice-title { font-size:14px; font-weight:700; color:#f2f6f8; }
       .h3-voice-summary,.h3-voice-hint,.h3-voice-target { color:#8ea0ad; font-size:10px; line-height:1.35; }
       .h3-voice-rows { display:flex; flex-direction:column; gap:4px; flex:0 0 auto; }
-      .h3-voice-row { display:grid; grid-template-columns:24px minmax(90px,.8fr) minmax(90px,1fr) 44px 76px; align-items:center; gap:6px; min-height:28px; padding:3px 5px; border:1px solid #34414b; border-radius:4px; background:#171d22; }
+      .h3-voice-row { display:grid; grid-template-columns:24px minmax(0,.8fr) minmax(0,1fr) 44px 76px; align-items:center; gap:6px; min-width:0; min-height:28px; padding:3px 5px; border:1px solid #34414b; border-radius:4px; background:#171d22; }
       .h3-voice-row.is-selected { border-color:#4c9eff; box-shadow:inset 0 0 0 1px rgba(76,158,255,.18); background:#1b2632; }
       .h3-voice-seat { display:grid; place-items:center; width:22px; height:22px; border-radius:50%; background:#2d4f77; color:#cfe8ff; font-weight:700; font-size:10px; }
       .h3-voice-name,.h3-voice-insert,.h3-voice-upload { min-width:0; border:1px solid #40515e; border-radius:4px; background:#26323b; color:#e5edf2; padding:4px 6px; font-size:11px; cursor:pointer; }
@@ -541,6 +543,7 @@ function installStyles() {
       .h3-voice-field textarea { resize:vertical; min-height:54px; }
       .h3-voice-description-box { display:flex; flex-direction:column; gap:5px; min-width:0; color:#9fb0bb; font-size:10px; }
       .h3-voice-description-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      .h3-voice-editor-title,.h3-voice-title { overflow-wrap:anywhere; }
       .h3-voice-description-box textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:54px; border:1px solid #3b4b57; border-radius:4px; background:#11171b; color:#e4edf2; padding:4px 6px; font-size:11px; }
       .h3-voice-template-select { max-width:260px; border:1px solid #4d6580; border-radius:4px; background:#172231; color:#cfe2f7; padding:3px 6px; font-size:10px; }
       .h3-voice-keyword-tags { display:flex; flex-wrap:wrap; gap:4px; max-height:52px; overflow:auto; padding:2px 0; }
@@ -550,19 +553,91 @@ function installStyles() {
       .h3-voice-audio-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; }
       .h3-voice-rights { display:flex; align-items:center; gap:6px; color:#a8bbb2; font-size:10px; }
       .h3-voice-hint { border-left:2px solid #496271; padding-left:7px; }
+      @container (max-width: 560px) {
+        .h3-voice-row { grid-template-columns:24px minmax(0,1fr) auto; grid-template-rows:auto auto; align-items:start; }
+        .h3-voice-seat { grid-row:1 / span 2; align-self:center; }
+        .h3-voice-name { grid-column:2; grid-row:1; }
+        .h3-voice-token { grid-column:2; grid-row:2; }
+        .h3-voice-mode { grid-column:3; grid-row:1; }
+        .h3-voice-insert { grid-column:3; grid-row:2; }
+        .h3-voice-grid.is-three,.h3-voice-grid.is-five { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .h3-voice-description-header { align-items:stretch; flex-direction:column; }
+        .h3-voice-template-select { width:100%; max-width:none; }
+        .h3-voice-audio-row { grid-template-columns:minmax(0,1fr); }
+      }
+      @container (max-width: 380px) {
+        .h3-voice-grid,.h3-voice-grid.is-three,.h3-voice-grid.is-five { grid-template-columns:minmax(0,1fr); }
+        .h3-voice-row { grid-template-columns:22px minmax(0,1fr); }
+        .h3-voice-seat { grid-row:1 / span 4; }
+        .h3-voice-mode,.h3-voice-insert { grid-column:2; }
+        .h3-voice-mode { grid-row:3; justify-self:start; }
+        .h3-voice-insert { grid-row:4; width:100%; }
+      }
     `;
+}
+
+function resizeVoiceNode(node) {
+    if (!node?.size || Number(node.size.length) < 2) return false;
+    const width = Math.max(MIN_NODE_WIDTH, Number(node.size[0]) || 0);
+    const height = Math.max(MIN_NODE_HEIGHT, Number(node.size[1]) || 0);
+    if (Number(node.size[0]) === width && Number(node.size[1]) === height) return false;
+    node.setSize?.([width, height]);
+    return true;
+}
+
+function syncVoiceDomLayout(node) {
+    if (!node) return;
+    resizeVoiceNode(node);
+    const widget = node.__h3VoiceWidget;
+    const element = widget?.element;
+    if (element) {
+        element.style.minWidth = "0";
+        element.style.width = "100%";
+        const host = element.parentElement;
+        if (host) {
+            host.style.minWidth = "0";
+            // Classic Nodes can restore an old saved size after the DOM
+            // widget was attached, while Vue Nodes can keep the first measured
+            // width after a later resize. Keep the host tied to node width.
+            host.style.width = `${Math.max(320, Number(node.size?.[0] || 0) - 20)}px`;
+            const vueHost = host.classList.contains("col-span-2");
+            if (vueHost) {
+                host.style.height = "";
+                element.style.height = "100%";
+            } else if (parseFloat(host.style.height || "0") <= 0) {
+                host.style.height = `${PANEL_HEIGHT}px`;
+            }
+        }
+    }
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function queueVoiceLayout(node) {
+    if (!node) return;
+    const run = () => syncVoiceDomLayout(node);
+    const raf = globalThis.requestAnimationFrame || ((callback) => setTimeout(callback, 0));
+    raf(() => {
+        run();
+        raf(run);
+    });
+    clearTimeout(node.__h3VoiceLayoutTimer);
+    node.__h3VoiceLayoutTimer = setTimeout(run, 100);
 }
 
 function setup(node) {
     if (!node || node.__h3VoiceSetup || typeof node.addDOMWidget !== "function") return;
     node.__h3VoiceSetup = true;
     installStyles();
+    resizeVoiceNode(node);
     setHiddenWidget(getWidget(node, "voice_state"));
     const panel = document.createElement("div");
     panel.className = "h3-voice-panel";
     panel.addEventListener("pointerdown", (event) => event.stopPropagation());
     const widget = node.addDOMWidget("h3_character_voice_library", "h3_character_voice_library", panel, {
         serialize: false,
+        hideOnZoom: false,
+        minNodeSize: [MIN_NODE_WIDTH, 0],
         getMinHeight: () => PANEL_HEIGHT,
     });
     if (!widget) return;
@@ -570,18 +645,29 @@ function setup(node) {
     widget.computedHeight = PANEL_HEIGHT;
     widget.options ||= {};
     widget.options.serialize = false;
+    widget.options.hideOnZoom = false;
+    widget.options.minNodeSize = [MIN_NODE_WIDTH, 0];
     widget.options.getMinHeight = () => PANEL_HEIGHT;
     widget.computeLayoutSize = () => ({ minHeight: PANEL_HEIGHT, minWidth: 0 });
+    node.__h3VoiceWidget = widget;
     node.__h3VoicePanel = panel;
     if (!String(getWidget(node, "voice_state")?.value || "").trim()) writeState(node, defaultState(), false);
     render(node);
     loadAudioFiles().then(() => render(node)).catch((error) => console.warn("Voice library audio list failed", error));
-    if (!node.__h3VoiceInitialSized) {
-        node.__h3VoiceInitialSized = true;
-        const width = Math.max(620, Number(node.size?.[0]) || 0);
-        const height = Math.max(700, Number(node.size?.[1]) || 0);
-        if (node.size?.[0] !== width || node.size?.[1] !== height) node.setSize?.([width, height]);
-    }
+    const originalOnResize = node.onResize;
+    node.onResize = function onVoiceLibraryResize(...args) {
+        const result = originalOnResize?.apply(this, args);
+        resizeVoiceNode(this);
+        queueVoiceLayout(this);
+        return result;
+    };
+    const originalOnConfigure = node.onConfigure;
+    node.onConfigure = function onVoiceLibraryConfigure(...args) {
+        const result = originalOnConfigure?.apply(this, args);
+        queueVoiceLayout(this);
+        return result;
+    };
+    queueVoiceLayout(node);
 }
 
 app.registerExtension({
@@ -597,9 +683,11 @@ app.registerExtension({
     },
     nodeCreated(node) {
         if (isVoiceLibraryNode(node)) setup(node);
+        if (isVoiceLibraryNode(node)) queueVoiceLayout(node);
     },
     loadedGraphNode(node) {
         if (isVoiceLibraryNode(node)) setup(node);
+        if (isVoiceLibraryNode(node)) queueVoiceLayout(node);
     },
 });
 

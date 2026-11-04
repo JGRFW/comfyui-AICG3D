@@ -672,7 +672,10 @@ def _h3_reference_capable(name: str) -> bool:
     tokens = set(normalised.split())
     if "minimax" not in tokens and "h3" not in compact:
         return False
-    return any(word in compact for word in ("ref2va", "ref2v", "refdelta", "hybrid", "fused"))
+    return any(
+        word in compact
+        for word in ("ref2va", "ref2v", "refdelta", "omniref", "hybrid", "fused")
+    )
 
 
 def _reference_capability_note(candidate_name: str, candidate_kind: str) -> str:
@@ -5232,6 +5235,18 @@ def _lock_audio_latent(latent: Mapping[str, Any], audio_latent: torch.Tensor) ->
     return _segment_pack_av(video, audio, video_mask, audio_mask)
 
 
+def _restore_audio_latent(sampled: Mapping[str, Any], audio_latent: torch.Tensor) -> dict[str, Any]:
+    """Keep the sampled video stream but restore the exact source audio stream.
+
+    A diffusion sampler receives one packed AV latent and may update both streams.
+    Second-pass video refinement must never decode the sampled audio stream; the
+    source audio is authoritative and is written back before returning the result.
+    """
+    video, sampled_audio = _segment_latent_streams(sampled)
+    locked_audio = _fit_audio_latent(audio_latent, sampled_audio)
+    return _segment_pack_latent(video, locked_audio)
+
+
 def _segment_noise_mask_streams(latent: Mapping[str, Any]) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     mask = latent.get("noise_mask") if isinstance(latent, Mapping) else None
     if mask is None:
@@ -8589,7 +8604,10 @@ class MiniMaxH3EasyRenderAdvanced:
             h3_context,
             {"samples": video_latent},
         )
-        second_input = _segment_pack_latent(video_latent, audio_latent)
+        second_input = _lock_audio_latent(
+            _segment_pack_latent(video_latent, audio_latent),
+            audio_latent,
+        )
         print(
             f"[MiniMax H3 Aicg] 二次采样放大 {scale:g}x："
             f"{steps} 步，denoise={denoise:.2f}，音频 latent 原样保留。"
@@ -8608,7 +8626,7 @@ class MiniMaxH3EasyRenderAdvanced:
             on_step=on_step,
             on_preview=on_preview,
         )
-        return second_latent
+        return _restore_audio_latent(second_latent, audio_latent)
 
     @classmethod
     def _render_digital_human_long(
@@ -9025,6 +9043,39 @@ PASS2_TILED_OFF = "关"
 PASS2_TILED_ON = "开"
 PASS2_TILED_CHOICES = (PASS2_TILED_OFF, PASS2_TILED_ON)
 
+#: 二采输出尺寸模式。目标分辨率模式可直接把 720P 输出为 1080P。
+PASS2_UPSCALE_MODE_SCALE = "按倍数放大"
+PASS2_UPSCALE_MODE_TARGET = "目标分辨率（720P→1080P）"
+PASS2_UPSCALE_MODE_REPAIR = "仅采样修复（不再放大）"
+PASS2_UPSCALE_MODE_CHOICES = (
+    PASS2_UPSCALE_MODE_SCALE,
+    PASS2_UPSCALE_MODE_TARGET,
+    PASS2_UPSCALE_MODE_REPAIR,
+)
+PASS2_TARGET_WIDTH = 1920
+PASS2_TARGET_HEIGHT = 1088
+
+#: 二采独立修复引擎。选择引擎后，节点会对上一颗二采传下来的画面做真实的
+#: 超分/视频修复，再把结果编码回 H3 latent，供下一颗二采继续接龙。
+PASS2_REPAIR_OFF = "关闭（仅 H3 二采）"
+PASS2_REPAIR_SEEDVR2 = "SeedVR2 视频修复"
+PASS2_REPAIR_RTX = "RTX VSR 超分"
+PASS2_REPAIR_VOSR2 = "VOSR2 单帧修复"
+PASS2_REPAIR_CHOICES = (
+    PASS2_REPAIR_OFF,
+    PASS2_REPAIR_SEEDVR2,
+    PASS2_REPAIR_RTX,
+    PASS2_REPAIR_VOSR2,
+)
+PASS2_REPAIR_AUTO_MODEL = "自动选择"
+PASS2_REPAIR_VOSR2_PREFIX = "VOSR2 / "
+
+#: 二采修复参数的默认值。
+PASS2_REPAIR_SCALE = 1.0
+PASS2_REPAIR_BATCH_SIZE = 5
+PASS2_REPAIR_TEMPORAL_OVERLAP = 2
+PASS2_REPAIR_COLOR = "lab"
+
 #: 二采分块的默认参数（沿用「分段二采」里 tiled_low_vram 那套取值）。
 PASS2_TILE_WIDTH = 512
 PASS2_TILE_HEIGHT = 512
@@ -9039,6 +9090,57 @@ RENDER_PREVIEW_CHOICES = (RENDER_PREVIEW_OFF, RENDER_PREVIEW_ON)
 
 #: 采样预览的默认间隔（步）：1 = 每步都推一张，越大越省。
 RENDER_PREVIEW_INTERVAL = 1
+
+
+def _scan_pass2_repair_models() -> tuple[list[str], list[str]]:
+    """Return SeedVR2 files and VOSR2 bundle names without requiring either plugin."""
+    models_root = str(getattr(folder_paths, "models_dir", "") or "")
+    seedvr_names: list[str] = []
+    for folder_name in ("SEEDVR2", "seedvr2"):
+        folder = os.path.join(models_root, folder_name)
+        if not os.path.isdir(folder):
+            continue
+        for entry in sorted(os.listdir(folder), key=str.lower):
+            path = os.path.join(folder, entry)
+            if os.path.isfile(path) and entry.lower().endswith((".safetensors", ".gguf")):
+                if "vae" in entry.lower():
+                    continue
+                if entry not in seedvr_names:
+                    seedvr_names.append(entry)
+
+    vosr_names: list[str] = []
+    vosr_root = os.path.join(models_root, "vosr2")
+    if os.path.isdir(vosr_root):
+        for entry in sorted(os.listdir(vosr_root), key=str.lower):
+            path = os.path.join(vosr_root, entry)
+            if not os.path.isdir(path) or entry.startswith(".") or entry.startswith("_"):
+                continue
+            args_path = os.path.join(path, "args.json")
+            if os.path.isfile(args_path):
+                vosr_names.append(entry)
+    return seedvr_names, vosr_names
+
+
+def _pass2_repair_model_choices() -> list[str]:
+    seedvr_names, vosr_names = _scan_pass2_repair_models()
+    choices = [PASS2_REPAIR_AUTO_MODEL, *seedvr_names]
+    choices.extend(f"{PASS2_REPAIR_VOSR2_PREFIX}{name}" for name in vosr_names)
+    return choices
+
+
+def _node_output_first(result: Any) -> Any:
+    """Read one value from both legacy tuple returns and comfy_api NodeOutput."""
+    if hasattr(result, "args"):
+        values = result.args
+        return values[0] if values else None
+    if hasattr(result, "result"):
+        values = result.result
+        if isinstance(values, tuple):
+            return values[0] if values else None
+        return values
+    if isinstance(result, tuple):
+        return result[0] if result else None
+    return result
 
 
 def _external_sampling_steps(sigmas: Any, fallback: Any) -> int:
@@ -9375,7 +9477,8 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         "二采条件 -> 二采采样 -> 解码 + 合成，只输出一条 VIDEO。"
         "接 AICG-渲染器（一采）的「一采数据」，输出直接连 SaveVideo；"
         "「二采数据」输出二采后的真实 latent，可继续接下一颗二采放大节点，实现多级放大；"
-        "二采重画力度看 second_pass_denoise（0.4~0.6 最稳）。"
+        "二采重画力度看 second_pass_denoise（0.30~0.35 最稳）。"
+        "输出尺寸支持按倍数、720P→1080P 目标分辨率，以及不放大只做画质修复。"
     )
 
     @staticmethod
@@ -9386,6 +9489,36 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         except Exception:
             choices = []
         return choices or ["(没有找到 Latent 放大器模型)"]
+
+    @staticmethod
+    def _repair_model_choices() -> list[str]:
+        """List independently installed video restoration models when available."""
+        try:
+            return _pass2_repair_model_choices()
+        except Exception:
+            return [PASS2_REPAIR_AUTO_MODEL]
+
+    @staticmethod
+    def _external_node_classes(engine: str) -> dict[str, Any]:
+        mappings = getattr(nodes, "NODE_CLASS_MAPPINGS", {}) or {}
+        required = {
+            PASS2_REPAIR_SEEDVR2: ("SeedVR2VideoUpscaler",),
+            PASS2_REPAIR_RTX: ("RTXVideoSuperResolution",),
+            PASS2_REPAIR_VOSR2: ("VOSR2ModelLoader", "VOSR2Upscale"),
+        }.get(str(engine or "").strip(), ())
+        missing = [name for name in required if name not in mappings]
+        if missing:
+            packages = {
+                PASS2_REPAIR_SEEDVR2: "ComfyUI-SeedVR2_VideoUpscaler",
+                PASS2_REPAIR_RTX: "comfyui_nvidia_rtx_nodes（需要 NVIDIA RTX 显卡与 nvvfx）",
+                PASS2_REPAIR_VOSR2: "ComfyUI-VOSR2",
+            }
+            raise ValueError(
+                f"已选择“{engine}”，但缺少节点 {', '.join(missing)}。"
+                f"请安装或启用 {packages.get(str(engine).strip(), '对应修复节点')}，"
+                "或把“修复引擎”改回关闭。"
+            )
+        return {name: mappings[name] for name in required}
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -9413,7 +9546,7 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                         "max": 1.0,
                         "step": 0.01,
                         "tooltip": (
-                            "二采重画力度：0.4~0.6 最稳，越大改得越多"
+                            "二采重画力度：0.30~0.35 最稳，越大改得越多"
                             "（放大出来的细节也越容易被改掉）。"
                         ),
                     },
@@ -9536,6 +9669,132 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                         ),
                     },
                 ),
+                "upscale_mode": (
+                    list(PASS2_UPSCALE_MODE_CHOICES),
+                    {
+                        "default": PASS2_UPSCALE_MODE_SCALE,
+                        "tooltip": (
+                            "按倍数放大：旧行为；目标分辨率：直接指定 1920×1080 等准确输出；"
+                            "仅采样修复：不再放大大尺寸，只对上一颗二采输出的画面继续低噪声采样。"
+                        ),
+                    },
+                ),
+                "target_width": (
+                    "INT",
+                    {
+                        "default": PASS2_TARGET_WIDTH,
+                        "min": 64,
+                        "max": nodes.MAX_RESOLUTION,
+                        "step": 8,
+                        "tooltip": "目标输出宽度；仅在“目标分辨率”模式生效。1080P 横屏填 1920。",
+                    },
+                ),
+                "target_height": (
+                    "INT",
+                    {
+                        "default": PASS2_TARGET_HEIGHT,
+                        "min": 64,
+                        "max": nodes.MAX_RESOLUTION,
+                        "step": 8,
+                        "tooltip": "目标输出高度；仅在“目标分辨率”模式生效。H3 的 1080P 档请填 1088。",
+                    },
+                ),
+                "repair_engine": (
+                    list(PASS2_REPAIR_CHOICES),
+                    {
+                        "default": PASS2_REPAIR_OFF,
+                        "tooltip": (
+                            "关闭时保持原来的 H3 二采；选择 SeedVR2 / RTX VSR / VOSR2 后，"
+                            "本节点会真正修复上一颗二采传来的画面，再把修复结果编码回 H3 latent。"
+                            "1.0× 也可连续串联，后一颗处理前一颗的结果。"
+                        ),
+                    },
+                ),
+                "repair_model": (
+                    cls._repair_model_choices(),
+                    {
+                        "default": PASS2_REPAIR_AUTO_MODEL,
+                        "tooltip": (
+                            "SeedVR2 选 models/SEEDVR2 中的模型；VOSR2 选 models/vosr2 中的模型包。"
+                            "自动选择会优先使用 SeedVR2 3B FP8，找不到时回落到第一个可用模型。"
+                        ),
+                    },
+                ),
+                "repair_scale": (
+                    "FLOAT",
+                    {
+                        "default": PASS2_REPAIR_SCALE,
+                        "min": 1.0,
+                        "max": 4.0,
+                        "step": 0.05,
+                        "tooltip": "修复引擎的输出倍数：1.0 = 保持原尺寸只修画质，1.5 = 在修复时同时放大 1.5×。",
+                    },
+                ),
+                "repair_batch_size": (
+                    "INT",
+                    {
+                        "default": PASS2_REPAIR_BATCH_SIZE,
+                        "min": 1,
+                        "max": 129,
+                        "step": 1,
+                        "tooltip": "SeedVR2 每次处理的帧数；推荐 4n+1（1/5/9/13…），越大越连贯但更吃显存。",
+                    },
+                ),
+                "repair_temporal_overlap": (
+                    "INT",
+                    {
+                        "default": PASS2_REPAIR_TEMPORAL_OVERLAP,
+                        "min": 0,
+                        "max": 16,
+                        "step": 1,
+                        "tooltip": "SeedVR2 相邻批次的重叠帧；推荐 1~4，能减少批次接缝抖动。",
+                    },
+                ),
+                "repair_color_correction": (
+                    ["lab", "wavelet", "wavelet_adaptive", "hsv", "adain", "none"],
+                    {
+                        "default": PASS2_REPAIR_COLOR,
+                        "tooltip": "把修复后的颜色拉回输入画面；推荐 lab，能降低多次修复后的偏色。",
+                    },
+                ),
+                "repair_quality": (
+                    ["ULTRA", "HIGH", "MEDIUM", "LOW"],
+                    {
+                        "default": "ULTRA",
+                        "tooltip": "仅 RTX VSR 使用；质量越高越慢。",
+                    },
+                ),
+                "repair_device": (
+                    ["cuda", "cpu"],
+                    {
+                        "default": "cuda",
+                        "tooltip": "SeedVR2 / VOSR2 使用的推理设备；RTX VSR 固定使用 NVIDIA RTX 显卡。",
+                    },
+                ),
+                "repair_blocks_to_swap": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 36,
+                        "step": 1,
+                        "tooltip": "SeedVR2 BlockSwap 数；显存不足时开 8~24，设大会变慢。0 = 关闭。",
+                    },
+                ),
+                "repair_offload_device": (
+                    ["cpu", "none"],
+                    {
+                        "default": "cpu",
+                        "tooltip": "SeedVR2 模型暂时不用时放回 CPU（推荐）或留在显存。BlockSwap 开启时必须用 cpu。",
+                    },
+                ),
+                "repair_vae_tiling": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "SeedVR2 的 VAE 分块编解码；长视频和高分辨率建议开，能显著降低显存峰值。",
+                    },
+                ),
             },
             "optional": {
                 "sampler": (
@@ -9557,7 +9816,12 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
             "upscale_scale", "upscale_device", "upscale_precision", "upscale_chunking",
             "output_first_pass", "tiled_sampling", "tile_width", "tile_height",
             "tile_overlap", "tile_fade", "sample_preview", "preview_interval",
+            "upscale_mode", "target_width", "target_height",
             "sampler", "sigmas",
+            "repair_engine", "repair_model", "repair_scale", "repair_batch_size",
+            "repair_temporal_overlap", "repair_color_correction", "repair_quality",
+            "repair_device", "repair_blocks_to_swap", "repair_offload_device",
+            "repair_vae_tiling",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -9570,13 +9834,33 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         precision: Any,
         chunking: Any,
         sampling_model: Any,
+        upscale_mode: Any = PASS2_UPSCALE_MODE_SCALE,
+        target_width: Any = PASS2_TARGET_WIDTH,
+        target_height: Any = PASS2_TARGET_HEIGHT,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """一采 AV latent -> (放大后的视频 latent, 原样带过去的音频 latent)。"""
         video, audio = _segment_latent_streams(first_latent)
+        mode = str(upscale_mode or PASS2_UPSCALE_MODE_SCALE).strip()
         scale = float(scale)
-        if scale <= PASS2_UPSCALE_THRESHOLD:
-            # 不放大也照样跑二采：等于用同一套流程做一次「原分辨率精修」。
+        if mode == PASS2_UPSCALE_MODE_REPAIR:
+            print("[MiniMax H3 Aicg] 二采画质修复：保持当前分辨率，不加载 Latent 放大器。")
             return video, audio
+        if mode == PASS2_UPSCALE_MODE_TARGET:
+            target_width = max(64, int(target_width or PASS2_TARGET_WIDTH))
+            target_height = max(64, int(target_height or PASS2_TARGET_HEIGHT))
+            upscale_config = {
+                "mode": "target dimensions",
+                "width": target_width,
+                "height": target_height,
+            }
+            scale_label = f"{target_width}x{target_height}"
+        else:
+            if scale <= PASS2_UPSCALE_THRESHOLD:
+                # 不放大也照样跑二采：等于用同一套流程做一次「原分辨率精修」。
+                return video, audio
+            mode = PASS2_UPSCALE_MODE_SCALE
+            upscale_config = {"mode": "scale by multiplier", "scale": scale}
+            scale_label = f"{scale:g}x"
         if not isinstance(model_name, str) or not model_name or model_name.startswith("("):
             raise ValueError("请先在 latent_upscale_model 里选一个 Latent 放大器模型")
         if str(device).lower() in {"cuda", "rocm"} and sampling_model is not None:
@@ -9592,7 +9876,7 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         result = MiniMaxH3EasyLatentUpscaler3D.execute(
             {"samples": video},
             str(model_name),
-            {"mode": "scale by multiplier", "scale": scale},
+            upscale_config,
             32,
             bool(chunking),
             str(device),
@@ -9602,10 +9886,263 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         if not isinstance(upscaled, torch.Tensor) or upscaled.ndim != 5:
             raise RuntimeError("Latent 3D 放大没有返回可用的视频 latent（应为 5D [B, C, T, H, W]）")
         print(
-            f"[MiniMax H3 Aicg] 二采放大 {scale:g}x："
+            f"[MiniMax H3 Aicg] 二采放大 {scale_label}："
             f"{tuple(video.shape)} -> {tuple(upscaled.shape)}"
         )
         return upscaled, audio
+
+    @staticmethod
+    def _resolve_repair_model(engine: str, requested: str) -> str:
+        """Resolve a stable model name without depending on another node's UI schema."""
+        seedvr_models, vosr_models = _scan_pass2_repair_models()
+        chosen = str(requested or PASS2_REPAIR_AUTO_MODEL).strip()
+
+        if engine == PASS2_REPAIR_SEEDVR2:
+            if chosen.startswith(PASS2_REPAIR_VOSR2_PREFIX):
+                raise ValueError("当前修复引擎是 SeedVR2，但模型栏选成了 VOSR2 模型包。")
+            if chosen == PASS2_REPAIR_AUTO_MODEL or not chosen:
+                preferred = "seedvr2_ema_3b_fp8_e4m3fn.safetensors"
+                chosen = preferred if preferred in seedvr_models else (seedvr_models[0] if seedvr_models else "")
+            if not chosen:
+                raise ValueError(
+                    "没有找到 SeedVR2 模型。请把模型放到 ComfyUI/models/SEEDVR2，"
+                    "至少需要 seedvr2_ema_3b_fp8_e4m3fn.safetensors 与 ema_vae_fp16.safetensors。"
+                )
+            if chosen not in seedvr_models:
+                raise ValueError(f"models/SEEDVR2 中找不到模型：{chosen}")
+            return chosen
+
+        if engine == PASS2_REPAIR_VOSR2:
+            if chosen.startswith(PASS2_REPAIR_VOSR2_PREFIX):
+                chosen = chosen[len(PASS2_REPAIR_VOSR2_PREFIX):].strip()
+            if chosen == PASS2_REPAIR_AUTO_MODEL or not chosen or chosen in seedvr_models:
+                preferred = "VOSR2"
+                chosen = preferred if preferred in vosr_models else (vosr_models[0] if vosr_models else "")
+            if not chosen:
+                raise ValueError(
+                    "没有找到 VOSR2 模型包。请把完整模型包放到 ComfyUI/models/vosr2/VOSR2。"
+                )
+            if chosen not in vosr_models:
+                raise ValueError(f"models/vosr2 中找不到模型包：{chosen}")
+            return chosen
+
+        raise ValueError(f"不支持的修复引擎：{engine}")
+
+    @classmethod
+    def _seedvr2_repair_frames(
+        cls,
+        frames: torch.Tensor,
+        *,
+        model_name: str,
+        scale: float,
+        seed: int,
+        batch_size: int,
+        temporal_overlap: int,
+        color_correction: str,
+        device: str,
+        blocks_to_swap: int,
+        offload_device: str,
+        vae_tiling: bool,
+    ) -> torch.Tensor:
+        classes = cls._external_node_classes(PASS2_REPAIR_SEEDVR2)
+        upscaler = classes["SeedVR2VideoUpscaler"]
+        if frames.ndim != 4 or frames.shape[0] < 1:
+            raise ValueError("SeedVR2 修复需要 BHWC 视频帧")
+
+        resolution = max(16, int(round(min(int(frames.shape[1]), int(frames.shape[2])) * float(scale) / 2.0)) * 2)
+        batch_size = max(1, int(batch_size or 1))
+        if (batch_size - 1) % 4:
+            batch_size = max(1, int(round((batch_size - 1) / 4.0)) * 4 + 1)
+        temporal_overlap = max(0, min(int(temporal_overlap or 0), max(0, batch_size - 1)))
+        offload = str(offload_device or "cpu").strip().lower()
+        if int(blocks_to_swap or 0) > 0 and offload == "none":
+            offload = "cpu"
+
+        try:
+            from comfy_execution.utils import get_executing_context
+            context = get_executing_context()
+            node_id = str(getattr(context, "node_id", "") or "aicg3d-h3-repair")
+        except Exception:
+            node_id = "aicg3d-h3-repair"
+
+        dit_config = {
+            "model": model_name,
+            "device": str(device or "cuda"),
+            "offload_device": offload,
+            "cache_model": False,
+            "blocks_to_swap": int(blocks_to_swap or 0),
+            "swap_io_components": False,
+            "attention_mode": "sdpa",
+            "torch_compile_args": None,
+            "node_id": f"{node_id}:seedvr2-dit",
+        }
+        tile_size = 1024
+        tile_overlap = min(128, tile_size // 2)
+        vae_config = {
+            "model": "ema_vae_fp16.safetensors",
+            "device": str(device or "cuda"),
+            "offload_device": offload,
+            "cache_model": False,
+            "encode_tiled": bool(vae_tiling),
+            "encode_tile_size": tile_size,
+            "encode_tile_overlap": tile_overlap,
+            "decode_tiled": bool(vae_tiling),
+            "decode_tile_size": tile_size,
+            "decode_tile_overlap": tile_overlap,
+            "tile_debug": "false",
+            "torch_compile_args": None,
+            "node_id": f"{node_id}:seedvr2-vae",
+        }
+
+        print(
+            "[MiniMax H3 Aicg] SeedVR2 真实视频修复："
+            f"{int(frames.shape[0])} 帧，最短边 {resolution}px，模型 {model_name}"
+        )
+        result = upscaler.execute(
+            image=frames,
+            dit=dit_config,
+            vae=vae_config,
+            seed=int(seed or 0) & 0xFFFFFFFF,
+            resolution=resolution,
+            max_resolution=0,
+            batch_size=batch_size,
+            uniform_batch_size=True,
+            temporal_overlap=temporal_overlap,
+            prepend_frames=0,
+            color_correction=str(color_correction or "lab"),
+            input_noise_scale=0.0,
+            latent_noise_scale=0.0,
+            offload_device=offload,
+            enable_debug=False,
+        )
+        repaired = _node_output_first(result)
+        if not isinstance(repaired, torch.Tensor) or repaired.ndim != 4:
+            raise RuntimeError("SeedVR2 没有返回可用的视频帧")
+        return repaired
+
+    @classmethod
+    def _rtx_vsr_repair_frames(
+        cls,
+        frames: torch.Tensor,
+        *,
+        scale: float,
+        quality: str,
+    ) -> torch.Tensor:
+        classes = cls._external_node_classes(PASS2_REPAIR_RTX)
+        result = classes["RTXVideoSuperResolution"].execute(
+            images=frames,
+            resize_type={"resize_type": "scale by multiplier", "scale": float(scale)},
+            quality=str(quality or "ULTRA").upper(),
+        )
+        repaired = _node_output_first(result)
+        if not isinstance(repaired, torch.Tensor) or repaired.ndim != 4:
+            raise RuntimeError("RTX VSR 没有返回可用的视频帧")
+        return repaired
+
+    @classmethod
+    def _vosr2_repair_frames(
+        cls,
+        frames: torch.Tensor,
+        *,
+        model_name: str,
+        scale: float,
+        seed: int,
+        color_correction: str,
+    ) -> torch.Tensor:
+        rounded_scale = int(round(float(scale)))
+        if abs(float(scale) - rounded_scale) > 1e-6:
+            raise ValueError("VOSR2 只支持整数倍（1×、2×、3×、4×）；需要 1.5× 请用 SeedVR2 或 RTX VSR。")
+        classes = cls._external_node_classes(PASS2_REPAIR_VOSR2)
+        loaded = _node_output_first(classes["VOSR2ModelLoader"].execute(model=model_name, dtype="default"))
+        alignment = str(color_correction or "wavelet").strip().lower()
+        if alignment not in {"wavelet", "adain", "none"}:
+            alignment = "wavelet"
+        result = classes["VOSR2Upscale"].execute(
+            model=loaded,
+            image=frames,
+            upscale=max(1, rounded_scale),
+            seed=int(seed or 0) & 0xFFFFFFFFFFFFFFFF,
+            color_alignment=alignment,
+            tile_size=512,
+            tile_overlap=64,
+            vae_tile_size=1024,
+            vae_tile_overlap=64,
+        )
+        repaired = _node_output_first(result)
+        if not isinstance(repaired, torch.Tensor) or repaired.ndim != 4:
+            raise RuntimeError("VOSR2 没有返回可用的视频帧")
+        return repaired
+
+    @classmethod
+    def _repair_video_latent(
+        cls,
+        h3_context: MiniMaxH3Context,
+        video_latent: torch.Tensor,
+        *,
+        engine: str,
+        model_name: str,
+        scale: float,
+        seed: int,
+        batch_size: int,
+        temporal_overlap: int,
+        color_correction: str,
+        quality: str,
+        device: str,
+        blocks_to_swap: int,
+        offload_device: str,
+        vae_tiling: bool,
+    ) -> torch.Tensor:
+        if h3_context.video_vae is None or not callable(getattr(h3_context.video_vae, "encode", None)):
+            raise ValueError("修复引擎需要上游 H3 Context 提供视频 VAE")
+        frames = nodes.VAEDecode().decode(h3_context.video_vae, {"samples": video_latent})[0]
+        if not isinstance(frames, torch.Tensor) or frames.ndim != 4:
+            raise RuntimeError("无法解码上一颗二采的 latent，修复引擎没有收到视频帧")
+        frames = frames[..., :3].detach().float().clamp(0.0, 1.0).contiguous()
+        resolved_model = cls._resolve_repair_model(engine, model_name) if engine in {PASS2_REPAIR_SEEDVR2, PASS2_REPAIR_VOSR2} else ""
+
+        if engine == PASS2_REPAIR_SEEDVR2:
+            repaired = cls._seedvr2_repair_frames(
+                frames,
+                model_name=resolved_model,
+                scale=scale,
+                seed=seed,
+                batch_size=batch_size,
+                temporal_overlap=temporal_overlap,
+                color_correction=color_correction,
+                device=device,
+                blocks_to_swap=blocks_to_swap,
+                offload_device=offload_device,
+                vae_tiling=vae_tiling,
+            )
+        elif engine == PASS2_REPAIR_RTX:
+            repaired = cls._rtx_vsr_repair_frames(frames, scale=scale, quality=quality)
+        elif engine == PASS2_REPAIR_VOSR2:
+            repaired = cls._vosr2_repair_frames(
+                frames,
+                model_name=resolved_model,
+                scale=scale,
+                seed=seed,
+                color_correction=color_correction,
+            )
+        else:
+            raise ValueError(f"不支持的修复引擎：{engine}")
+
+        repaired = repaired[..., :3].detach().float().clamp(0.0, 1.0).contiguous()
+        if repaired.shape[0] != frames.shape[0]:
+            raise RuntimeError(
+                f"修复引擎改变了帧数（{frames.shape[0]} -> {repaired.shape[0]}）；"
+                "二采修复链必须保持帧数完全一致。"
+            )
+        encoded = h3_context.video_vae.encode(repaired)
+        if isinstance(encoded, Mapping):
+            encoded = encoded.get("samples")
+        if not isinstance(encoded, torch.Tensor) or encoded.ndim != 5:
+            raise RuntimeError("修复后的视频无法编码回 H3 5D 视频 latent")
+        print(
+            f"[MiniMax H3 Aicg] {engine} 完成："
+            f"{tuple(frames.shape)} -> {tuple(repaired.shape)} -> latent {tuple(encoded.shape)}"
+        )
+        return encoded.detach().contiguous()
 
     @staticmethod
     def _tiled_second_pass(
@@ -9708,6 +10245,20 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         tile_fade=PASS2_TILE_FADE,
         sample_preview=RENDER_PREVIEW_OFF,
         preview_interval=RENDER_PREVIEW_INTERVAL,
+        upscale_mode=PASS2_UPSCALE_MODE_SCALE,
+        target_width=PASS2_TARGET_WIDTH,
+        target_height=PASS2_TARGET_HEIGHT,
+        repair_engine=PASS2_REPAIR_OFF,
+        repair_model=PASS2_REPAIR_AUTO_MODEL,
+        repair_scale=PASS2_REPAIR_SCALE,
+        repair_batch_size=PASS2_REPAIR_BATCH_SIZE,
+        repair_temporal_overlap=PASS2_REPAIR_TEMPORAL_OVERLAP,
+        repair_color_correction=PASS2_REPAIR_COLOR,
+        repair_quality="ULTRA",
+        repair_device="cuda",
+        repair_blocks_to_swap=0,
+        repair_offload_device="cpu",
+        repair_vae_tiling=True,
         output_first_pass=PASS2_FIRST_PASS_OFF,
         cleanup_after_run=RENDER_CLEANUP_UNLOAD,
         sampler=None,
@@ -9722,7 +10273,17 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
                 "AICG-渲染器（二采放大）只处理单段生成：请把上游 MiniMax H3 Aicg "
                 "节点切到图生视频 / 参考 / 数字人模式。Context Segments 请使用 Segment Decode。"
             )
-        if MiniMaxH3EasyLatentUpscaler3D is None:
+        resolved_upscale_mode = str(upscale_mode or PASS2_UPSCALE_MODE_SCALE).strip()
+
+        repair_engine = str(repair_engine or PASS2_REPAIR_OFF).strip()
+        repair_active = repair_engine != PASS2_REPAIR_OFF
+        if repair_engine not in PASS2_REPAIR_CHOICES:
+            raise ValueError(f"未知的二采修复引擎：{repair_engine}")
+        if (
+            not repair_active
+            and resolved_upscale_mode != PASS2_UPSCALE_MODE_REPAIR
+            and MiniMaxH3EasyLatentUpscaler3D is None
+        ):
             raise ValueError("Latent 3D 放大模块不可用：检查 aicg3d_h3easy/h3_latent_upscaler.py")
 
         model = _resolve_h3_model(h3_context)
@@ -9740,7 +10301,9 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         # 进度条把后半程摊成一条：放大 12% -> 二采 78% -> 解码合成 10%。
         reporter = RenderProgressReporter()
         # 采样预览看节点上的开关；模块级 SAMPLE_PREVIEW_ENABLED 仍然能把所有渲染节点强制打开。
-        want_preview = SAMPLE_PREVIEW_ENABLED or str(sample_preview or "").strip() == RENDER_PREVIEW_ON
+        want_preview = (not repair_active) and (
+            SAMPLE_PREVIEW_ENABLED or str(sample_preview or "").strip() == RENDER_PREVIEW_ON
+        )
         preview = RenderPreviewEncoder(model) if want_preview else None
         on_preview = None
         if preview is not None:
@@ -9754,64 +10317,113 @@ class MiniMaxH3EasyRenderPass2(MiniMaxH3EasyRenderAdvanced):
         want_first_pass = str(output_first_pass or "").strip() == PASS2_FIRST_PASS_ON
         done = False
         try:
-            # ---- 拆 AV latent + Latent 3D 放大（音频那一路原样带过去）----
-            reporter.begin_stage(STAGE_UPSCALE, PASS2_UPSCALE_BEGIN, PASS2_UPSCALE_END)
-            video_latent, audio_latent = self._upscale_video_latent(
-                first_latent,
-                latent_upscale_model,
-                upscale_scale,
-                upscale_device,
-                upscale_precision,
-                upscale_chunking,
-                model,
-            )
-
-            # ---- 二采条件：首帧 / 首尾帧要按新分辨率重新编码关键帧 ----
-            (second_conditioning,) = MiniMaxH3EasySecondPassConditioning().rebuild(
-                h3_context,
-                {"samples": video_latent},
-            )
-
-            # ---- 二采：吃「放大后的视频 + 原音频」拼回来的 AV latent ----
-            second_input = _segment_pack_latent(video_latent, audio_latent)
-            sampling_steps = _external_sampling_steps(sigmas, steps)
-            reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS2_UPSCALE_END, SAMPLE_SHARE, sampling_steps)
-            if str(tiled_sampling or "").strip() == PASS2_TILED_ON:
-                # 分块二采：显存占用只跟单块有关，长片 / 放大后不容易爆显存。
-                second_latent = self._tiled_second_pass(
-                    model,
-                    second_conditioning,
-                    second_input,
+            if repair_active:
+                reporter.begin_stage(STAGE_UPSCALE, PASS2_UPSCALE_BEGIN, SAMPLE_SHARE)
+                video_latent, audio_latent = _segment_latent_streams(first_latent)
+                # SeedVR2 / VOSR2 会加载自己的大模型；先把 H3 主干请出显存，
+                # 避免 16GB 级显卡在修复模型加载时被两套权重同时挤爆。
+                try:
+                    comfy.model_management.unload_model_and_clones(
+                        model,
+                        unload_additional_models=False,
+                    )
+                    comfy.model_management.soft_empty_cache()
+                except Exception:
+                    pass
+                repaired_video_latent = self._repair_video_latent(
+                    h3_context,
                     video_latent,
-                    sampler_name,
-                    scheduler,
-                    steps,
-                    second_pass_denoise,
-                    second_pass_seed,
-                    tile_width,
-                    tile_height,
-                    tile_overlap,
-                    tile_fade,
-                    _StageAbsoluteProgress(reporter),
-                    on_preview,
-                    sampler=sampler,
-                    sigmas=sigmas,
+                    engine=repair_engine,
+                    model_name=repair_model,
+                    scale=repair_scale,
+                    seed=second_pass_seed,
+                    batch_size=repair_batch_size,
+                    temporal_overlap=repair_temporal_overlap,
+                    color_correction=repair_color_correction,
+                    quality=repair_quality,
+                    device=repair_device,
+                    blocks_to_swap=repair_blocks_to_swap,
+                    offload_device=repair_offload_device,
+                    vae_tiling=repair_vae_tiling,
+                )
+                second_latent = _restore_audio_latent(
+                    _segment_pack_latent(repaired_video_latent, audio_latent),
+                    audio_latent,
+                )
+                print(
+                    f"[MiniMax H3 Aicg] 二采修复链已输出第 {int(repaired_video_latent.shape[2])} 个 latent 时间步；"
+                    "本节点结果可以直接接入下一颗 AICG-渲染器（二采放大）。"
                 )
             else:
-                (second_latent,) = sampler_helper.sample(
+                # ---- 拆 AV latent + Latent 3D 放大（音频那一路原样带过去）----
+                reporter.begin_stage(STAGE_UPSCALE, PASS2_UPSCALE_BEGIN, PASS2_UPSCALE_END)
+                video_latent, audio_latent = self._upscale_video_latent(
+                    first_latent,
+                    latent_upscale_model,
+                    upscale_scale,
+                    upscale_device,
+                    upscale_precision,
+                    upscale_chunking,
                     model,
-                    second_conditioning,
-                    second_input,
-                    second_pass_seed,
-                    sampler_name,
-                    scheduler,
-                    steps,
-                    second_pass_denoise,
-                    sampler=sampler,
-                    sigmas=sigmas,
-                    on_step=reporter.update_stage,
-                    on_preview=on_preview,
+                    upscale_mode=resolved_upscale_mode,
+                    target_width=target_width,
+                    target_height=target_height,
                 )
+
+                # ---- 二采条件：首帧 / 首尾帧要按新分辨率重新编码关键帧 ----
+                (second_conditioning,) = MiniMaxH3EasySecondPassConditioning().rebuild(
+                    h3_context,
+                    {"samples": video_latent},
+                )
+
+                # ---- 二采：吃「放大后的视频 + 原音频」拼回来的 AV latent ----
+                second_input = _lock_audio_latent(
+                    _segment_pack_latent(video_latent, audio_latent),
+                    audio_latent,
+                )
+                sampling_steps = _external_sampling_steps(sigmas, steps)
+                reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS2_UPSCALE_END, SAMPLE_SHARE, sampling_steps)
+                if str(tiled_sampling or "").strip() == PASS2_TILED_ON:
+                    # 分块二采：显存占用只跟单块有关，长片 / 放大后不容易爆显存。
+                    second_latent = self._tiled_second_pass(
+                        model,
+                        second_conditioning,
+                        second_input,
+                        video_latent,
+                        sampler_name,
+                        scheduler,
+                        steps,
+                        second_pass_denoise,
+                        second_pass_seed,
+                        tile_width,
+                        tile_height,
+                        tile_overlap,
+                        tile_fade,
+                        _StageAbsoluteProgress(reporter),
+                        on_preview,
+                        sampler=sampler,
+                        sigmas=sigmas,
+                    )
+                else:
+                    (second_latent,) = sampler_helper.sample(
+                        model,
+                        second_conditioning,
+                        second_input,
+                        second_pass_seed,
+                        sampler_name,
+                        scheduler,
+                        steps,
+                        second_pass_denoise,
+                        sampler=sampler,
+                        sigmas=sigmas,
+                        on_step=reporter.update_stage,
+                        on_preview=on_preview,
+                    )
+
+                # The sampler may update both streams of the packed AV latent. Video
+                # refinement must not alter the source audio, so restore it before
+                # decoding or passing the result to another second-pass node.
+                second_latent = _restore_audio_latent(second_latent, audio_latent)
 
             reporter.begin_decode()
             frames, audio = self._decode_av(h3_context, second_latent)
@@ -13326,6 +13938,8 @@ class MiniMaxH3SequenceConfig:
     second_pass_scale: float = 1.5
     second_pass_steps: int = 4
     second_pass_denoise: float = 0.35
+    second_pass_sampler_name: str = "euler"
+    second_pass_scheduler: str = "beta"
 
 
 @dataclass(frozen=True)
@@ -13489,6 +14103,10 @@ class MiniMaxH3EasySequenceGlobal:
 
     @classmethod
     def INPUT_TYPES(cls):
+        second_pass_models = MiniMaxH3EasyRenderPass2._upscale_model_choices()
+        second_pass_default_model = _resolve_h3_secondary_upscaler(None)
+        if second_pass_default_model not in second_pass_models:
+            second_pass_default_model = second_pass_models[0]
         return {
             "required": {
                 "h3_bundle": ("MINIMAX_H3_BUNDLE",),
@@ -13662,6 +14280,57 @@ class MiniMaxH3EasySequenceGlobal:
                         ),
                     },
                 ),
+                "second_pass_model": (
+                    second_pass_models,
+                    {
+                        "default": second_pass_default_model,
+                        "tooltip": "二采使用的 H3 Latent 放大器；优先 V2，关闭二采时不会加载。",
+                    },
+                ),
+                "second_pass_scale": (
+                    "FLOAT",
+                    {
+                        "default": 1.5,
+                        "min": 1.0,
+                        "max": 4.0,
+                        "step": 0.05,
+                        "tooltip": "二采放大倍数；1.5 表示宽高各放大 1.5 倍。",
+                    },
+                ),
+                "second_pass_sampler_name": (
+                    comfy.samplers.SAMPLER_NAMES,
+                    {
+                        "default": "euler",
+                        "tooltip": "二采独立采样器；不影响一采采样器。",
+                    },
+                ),
+                "second_pass_scheduler": (
+                    comfy.samplers.SCHEDULER_NAMES,
+                    {
+                        "default": "beta",
+                        "tooltip": "二采独立调度器；不影响一采调度器。",
+                    },
+                ),
+                "second_pass_steps": (
+                    "INT",
+                    {
+                        "default": 4,
+                        "min": 1,
+                        "max": 20,
+                        "step": 1,
+                        "tooltip": "二采扩散步数；建议 4～6 步。",
+                    },
+                ),
+                "second_pass_denoise": (
+                    "FLOAT",
+                    {
+                        "default": 0.35,
+                        "min": 0.05,
+                        "max": 0.60,
+                        "step": 0.01,
+                        "tooltip": "二采重绘强度；建议 0.20～0.35，越低越保留一采画面。",
+                    },
+                ),
             },
             "optional": {
                 "model": ("MODEL",),
@@ -13694,7 +14363,9 @@ class MiniMaxH3EasySequenceGlobal:
             "audio_mode", "vram_tier",
             "exposure_lock",
             "keep_full",
-            "second_pass",
+            "second_pass", "second_pass_model", "second_pass_scale",
+            "second_pass_sampler_name", "second_pass_scheduler",
+            "second_pass_steps", "second_pass_denoise",
             "sampler", "sigmas",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
@@ -13722,6 +14393,12 @@ class MiniMaxH3EasySequenceGlobal:
         exposure_lock=SEQUENCE_EXPOSURE_LOCK_ON,
         keep_full=True,
         second_pass=False,
+        second_pass_model="none",
+        second_pass_scale=1.5,
+        second_pass_sampler_name="euler",
+        second_pass_scheduler="beta",
+        second_pass_steps=4,
+        second_pass_denoise=0.35,
         model=None,
         sampler=None,
         sigmas=None,
@@ -13747,7 +14424,7 @@ class MiniMaxH3EasySequenceGlobal:
             SEQUENCE_HANDOFF_MIN_FRAMES,
             min(SEQUENCE_HANDOFF_MAX_FRAMES, int(handoff_frames or SEQUENCE_HANDOFF_DEFAULT_FRAMES)),
         )
-        secondary_model = _resolve_h3_secondary_upscaler(None)
+        secondary_model = _resolve_h3_secondary_upscaler(second_pass_model)
         if bool(second_pass) and _is_none_model(secondary_model):
             raise ValueError(
                 "已开启二采高清放大，但没有找到 H3 Latent 放大器。请把 V2 模型放到 "
@@ -13781,9 +14458,11 @@ class MiniMaxH3EasySequenceGlobal:
             keep_full=bool(keep_full),
             second_pass=bool(second_pass),
             second_pass_model=secondary_model,
-            second_pass_scale=1.5,
-            second_pass_steps=4,
-            second_pass_denoise=0.35,
+            second_pass_scale=max(1.0, min(4.0, float(second_pass_scale or 1.5))),
+            second_pass_steps=max(1, min(20, int(second_pass_steps or 4))),
+            second_pass_denoise=max(0.05, min(0.60, float(second_pass_denoise or 0.35))),
+            second_pass_sampler_name=str(second_pass_sampler_name or "euler"),
+            second_pass_scheduler=str(second_pass_scheduler or "beta"),
             model=model,
             sampler=sampler,
             sigmas=sigmas,
@@ -13796,7 +14475,10 @@ class MiniMaxH3EasySequenceGlobal:
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
             f"接缝处理「{config.exposure_lock}」；"
             f"保完整「{'开' if config.keep_full else '关'}」；"
-            f"二采高清「{'开' if config.second_pass else '关'}」；"
+            f"二采高清「{'开' if config.second_pass else '关'}」"
+            f"（{config.second_pass_model} / {config.second_pass_scale:g}x / "
+            f"{config.second_pass_sampler_name}+{config.second_pass_scheduler} / "
+            f"{config.second_pass_steps}步 / {config.second_pass_denoise:.2f}）；"
             f"外部采样器「{'已连接' if config.sampler is not None else '未连接'}」；"
             f"外部 Sigmas「{'已连接' if config.sigmas is not None else '未连接'}」。"
         )
@@ -14007,14 +14689,17 @@ class MiniMaxH3EasySequenceSegment:
             int(upscaled_video.shape[-2]),
             int(upscaled_video.shape[-1]),
         )
-        second_input = _segment_pack_latent(upscaled_video, upscaled_audio)
+        second_input = _lock_audio_latent(
+            _segment_pack_latent(upscaled_video, upscaled_audio),
+            upscaled_audio,
+        )
         (refined,) = AICG3DSamplerAdvanced().sample(
             model,
             second_conditioning,
             second_input,
             int(seed) & 0xFFFFFFFFFFFFFFFF,
-            config.sampler_name,
-            config.scheduler,
+            config.second_pass_sampler_name,
+            config.second_pass_scheduler,
             config.second_pass_steps,
             config.second_pass_denoise,
             sampler=config.sampler,
@@ -14022,6 +14707,7 @@ class MiniMaxH3EasySequenceSegment:
             on_step=on_step,
             on_preview=on_preview,
         )
+        refined = _restore_audio_latent(refined, upscaled_audio)
         return refined, continuity_video
 
     @classmethod

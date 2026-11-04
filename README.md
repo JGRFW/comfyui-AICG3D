@@ -23,9 +23,20 @@
 
 官方仓库地址：https://github.com/JGRFW/comfyui-AICG3D
 
+## 🆕 v1.1.26 更新摘要
+
+完整说明见 [RELEASE_NOTES_v1.1.26.md](release_notes/RELEASE_NOTES_v1.1.26.md)。
+
+- **管理器启动卡死修复**：根目录 `requirements.txt` 改为零自动安装，避免 ComfyUI Manager 启动时下载 `imageio-ffmpeg` 等大型依赖而卡在启动界面。
+- **可选依赖拆分**：TTS、音色克隆、提示词优化和 FFmpeg 依赖移动到 `requirements-optional.txt`，只在需要对应功能时手动安装。
+- **Registry 元数据零强制依赖**：`pyproject.toml` 不再强制安装外部包，ComfyUI 本体已有运行环境可直接启动。
+- **缺失依赖提示保留**：可选功能缺包时仍会在对应节点内给出明确安装提示，不影响其他节点和工作流加载。
+
+
 ## 🆕 v1.1.25 更新摘要
 
 完整说明见 [RELEASE_NOTES_v1.1.25.md](release_notes/RELEASE_NOTES_v1.1.25.md)。
+
 
 - **二采无限修复链**：新增 SeedVR2、RTX VSR、VOSR2 三种真实修复引擎；修复模式会处理上一颗二采的结果并回写 H3 latent，`1.0x` 也能逐颗接续。
 - **二采音频锁定**：视频二采使用独立噪声遮罩，采样后强制恢复一采原音轨，减少音频被二次修复和速度变化的问题。

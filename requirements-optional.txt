@@ -1,0 +1,23 @@
+# AICG3D 可选功能依赖。根目录 requirements.txt 不会自动安装这些包。
+# 只在需要对应功能时，由用户手动执行：
+# python -m pip install -r requirements-optional.txt
+
+# 异步请求与提示词优化
+aiohttp>=3.11.8
+requests>=2.28
+
+# 资源监控
+psutil>=5.9
+
+# 角色音色库 / Spark-TTS
+edge-tts>=7.0.0
+omegaconf>=2.3
+soundfile>=0.12
+soxr>=0.5.0.post1
+einx>=0.3.0
+einops>=0.8.0
+librosa>=0.10
+transformers>=4.45
+
+# 视频最终合成所需的 FFmpeg。若系统已有 ffmpeg，可不安装此项。
+imageio-ffmpeg

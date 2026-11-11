@@ -622,6 +622,15 @@
             "name": "sample_preview"
           },
           "link": null
+        },
+        {
+          "localized_name": "digital_human_refiner_lora",
+          "name": "digital_human_refiner_lora",
+          "type": "COMBO",
+          "widget": {
+            "name": "digital_human_refiner_lora"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -648,27 +657,31 @@
         "释放缓存",
         0,
         true,
+        1.5,
         1.0,
-        5,
-        0.5,
-        "minimax_h3_latent_upscaler_3d_fp16.safetensors",
-        false
+        4,
+        0.3,
+        "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
+        false,
+        "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors"
       ],
       "widgets_values_named": {
         "noise_seed": 357482398646636,
-        "control_after_generate": "randomize",
         "sampler_name": "euler",
         "scheduler": "beta",
         "steps": 8,
         "denoise": 1.0,
         "cleanup_after_run": "释放缓存",
+        "control_after_generate": "randomize",
         "guide_frame_idx": 0,
         "digital_human_selflift": true,
+        "digital_human_upscale_scale": 1.5,
         "digital_human_cfg": 1.0,
-        "digital_human_transition_step": 5,
-        "digital_human_lowres_scale": 0.5,
-        "digital_human_upscaler_model": "minimax_h3_latent_upscaler_3d_fp16.safetensors",
-        "sample_preview": false
+        "digital_human_transition_step": 4,
+        "digital_human_lowres_scale": 0.3,
+        "digital_human_upscaler_model": "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
+        "sample_preview": false,
+        "digital_human_refiner_lora": "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors"
       }
     },
     {
@@ -1265,7 +1278,8 @@
         "cnr_id": "aicg3d-h3-suite"
       },
       "widgets_values": [
-        "{\"version\":1,\"roles\":[{\"id\":\"girl\",\"name\":\"女孩\",\"mode\":\"described\",\"description\":\"稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"female\",\"pitch\":\"high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"boy\",\"name\":\"男孩\",\"mode\":\"described\",\"description\":\"稚嫩清脆的少年童声，音色明亮有精神，语调自然，情绪变化真实，不做成年人低音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"male\",\"pitch\":\"medium_high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"heroine\",\"name\":\"女主角\",\"mode\":\"described\",\"description\":\"年轻成年女性声音，清澈温柔，音色细腻稳定，古风台词自然端庄，情绪表达克制而清楚。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"female\",\"pitch\":\"medium\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"hero\",\"name\":\"男主角\",\"mode\":\"described\",\"description\":\"年轻成年男性声音，低稳温厚，咬字清晰有力量，情绪推进自然，不夸张吼叫。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_woman\",\"name\":\"老太太\",\"mode\":\"described\",\"description\":\"年长女性声音，略带岁月沙哑和轻微气声，语速偏慢，咬字仍然清楚，情绪自然不夸张。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"female\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_man\",\"name\":\"老爷子\",\"mode\":\"described\",\"description\":\"年长男性声音，低沉宽厚，带轻微沙哑和岁月感，语速偏慢，威严但自然。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false}]}"
+        "{\"version\":1,\"roles\":[{\"id\":\"girl\",\"name\":\"女孩\",\"mode\":\"described\",\"description\":\"稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"female\",\"pitch\":\"high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"boy\",\"name\":\"男孩\",\"mode\":\"described\",\"description\":\"稚嫩清脆的少年童声，音色明亮有精神，语调自然，情绪变化真实，不做成年人低音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"male\",\"pitch\":\"medium_high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"heroine\",\"name\":\"女主角\",\"mode\":\"described\",\"description\":\"年轻成年女性声音，清澈温柔，音色细腻稳定，古风台词自然端庄，情绪表达克制而清楚。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"female\",\"pitch\":\"medium\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"hero\",\"name\":\"男主角\",\"mode\":\"described\",\"description\":\"年轻成年男性声音，低稳温厚，咬字清晰有力量，情绪推进自然，不夸张吼叫。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_woman\",\"name\":\"老太太\",\"mode\":\"described\",\"description\":\"年长女性声音，略带岁月沙哑和轻微气声，语速偏慢，咬字仍然清楚，情绪自然不夸张。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"female\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_man\",\"name\":\"老爷子\",\"mode\":\"described\",\"description\":\"年长男性声音，低沉宽厚，带轻微沙哑和岁月感，语速偏慢，威严但自然。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false}]}",
+        true
       ],
       "title": "MiniMax H3 Aicg 角色音色库"
     }

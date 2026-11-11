@@ -493,6 +493,7 @@ function fillSegments(node, options = {}) {
     if (options.silent !== true) {
         const linked = targets.filter((target) => promptTakenByLink(node, target, graph)).length;
         const notes = [`已把 ${used} 段写进「视频段落」节点`];
+        if (options.source === "clipboard") notes.push("内容来自系统剪贴板");
         if (seedsWritten) {
             notes.push(`种子按顺序写入 ${seedBase}–${sequenceSeed(seedBase, seedsWritten - 1)}`);
         }
@@ -529,6 +530,58 @@ function scheduleAutoFill(node) {
         node.__aicg3dAutoFillTimer = null;
         setButtonLabel(node, fillSegments(node, { silent: true }));
     }, AUTOFILL_DELAY);
+}
+
+async function fillSegmentsFromClipboard(node) {
+    const button = buttonOf(node);
+    const oldName = button?.name || BUTTON_PREFIX;
+    let count = 0;
+    const existingText = String(readWidget(node, "text", "") || "").trim();
+
+    // 取消文本框上一次还没执行的自动填入，防止同一批提示词被再次写入并更换种子。
+    if (node.__aicg3dAutoFillTimer) {
+        clearTimeout(node.__aicg3dAutoFillTimer);
+        node.__aicg3dAutoFillTimer = null;
+    }
+    if (button) {
+        button.name = "正在读取系统剪贴板...";
+        button.disabled = true;
+    }
+
+    try {
+        if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
+            throw new Error("当前浏览器不支持自动读取系统剪贴板");
+        }
+        const clipboardText = normalizeText(await navigator.clipboard.readText());
+        if (!clipboardText.trim()) {
+            if (!existingText) {
+                notify("系统剪贴板和节点文本框都没有文字。", "error");
+                return;
+            }
+            notify("系统剪贴板里没有文字，已按节点文本框中的现有内容填入。", "warn");
+            count = fillSegments(node, { silent: true });
+        } else if (writeWidget(node, "text", clipboardText)) {
+            node.setDirtyCanvas?.(true, true);
+            app.graph?.setDirtyCanvas?.(true, true);
+            count = fillSegments(node, { source: "clipboard" });
+        } else {
+            throw new Error("节点文本框不可写");
+        }
+    } catch (error) {
+        const detail = error?.message || String(error || "未知错误");
+        if (existingText) {
+            count = fillSegments(node, { silent: true });
+            notify(`无法读取系统剪贴板（${detail}）。请允许浏览器剪贴板权限；本次已按节点文本框里的现有内容填入。`, "warn");
+        } else {
+            notify(`无法读取系统剪贴板（${detail}）。请允许浏览器剪贴板权限，或先手动粘贴到文本框。`, "error");
+        }
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.name = oldName;
+        }
+        setButtonLabel(node, count);
+    }
 }
 
 async function optimizePromptScript(node, button) {
@@ -657,11 +710,11 @@ function install(node) {
     node.__aicg3dPromptSplitInstalled = true;
 
     const button = node.addWidget("button", BUTTON_PREFIX, null, () => {
-        setButtonLabel(node, fillSegments(node));
+        fillSegmentsFromClipboard(node);
     });
     if (button) {
         button.serialize = false;
-        button.tooltip = "按画布顺序写入每段提示词、秒数和连续种子；顺序种子会固定为 fixed，运行后不再自动变。";
+        button.tooltip = "点击后自动读取系统剪贴板，按画布顺序写入每段提示词、秒数和连续种子；顺序种子会固定为 fixed，运行后不再自动变。";
     }
 
     const clearButton = node.addWidget("button", "✕ 一键清除全部提示词", null, () => {

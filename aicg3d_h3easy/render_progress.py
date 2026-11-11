@@ -180,6 +180,26 @@ class RenderProgressReporter:
         """解码 / 合成阶段：没有可拆分的步数，只报阶段名。"""
         self.begin_stage(STAGE_DECODE, SAMPLE_SHARE, 1.0)
 
+    def sequence_video_ready(self, kind: str, video: dict[str, Any]) -> None:
+        """Push a completed first-pass or final segment video as soon as it is encoded."""
+        server = progress_server()
+        if server is None or not self.node_id:
+            return
+        payload = {
+            "node_id": self.node_id,
+            "prompt_id": self.prompt_id,
+            "kind": str(kind or ""),
+            "video": video,
+        }
+        try:
+            server.send_sync(
+                "aicg3d_sequence_video_preview",
+                payload,
+                getattr(server, "client_id", None),
+            )
+        except Exception:
+            pass
+
     def finish(self, ok: bool = True) -> None:
         """收尾：成功画到 100%，失败让前端立刻收起进度条。"""
         self.finished = True

@@ -16,15 +16,19 @@ import torch
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
+COMFY_ROOT = PLUGIN_ROOT.parents[1]
+for path in (str(COMFY_ROOT), str(PLUGIN_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from aicg3d_h3easy.nodes import (  # noqa: E402
     _SEQUENCE_LIVE_CACHE,
     _SEQUENCE_LIVE_CACHE_LOCK,
     _SequenceSeamMatcher,
     _sequence_cache_read_chain,
+    _sequence_frame_luma,
     _sequence_handoff_context_frames,
+    _sequence_stabilize_tail_exposure,
 )
 
 
@@ -60,6 +64,50 @@ def test_same_shot_exposure_is_repaired() -> None:
     assert record["seam_gap_after"] < record["seam_gap_before"], record
     assert not torch.equal(output, after), "same-shot exposure should be corrected"
 
+
+def test_second_pass_disables_bridge_but_keeps_exposure_lock() -> None:
+    matcher = _SequenceSeamMatcher(enabled=True, allow_motion_bridge=False)
+    before = _frames(0.36)
+    after = _frames(0.52)
+    matcher.apply(before.clone(), 1)
+    output = matcher.apply(after.clone(), 2)
+    record = matcher.records[-1]
+
+    assert record["applied"], record
+    assert record["bridge_weight"] == 0.0, record
+    assert record["seam_gap_after"] < record["seam_gap_before"], record
+    assert not torch.equal(output, after), "exposure correction must stay enabled for Pass 2"
+
+
+def test_tail_exposure_pulse_is_removed_before_handoff() -> None:
+    matcher = _SequenceSeamMatcher(enabled=True, allow_motion_bridge=False)
+    segment = _frames(0.50, count=24)
+    segment[-1].fill_(0.46)
+    repaired = matcher.apply(segment, 1)
+
+    assert abs(_sequence_frame_luma(repaired[-1]) - 0.50) < 0.003
+    assert abs(_sequence_frame_luma(matcher.previous_tail[-1]) - 0.50) < 0.003
+
+
+def test_tail_exposure_high_pulse_is_removed_before_handoff() -> None:
+    matcher = _SequenceSeamMatcher(enabled=True, allow_motion_bridge=False)
+    segment = _frames(0.50, count=24)
+    segment[-1].fill_(0.56)
+    repaired = matcher.apply(segment, 1)
+
+    assert abs(_sequence_frame_luma(repaired[-1]) - 0.50) < 0.003
+    assert abs(_sequence_frame_luma(matcher.previous_tail[-1]) - 0.50) < 0.003
+
+
+def test_tail_helper_leaves_real_fade_alone() -> None:
+    segment = _frames(0.50, count=24)
+    for index in range(8):
+        segment[-(index + 1)].fill_(0.50 - index * 0.015)
+    original = segment.clone()
+    repaired, correction = _sequence_stabilize_tail_exposure(segment)
+
+    assert correction == 0.0
+    assert torch.equal(repaired, original)
 
 def test_real_scene_change_skips_spatial_blend() -> None:
     generator = torch.Generator().manual_seed(20261025)
@@ -114,6 +162,10 @@ def main() -> None:
     tests = (
         test_handoff_grid,
         test_same_shot_exposure_is_repaired,
+        test_second_pass_disables_bridge_but_keeps_exposure_lock,
+        test_tail_exposure_pulse_is_removed_before_handoff,
+        test_tail_exposure_high_pulse_is_removed_before_handoff,
+        test_tail_helper_leaves_real_fade_alone,
         test_real_scene_change_skips_spatial_blend,
         test_cache_chain_ignores_disconnected_stale_tail,
         test_disabled_mode_only_reports,

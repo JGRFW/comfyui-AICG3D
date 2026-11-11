@@ -2988,6 +2988,13 @@ def _apply_lora_stack(model: Any, stack: tuple[tuple[str, float], ...]) -> Any:
     return patched
 
 
+def _apply_secondary_refiner_lora(model: Any, lora_name: Any) -> Any:
+    """只给二采模型应用选中的成片精修 LoRA，一采模型保持原样。"""
+    if model is None or _is_none_model(lora_name):
+        return model
+    return _apply_lora_stack(model, ((str(lora_name), 1.0),))
+
+
 def _clip_choices() -> list[str]:
     return _all_weight_choices(
         ("text_encoders", "clip", "clip_gguf"),
@@ -3478,6 +3485,10 @@ class MiniMaxH3SegmentSample:
     # 段落链的下一段靠它继承素材库，所以这里必须留全集，否则第 1 段只 @ 了一张图，
     # 后面几段能用的素材会被一起裁掉。
     source_media: tuple[Any, ...] | None = None
+    # Stable role IDs locked by this segment. The next segment inherits them
+    # when its own prompt does not explicitly name a new @role, preventing the
+    # same on-screen character from silently drifting to a different voice.
+    active_voice_ids: tuple[str, ...] = ()
     # Motion Context keeps a phase-aligned slice of the sampled latent tail so
     # the next segment can continue it without a lossy VAE round trip.
     motion_context_tail_latent: torch.Tensor | None = None
@@ -3926,8 +3937,9 @@ class MiniMaxH3EasyCharacterVoiceLibrary:
     RETURN_TYPES = (CHARACTER_VOICE_CAST_TYPE, "STRING")
     RETURN_NAMES = ("voice_cast", "report_json")
     DESCRIPTION = (
-        "六个角色的固定音色库。描述音色可生成多声线试听并自动固定为参考音频；也支持直接使用 5～15 秒音频克隆音色。"
-        "在提示词中插入 @角色1～@角色6，节点就会只把本次出现的角色锁进 H3 参考条件。"
+        "六个角色的固定音色库。描述音色可生成试听参考；需要严格固定同一音色时请转为克隆音色，也支持直接使用 5～15 秒音频克隆。"
+        "提示词中的 @角色1～@角色6 或 (S1)～(S6) 会锁定对应座位；"
+        "后续提示词不需要重复 @，只有明确点名新角色时才会切换音色。"
     )
 
     @classmethod
@@ -3935,11 +3947,20 @@ class MiniMaxH3EasyCharacterVoiceLibrary:
         return {
             "required": {
                 "voice_state": ("STRING", {"default": "", "multiline": False}),
+                "enabled": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "关闭后保留角色和音色配置，但本次运行完全跳过音色库；工作流按无音色库节点时的方式正常执行。",
+                    },
+                ),
             },
         }
 
     @classmethod
-    def VALIDATE_INPUTS(cls, voice_state="", **_kwargs):
+    def VALIDATE_INPUTS(cls, voice_state="", enabled=True, **_kwargs):
+        if not _voice_cast_bool(enabled):
+            return True
         for role in _voice_cast_normalize_state(voice_state)["roles"]:
             if role["mode"] != "reference":
                 continue
@@ -3954,7 +3975,9 @@ class MiniMaxH3EasyCharacterVoiceLibrary:
         return True
 
     @classmethod
-    def IS_CHANGED(cls, voice_state="", **_kwargs):
+    def IS_CHANGED(cls, voice_state="", enabled=True, **_kwargs):
+        if not _voice_cast_bool(enabled):
+            return "disabled"
         state = _voice_cast_normalize_state(voice_state)
         signature = []
         for role in state["roles"]:
@@ -3968,7 +3991,19 @@ class MiniMaxH3EasyCharacterVoiceLibrary:
             signature.append((role, stat_key))
         return repr(signature)
 
-    def load(self, voice_state=""):
+    def load(self, voice_state="", enabled=True):
+        if not _voice_cast_bool(enabled):
+            report = {
+                "enabled": False,
+                "roles": 0,
+                "reference_voices": 0,
+                "described_voices": 0,
+                "role_details": [],
+            }
+            return (
+                MiniMaxH3CharacterVoiceCast(tuple()),
+                json.dumps(report, ensure_ascii=False, separators=(",", ":")),
+            )
         state = _voice_cast_normalize_state(voice_state)
         roles = []
         report_roles = []
@@ -4022,6 +4057,7 @@ class MiniMaxH3EasyCharacterVoiceLibrary:
             })
         cast = MiniMaxH3CharacterVoiceCast(tuple(roles))
         report = {
+            "enabled": True,
             "roles": len(roles),
             "reference_voices": sum(1 for role in roles if role.mode == "reference"),
             "described_voices": sum(1 for role in roles if role.mode == "described"),
@@ -5480,6 +5516,47 @@ def _segment_motion_context_tail_from_latent(
     ).detach().to("cpu").contiguous()
 
 
+def _segment_fit_video_latent_canvas(
+    video: torch.Tensor,
+    target_height: int,
+    target_width: int,
+) -> torch.Tensor:
+    """Return the refined tail on the first-pass sampling canvas.
+
+    Pass 2 changes the spatial latent grid.  The next segment still samples on
+    the Pass 1 grid, so continuity must come from the refined tail resized back
+    to that grid rather than the stale pre-refinement tail.  Temporal tokens and
+    channels remain unchanged.
+    """
+    if not isinstance(video, torch.Tensor) or video.ndim != 5:
+        raise ValueError("Pass 2 continuity expects a 5D H3 video latent")
+    target_height = max(1, int(target_height))
+    target_width = max(1, int(target_width))
+    source_height, source_width = int(video.shape[-2]), int(video.shape[-1])
+    if source_height == target_height and source_width == target_width:
+        return video.detach().to("cpu").contiguous()
+
+    batch, channels, temporal = (
+        int(video.shape[0]), int(video.shape[1]), int(video.shape[2])
+    )
+    flat = video.detach().permute(0, 2, 1, 3, 4).reshape(
+        batch * temporal, channels, source_height, source_width
+    ).float()
+    downscaling = target_height < source_height or target_width < source_width
+    resized = torch.nn.functional.interpolate(
+        flat,
+        size=(target_height, target_width),
+        mode="area" if downscaling else "bilinear",
+        align_corners=None if downscaling else False,
+        antialias=False if downscaling else True,
+    )
+    return resized.reshape(
+        batch, temporal, channels, target_height, target_width
+    ).permute(0, 2, 1, 3, 4).to(
+        device="cpu", dtype=video.dtype
+    ).contiguous()
+
+
 def _segment_has_visual_reference(items: list[_MediaInput] | tuple[_MediaInput, ...] | None) -> bool:
     """Return whether the current segment has an image/video reference.
 
@@ -6150,16 +6227,18 @@ def _voice_mention_pattern(token: str) -> re.Pattern[str]:
     )
 
 
-def _apply_character_voice_cast(
+def _voice_speaker_seat_pattern(position: int) -> re.Pattern[str]:
+    """Match the template's (S1) speaker label without treating it as dialogue."""
+    return re.compile(rf"\(\s*S{int(position)}\s*\)", flags=re.IGNORECASE)
+
+
+def _matched_character_voice_roles(
     prompt: str,
-    items: list[_MediaInput],
     voice_cast: MiniMaxH3CharacterVoiceCast | None,
-    *,
-    allow_reference_audio: bool = True,
-) -> tuple[list[_MediaInput], str]:
-    """Bind only the role voices explicitly mentioned as @角色 in this shot."""
+) -> list[tuple[int, MiniMaxH3CharacterVoiceRole, list[re.Pattern[str]]]]:
+    """Return roles selected by @role or the template's (S1) speaker label."""
     if not isinstance(voice_cast, MiniMaxH3CharacterVoiceCast):
-        return items, str(prompt or "")
+        return []
     source = str(prompt or "")
     active = []
     for position, role in enumerate(voice_cast.roles, start=1):
@@ -6168,8 +6247,75 @@ def _apply_character_voice_cast(
             _voice_mention_pattern(f"@{role.name}"),
             _voice_mention_pattern(f"@{role.role_id}"),
         ]
-        if any(pattern.search(source) for pattern in patterns):
+        has_role_marker = any(pattern.search(source) for pattern in patterns)
+        has_speaker_label = _voice_speaker_seat_pattern(position).search(source) is not None
+        if has_role_marker or has_speaker_label:
             active.append((position, role, patterns))
+    return active
+
+
+def _resolve_sequence_voice_cast(
+    prompt: str,
+    voice_cast: MiniMaxH3CharacterVoiceCast | None,
+    previous_segment: Any,
+) -> tuple[MiniMaxH3CharacterVoiceCast | None, tuple[str, ...]]:
+    """Resolve this segment's cast, inheriting the prior active speakers.
+
+    An explicit @role or (Sx) label always wins. If the current prompt has no
+    role marker, the same stable role IDs from the previous segment remain
+    locked so H3 continues to receive their reference audio instead of drifting.
+    """
+    inherited_cast = getattr(previous_segment, "voice_cast", None)
+    active_cast = (
+        voice_cast
+        if isinstance(voice_cast, MiniMaxH3CharacterVoiceCast)
+        else inherited_cast if isinstance(inherited_cast, MiniMaxH3CharacterVoiceCast) else None
+    )
+    if not isinstance(active_cast, MiniMaxH3CharacterVoiceCast):
+        return None, ()
+
+    explicit_roles = _matched_character_voice_roles(prompt, active_cast)
+    if explicit_roles:
+        return active_cast, tuple(role.role_id for _position, role, _patterns in explicit_roles)
+    if not active_cast.roles:
+        return active_cast, ()
+
+    previous_sample = getattr(previous_segment, "sample", None)
+    inherited_ids = tuple(getattr(previous_sample, "active_voice_ids", ()) or ())
+    if not inherited_ids:
+        return active_cast, ()
+
+    available_ids = {role.role_id for role in active_cast.roles}
+    missing_ids = [role_id for role_id in inherited_ids if role_id not in available_ids]
+    if missing_ids:
+        raise ValueError(
+            "上一段锁定的角色音色在当前角色音色库中不存在："
+            + "、".join(missing_ids)
+            + "。请恢复相同角色，或在当前段用 @角色 明确选择新音色。"
+        )
+    return active_cast, inherited_ids
+
+
+def _apply_character_voice_cast(
+    prompt: str,
+    items: list[_MediaInput],
+    voice_cast: MiniMaxH3CharacterVoiceCast | None,
+    *,
+    allow_reference_audio: bool = True,
+    forced_role_ids: tuple[str, ...] = (),
+) -> tuple[list[_MediaInput], str]:
+    """Bind role voices selected by @角色 or a template (Sx) speaker label."""
+    if not isinstance(voice_cast, MiniMaxH3CharacterVoiceCast):
+        return items, str(prompt or "")
+    source = str(prompt or "")
+    active = _matched_character_voice_roles(source, voice_cast)
+    if not active and forced_role_ids:
+        forced = set(forced_role_ids)
+        active = [
+            (position, role, [])
+            for position, role in enumerate(voice_cast.roles, start=1)
+            if role.role_id in forced
+        ]
     if not active:
         return items, source
 
@@ -8182,6 +8328,7 @@ class MiniMaxH3EasyRenderAdvanced:
         digital_default_upscaler = _resolve_selflift_upscaler(None)
         if digital_default_upscaler not in digital_upscalers:
             digital_default_upscaler = digital_upscalers[0]
+        refiner_loras = _lora_choices()
         return {
             "required": {
                 "h3_context": ("MINIMAX_H3_CONTEXT",),
@@ -8272,6 +8419,17 @@ class MiniMaxH3EasyRenderAdvanced:
                         "tooltip": "开启后每步通过 ComfyUI 原生预览通道显示采样画面；关闭后不生成任何采样预览。",
                     },
                 ),
+                # 追加在最后：旧工作流按位置保存的 widget 值不会被挤乱。
+                "digital_human_refiner_lora": (
+                    refiner_loras,
+                    {
+                        "default": "none",
+                        "tooltip": (
+                            "只给第二次潜空间采样使用的成片精修 LoRA，固定强度 1.0；"
+                            "一采模型不受影响。选择 none 表示二采不叠加额外 LoRA。"
+                        ),
+                    },
+                ),
             },
             "optional": {
                 # MODEL 补丁链显式连线优先；未连接时继续使用 h3_context 自带模型。
@@ -8324,6 +8482,7 @@ class MiniMaxH3EasyRenderAdvanced:
             "digital_human_upscale_scale",
             "digital_human_lowres_model", "digital_human_highres_model",
             "sample_preview",
+            "digital_human_refiner_lora",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -8652,6 +8811,7 @@ class MiniMaxH3EasyRenderAdvanced:
         digital_human_highres_model: Any = None,
         external_sampler: Any = None,
         external_sigmas: Any = None,
+        digital_human_refiner_lora: str = "none",
     ):
         """在同一个渲染器内完成长音频数字人的自动分段与最终合成。"""
         plan = h3_context.digital_human_plan
@@ -8680,6 +8840,10 @@ class MiniMaxH3EasyRenderAdvanced:
         sample_model, highres_model = cls._resolve_selflift_models(
             model, digital_human_lowres_model, digital_human_highres_model
         )
+        if refine_enabled:
+            highres_model = _apply_secondary_refiner_lora(
+                highres_model, digital_human_refiner_lora
+            )
         sampler_obj = external_sampler or comfy.samplers.sampler_object(sampler_name)
         if external_sigmas is None:
             sigmas_tensor = AICG3DSamplerAdvanced.calculate_sigmas(
@@ -8865,6 +9029,8 @@ class MiniMaxH3EasyRenderAdvanced:
         digital_human_highres_model=None,
         sample_preview=False,
         digital_human_upscale_scale=1.5,
+        digital_human_refiner_lora="none",
+        show_advanced_inputs=False,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
@@ -8922,6 +9088,7 @@ class MiniMaxH3EasyRenderAdvanced:
                     digital_human_upscale_scale=digital_human_upscale_scale,
                     digital_human_lowres_model=digital_human_lowres_model,
                     digital_human_highres_model=digital_human_highres_model,
+                    digital_human_refiner_lora=digital_human_refiner_lora,
                     external_sampler=sampler,
                     external_sigmas=sigmas,
                 )
@@ -8929,6 +9096,9 @@ class MiniMaxH3EasyRenderAdvanced:
                 if bool(digital_human_selflift):
                     sample_model, highres_model = self._resolve_selflift_models(
                         model, digital_human_lowres_model, digital_human_highres_model
+                    )
+                    highres_model = _apply_secondary_refiner_lora(
+                        highres_model, digital_human_refiner_lora
                     )
                     first_steps = _external_sampling_steps(sigmas, steps)
                     second_steps = max(1, min(6, int(digital_human_transition_step or 4)))
@@ -9205,6 +9375,22 @@ class MiniMaxH3EasyRenderAdvancedWithModel(MiniMaxH3EasyRenderAdvanced):
         required.update(base["required"])
         optional = dict(base.get("optional", {}))
         optional.pop("model", None)
+        # 高级输入使用一个可记忆的总开关折叠。采样预览固定放在最后一行，
+        # 避免二采参数展开后预览控件又跑到节点中间。
+        preview_definition = required.pop("sample_preview")
+        refiner_definition = required.pop("digital_human_refiner_lora")
+        required["digital_human_refiner_lora"] = refiner_definition
+        required["show_advanced_inputs"] = (
+            "BOOLEAN",
+            {
+                "default": False,
+                "tooltip": (
+                    "开 = 显示外部采样器、外部 Sigmas、引导图片、引导音频、首采模型和二采模型；"
+                    "关 = 收起这些可选输入。已连接的输入会自动保持展开，不会断线。"
+                ),
+            },
+        )
+        required["sample_preview"] = preview_definition
         return {"required": required, "optional": optional}
 
 
@@ -9399,6 +9585,7 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         from aicg3d_h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             STAGE_SAMPLE,
+            STAGE_SAMPLE_SECOND,
             RenderPreviewEncoder,
             RenderProgressReporter,
         )
@@ -12595,7 +12782,16 @@ class MiniMaxH3EasySegmentDecode:
         exposure_mode = str(
             segments.plan.get("exposure_lock") if isinstance(segments.plan, Mapping) else ""
         )
-        seam_matcher = _SequenceSeamMatcher(exposure_mode == SEQUENCE_EXPOSURE_LOCK_ON)
+        second_pass_enabled = bool(
+            segments.plan.get("second_pass", False)
+        ) if isinstance(segments.plan, Mapping) else False
+        # In second-pass mode the next segment starts from the refined tail that
+        # was actually shown. Replacing frame zero with an extrapolated bridge
+        # would create the one-frame ghost this matcher is meant to prevent.
+        seam_matcher = _SequenceSeamMatcher(
+            exposure_mode == SEQUENCE_EXPOSURE_LOCK_ON,
+            allow_motion_bridge=not second_pass_enabled,
+        )
 
         def start_video(frame: torch.Tensor):
             height, width = int(frame.shape[0]), int(frame.shape[1])
@@ -13162,7 +13358,11 @@ SEQUENCE_SEAM_ADD_LUMA_FRAMES = 12
 SEQUENCE_SEAM_ADD_LUMA_MAX = 0.10
 SEQUENCE_SEGMENT_LUMA_MAX = 0.04
 SEQUENCE_SEGMENT_LUMA_EPSILON = 0.002
-SEQUENCE_SEAM_LUMA_EPSILON = 0.008
+SEQUENCE_SEAM_LUMA_EPSILON = 0.002
+SEQUENCE_SEAM_TAIL_FRAMES = 1
+SEQUENCE_SEAM_TAIL_LOOKBACK_FRAMES = 8
+SEQUENCE_SEAM_TAIL_LUMA_EPSILON = 0.004
+SEQUENCE_SEAM_TAIL_LUMA_MAX = 0.06
 
 #: Only soften a one-frame seam jump when the two views are still the same
 #: shot. Hard cuts are intentionally left alone, because blending across them
@@ -13260,6 +13460,88 @@ def _sequence_fit_frame(frame: torch.Tensor, width: int, height: int) -> torch.T
     return resized.permute(1, 2, 0).to(dtype=frame.dtype)
 
 
+def _sequence_reference_tail_frame(previous_tail: torch.Tensor) -> torch.Tensor:
+    """Pick the tail frame closest to the stable tail luminance.
+
+    H3 can leave one short exposure pulse on the final frame. Using that
+    frame directly as the next segment's guide transfers the pulse to the
+    join, so use the median tail level and its nearest real frame instead.
+    """
+    if not isinstance(previous_tail, torch.Tensor) or previous_tail.numel() == 0:
+        return previous_tail
+    count = min(3, int(previous_tail.shape[0]))
+    if count <= 1:
+        return previous_tail[-1]
+    candidates = previous_tail[-count:]
+    values = [_sequence_frame_luma(frame) for frame in candidates]
+    ordered = sorted(values)
+    reference = float(ordered[len(ordered) // 2])
+    return candidates[min(range(count), key=lambda item: abs(values[item] - reference))]
+
+
+def _sequence_stabilize_tail_exposure(frames: torch.Tensor) -> tuple[torch.Tensor, float]:
+    """Remove an exposure pulse from a segment's final visible frame.
+
+    This is temporal-only: it never resamples or blends adjacent images. A
+    stable run before the final frame is used as the exposure reference, so
+    the next segment cannot inherit an anomalous last frame.
+    """
+    count = int(frames.shape[0]) if isinstance(frames, torch.Tensor) else 0
+    tail_count = min(int(SEQUENCE_SEAM_TAIL_FRAMES), max(0, count // 5))
+    lookback = min(
+        int(SEQUENCE_SEAM_TAIL_LOOKBACK_FRAMES),
+        max(0, count - tail_count),
+    )
+    if tail_count <= 0 or lookback < 4 or frames.ndim != 4:
+        return frames, 0.0
+    history_start = count - tail_count - lookback
+    history = [
+        _sequence_frame_luma(frames[index])
+        for index in range(history_start, count - tail_count)
+    ]
+    ordered = sorted(history)
+    baseline = float(ordered[len(ordered) // 2])
+    # A real fade or moving light begins in this history window. Leave it
+    # alone; only abrupt pulses after an otherwise stable run are repaired.
+    if max(history) - min(history) > max(0.025, SEQUENCE_SEAM_TAIL_LUMA_EPSILON * 3.0):
+        return frames, 0.0
+    corrected = 0.0
+    for offset in range(tail_count):
+        frame_index = count - tail_count + offset
+        current = _sequence_frame_luma(frames[frame_index])
+        delta = baseline - current
+        if abs(delta) < SEQUENCE_SEAM_TAIL_LUMA_EPSILON:
+            continue
+        # Full correction on the final frame; a short ramp on earlier tail
+        # frames prevents the repair itself becoming a new exposure pulse.
+        weight = 1.0 if offset == tail_count - 1 else (offset + 1) / float(tail_count)
+        delta = max(
+            -float(SEQUENCE_SEAM_TAIL_LUMA_MAX),
+            min(float(SEQUENCE_SEAM_TAIL_LUMA_MAX), float(delta) * float(weight)),
+        )
+        if abs(delta) < 1e-5:
+            continue
+        frames[frame_index] = (
+            frames[frame_index].float() + delta
+        ).clamp_(0.0, 1.0).to(dtype=frames.dtype)
+        corrected = max(corrected, abs(float(delta)))
+    return frames, float(corrected)
+
+
+    """Resize one HWC guide frame without depending on the main H3 helpers."""
+    if frame.dim() == 4:
+        frame = frame[0]
+    if tuple(frame.shape[:2]) == (int(height), int(width)):
+        return frame
+    resized = torch.nn.functional.interpolate(
+        frame.permute(2, 0, 1).unsqueeze(0).float(),
+        size=(int(height), int(width)),
+        mode="bilinear",
+        align_corners=False,
+    )[0]
+    return resized.permute(1, 2, 0).to(dtype=frame.dtype)
+
+
 def _sequence_box_blur(frames: torch.Tensor, kernel: int) -> torch.Tensor:
     """Box blur an HWC/BHWC frame batch for the low-frequency seam grade."""
     k = int(kernel)
@@ -13302,7 +13584,11 @@ def _sequence_match_opening_grade(frames: torch.Tensor, previous_tail: torch.Ten
     ]
     if not weights or weights[-1] <= 0.0:
         return frames
-    guide = _sequence_fit_frame(previous_tail[-1], int(frames.shape[2]), int(frames.shape[1]))
+    guide = _sequence_fit_frame(
+        _sequence_reference_tail_frame(previous_tail),
+        int(frames.shape[2]),
+        int(frames.shape[1]),
+    )
     out = frames
     try:
         source = out[:count].float()
@@ -13337,7 +13623,11 @@ def _sequence_additive_opening_luma(
     count = min(int(SEQUENCE_SEAM_ADD_LUMA_FRAMES), int(frames.shape[0]) - 1)
     if count < 2:
         return frames, 0.0, 0.0
-    guide = _sequence_fit_frame(previous_tail[-1], int(frames.shape[2]), int(frames.shape[1]))
+    guide = _sequence_fit_frame(
+        _sequence_reference_tail_frame(previous_tail),
+        int(frames.shape[2]),
+        int(frames.shape[1]),
+    )
     y_start = _sequence_frame_luma(guide)
     y0 = _sequence_frame_luma(frames[0])
     y1 = _sequence_frame_luma(frames[min(1, count)])
@@ -13383,7 +13673,9 @@ def _sequence_seam_snapshot(
             "structure_diff": 0.0,
         }
     guide = _sequence_fit_frame(
-        previous_tail[-1], int(frames.shape[2]), int(frames.shape[1])
+        _sequence_reference_tail_frame(previous_tail),
+        int(frames.shape[2]),
+        int(frames.shape[1]),
     )
     body0 = frames[0]
     y_start = _sequence_frame_luma(guide)
@@ -13498,8 +13790,9 @@ def _sequence_motion_bridge(
 class _SequenceSeamMatcher:
     """Director-style seam repair and diagnostics for the sequence combiner."""
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True, allow_motion_bridge: bool = True):
         self.enabled = bool(enabled)
+        self.allow_motion_bridge = bool(allow_motion_bridge)
         self.previous_tail: torch.Tensor | None = None
         self.previous_segment_luma: float | None = None
         self.records: list[dict[str, Any]] = []
@@ -13508,19 +13801,28 @@ class _SequenceSeamMatcher:
         if not isinstance(frames, torch.Tensor) or frames.numel() == 0:
             return frames
         repaired = frames
+        repair_enabled = bool(self.enabled)
+        tail_correction = 0.0
+        if repair_enabled:
+            repaired, tail_correction = _sequence_stabilize_tail_exposure(repaired)
+            if tail_correction > 0.0:
+                print(
+                    f"[MiniMax H3 Aicg] 视频段落 {index}：尾帧曝光脉冲已平滑"
+                    f"（校正 {tail_correction:.3f}）。"
+                )
         before = None
         hard_cut = False
         bridge = None
         global_offset = 0.0
-        repair_enabled = bool(self.enabled)
         if self.previous_tail is not None:
             before = _sequence_seam_snapshot(repaired, self.previous_tail)
             hard_cut = (
                 before["structure_diff"] > SEQUENCE_SEAM_BRIDGE_CUT_STRUCTURE_DIFF
                 and before["lowfreq_diff"] > SEQUENCE_SEAM_BRIDGE_CUT_MIN_LOWFREQ
             )
-            repair_enabled = bool(self.enabled)
-            bridge_enabled = bool(repair_enabled and not hard_cut)
+            bridge_enabled = bool(
+                repair_enabled and not hard_cut and self.allow_motion_bridge
+            )
             repaired, bridge = (
                 _sequence_motion_bridge(
                     repaired, self.previous_tail, before["lowfreq_diff"]
@@ -13932,7 +14234,7 @@ class MiniMaxH3SequenceConfig:
     #: 可选的外部采样器 / sigma 调度；连接后优先于 sampler_name / scheduler / steps。
     sampler: Any = None
     sigmas: Any = None
-    #: 每段一采完成后的 V2 高清二采；不改动跨段衔接使用的一采基准 latent。
+    #: 每段一采完成后的 V2 高清二采；跨段衔接仍继承一采原生尾帧。
     second_pass: bool = False
     second_pass_model: str = "none"
     second_pass_scale: float = 1.5
@@ -13962,6 +14264,8 @@ class MiniMaxH3SequenceSegment:
     cache_scope: str = ""
     chain_key: str = ""
     node_id: str = ""
+    #: Optional first-pass sample retained only while the first-pass VIDEO output is requested.
+    first_pass_sample: MiniMaxH3SegmentSample | None = None
 
 
 def _sequence_collect_chain(final_segment: Any) -> list[MiniMaxH3SequenceSegment]:
@@ -14276,7 +14580,7 @@ class MiniMaxH3EasySequenceGlobal:
                         "tooltip": (
                             "开启后每一段先完整一采，再用 V2 Latent 放大器提升到 1.5 倍，"
                             "保持音频 latent 不变并执行 4 步、0.35 降噪的第二次采样。"
-                            "跨段衔接仍使用一采的原始尺寸 latent，不会影响下一段。"
+                            "二采只提升本段最终画面，跨段衔接始终使用一采原生尾帧，避免高清尾帧反复缩放产生接缝模糊。"
                         ),
                     },
                 ),
@@ -14528,6 +14832,7 @@ class MiniMaxH3EasySequenceSegment:
         "全局设置顺着 previous_segment 继承；每段可以用节点内嵌资源库选择独立素材，"
         "没有独立素材时沿用上一段，也可以继续外接资源库 Bundle。"
         "需要固定本段画面或声音时，可连接 guide_image / guide_audio 并设置 guide_frame_idx。"
+        "一采与二采完成后会直接在节点内分阶段显示视频预览，不提供独立视频输出口。"
     )
 
     @classmethod
@@ -14656,6 +14961,91 @@ class MiniMaxH3EasySequenceSegment:
         )
         return state
 
+    @staticmethod
+    def _temporary_video_preview(video: Any, prefix: str) -> dict[str, Any]:
+        width, height = video.get_dimensions()
+        folder, name, counter, subfolder, _ = folder_paths.get_save_image_path(
+            str(prefix or "AICG3D_video_preview"),
+            folder_paths.get_temp_directory(),
+            int(width),
+            int(height),
+        )
+        os.makedirs(folder, exist_ok=True)
+        filename = f"{name}_{counter:05}_.mp4"
+        video.save_to(
+            os.path.join(folder, filename),
+            format=Types.VideoContainer.MP4,
+            codec="auto",
+            preset="ultrafast",
+        )
+        return {"filename": filename, "subfolder": subfolder, "type": "temp"}
+
+    @classmethod
+    def _deliver_sample_video(
+        cls,
+        config: MiniMaxH3SequenceConfig,
+        sample: MiniMaxH3SegmentSample,
+        index: int,
+        timeline_start: int,
+        source_audio: Mapping[str, Any] | None,
+        reason: str,
+    ):
+        """Decode one stored segment sample into an optional standalone VIDEO."""
+        if not isinstance(sample, MiniMaxH3SegmentSample):
+            raise RuntimeError(f"视频段落 {index} 没有可解码的采样数据")
+        profile = _sequence_vram_profile(config)
+        if profile.unload_before_decode:
+            _release_bundle_models(config.bundle, reason, profile)
+        latent = _segment_pack_latent(sample.video_latent, sample.audio_latent)
+        try:
+            decoded = nodes.VAEDecode().decode(config.bundle.video_vae, latent)[0]
+            if not isinstance(decoded, torch.Tensor) or decoded.ndim != 4 or decoded.shape[0] == 0:
+                raise RuntimeError(f"视频段落 {index} 没有解码出可用画面")
+            output_frames = max(5, int(sample.output_frames or sample.delivery_frames))
+            start = max(0, int(sample.head_frames))
+            end = min(int(decoded.shape[0]), start + output_frames)
+            frames = decoded[start:end, ..., :3].detach().to(device="cpu", dtype=torch.float32).contiguous()
+            if frames.shape[0] <= 0:
+                raise RuntimeError(f"视频段落 {index} 的交付帧范围为空")
+            if source_audio is not None:
+                audio = _segment_trim_audio(source_audio, int(timeline_start), int(frames.shape[0]))
+            else:
+                decoded_audio = nodes_audio.vae_decode_audio(config.bundle.audio_vae, latent)
+                audio = _segment_trim_audio(decoded_audio, start, int(frames.shape[0]))
+            return InputImpl.VideoFromComponents(
+                Types.VideoComponents(
+                    images=frames,
+                    audio=audio,
+                    frame_rate=Fraction(str(float(config.fps or h3.FPS))),
+                )
+            )
+        finally:
+            del latent
+
+    @classmethod
+    def _deliver_video(cls, config: MiniMaxH3SequenceConfig, result: "MiniMaxH3SequenceSegment"):
+        return cls._deliver_sample_video(
+            config,
+            result.sample,
+            int(result.index),
+            int(result.timeline_start),
+            result.source_audio,
+            "本段视频输出解码",
+        )
+
+    @classmethod
+    def _deliver_first_pass_video(cls, config: MiniMaxH3SequenceConfig, result: "MiniMaxH3SequenceSegment"):
+        if not isinstance(result.first_pass_sample, MiniMaxH3SegmentSample):
+            raise RuntimeError(f"视频段落 {result.index} 没有可输出的一采画面")
+        return cls._deliver_sample_video(
+            config,
+            result.first_pass_sample,
+            int(result.index),
+            int(result.timeline_start),
+            result.source_audio,
+            "一采视频输出解码",
+        )
+
     @classmethod
     def _apply_sequence_second_pass(
         cls,
@@ -14666,15 +15056,27 @@ class MiniMaxH3EasySequenceSegment:
         seed: Any,
         on_step: Any = None,
         on_preview: Any = None,
+        boundary_frames: int = 0,
+        previous_second_pass_tail: torch.Tensor | None = None,
     ):
-        """Keep continuity on the first-pass grid and return the refined output."""
+        """Refine this segment and return its native Pass 1 continuity tail."""
         continuity_video, _audio = _segment_latent_streams(sampled)
         if not config.second_pass:
             return sampled, continuity_video
 
+        # Pass 2 is only the final picture for this segment. Keep segment
+        # continuity on the untouched Pass 1 latent grid so later segments
+        # never inherit a high-res -> low-res spatial round trip.
+        first_pass_continuity_video = continuity_video
+
         from aicg3d_h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
 
         device = "cuda" if getattr(model.load_device, "type", "cpu") == "cuda" else "cpu"
+        # Keep the whole segment together for the learned 3D upscaler. Its
+        # temporal path contains six 5-token convolutions; splitting the hidden
+        # handoff from the visible body pads the first visible token and creates
+        # the soft opening frame seen after every join. The hidden head is
+        # replaced below with the exact previous Pass 2 tail instead.
         upscaled_video, upscaled_audio = MiniMaxH3EasyRenderPass2._upscale_video_latent(
             sampled,
             config.second_pass_model,
@@ -14684,14 +15086,63 @@ class MiniMaxH3EasySequenceSegment:
             True,
             model,
         )
+        boundary_tokens = (
+            int(h3.temporal_shape(max(0, int(boundary_frames)))[1])
+            if int(boundary_frames) > 0 else 0
+        )
+        lock_previous_head = False
+        if 0 < boundary_tokens < int(upscaled_video.shape[2]):
+            if isinstance(previous_second_pass_tail, torch.Tensor):
+                tail = previous_second_pass_tail.to(
+                    device=upscaled_video.device, dtype=upscaled_video.dtype,
+                )
+                if int(tail.shape[2]) >= boundary_tokens:
+                    tail = tail[:, :, -boundary_tokens:]
+                if (
+                    int(tail.shape[2]) == boundary_tokens
+                    and tuple(tail.shape[-2:]) == tuple(upscaled_video.shape[-2:])
+                ):
+                    upscaled_video = torch.cat(
+                        (tail.contiguous(), upscaled_video[:, :, boundary_tokens:]),
+                        dim=2,
+                    ).contiguous()
+                    lock_previous_head = True
+                    print(
+                        "[MiniMax H3 Aicg] 二采接缝保护：已接回上一段真实二采尾帧，"
+                        f"隐藏头 {boundary_frames} 帧 / {boundary_tokens} 个 latent token，二采不再改写接缝。"
+                    )
+                else:
+                    print(
+                        "[MiniMax H3 Aicg] 二采接缝保护已跳过：上一段二采尾帧与当前画布不一致，"
+                        f"尾帧 {tuple(tail.shape)}，当前 {tuple(upscaled_video.shape)}。"
+                    )
         second_conditioning = _resize_keyframe_conditioning(
             conditioning,
             int(upscaled_video.shape[-2]),
             int(upscaled_video.shape[-1]),
         )
-        second_input = _lock_audio_latent(
-            _segment_pack_latent(upscaled_video, upscaled_audio),
-            upscaled_audio,
+        # The inherited handoff is hidden by delivery trimming, but it still
+        # participates in H3 temporal attention. Keep the exact previous Pass 2
+        # tail and mask it from refinement so sampling cannot introduce a new
+        # noise trajectory at the join. The visible body remains fully sampled.
+        video_mask = torch.ones(
+            (upscaled_video.shape[0], 1, upscaled_video.shape[2],
+             upscaled_video.shape[3], upscaled_video.shape[4]),
+            device=upscaled_video.device,
+            dtype=upscaled_video.dtype,
+        )
+        if lock_previous_head:
+            # The handoff head is already the exact high-resolution tail from
+            # the preceding segment. Freezing it prevents Pass 2 from applying a
+            # fresh noise trajectory to the join and keeps its pixels bit-identical.
+            video_mask[:, :, :boundary_tokens] = 0.0
+        audio_mask = torch.zeros(
+            (upscaled_audio.shape[0], 1, upscaled_audio.shape[2], upscaled_audio.shape[3]),
+            device=upscaled_audio.device,
+            dtype=upscaled_audio.dtype,
+        )
+        second_input = _segment_pack_av(
+            upscaled_video, upscaled_audio, video_mask, audio_mask,
         )
         (refined,) = AICG3DSamplerAdvanced().sample(
             model,
@@ -14708,7 +15159,13 @@ class MiniMaxH3EasySequenceSegment:
             on_preview=on_preview,
         )
         refined = _restore_audio_latent(refined, upscaled_audio)
-        return refined, continuity_video
+        refined_video, _refined_audio = _segment_latent_streams(refined)
+        if int(refined_video.shape[2]) != int(continuity_video.shape[2]):
+            raise RuntimeError("Pass 2 changed the segment temporal latent length")
+        # Pass 2 remains the delivered high-resolution output, but Motion Context
+        # must continue from Pass 1. Shrinking the refined tail back to the Pass 1
+        # canvas softens the next segment's handoff and first visible token.
+        return refined, first_pass_continuity_video
 
     @classmethod
     def sample_segment(
@@ -14758,7 +15215,6 @@ class MiniMaxH3EasySequenceSegment:
                 )
         if previous_segment is not None and not isinstance(previous_segment, MiniMaxH3SequenceSegment):
             raise ValueError("previous_segment 只能接本插件「视频段落」节点的 segment 输出")
-        active_voice_cast = voice_cast if isinstance(voice_cast, MiniMaxH3CharacterVoiceCast) else None
         # 全局设置只在第 1 段接：后面的段落顺着 previous_segment 用同一份配置。
         config = sequence_config
         if config is None and previous_segment is not None:
@@ -14856,8 +15312,14 @@ class MiniMaxH3EasySequenceSegment:
                 # 没接音频就没有可锁的音轨，直接按普通流程跑，不报错。
                 digital_human = False
 
+        active_voice_cast, active_voice_ids = _resolve_sequence_voice_cast(
+            prompt_text, voice_cast, previous_segment
+        )
         items, prompt_text = _apply_character_voice_cast(
-            prompt_text, list(items), active_voice_cast
+            prompt_text,
+            list(items),
+            active_voice_cast,
+            forced_role_ids=active_voice_ids,
         )
         if items:
             items, prompt_text = bind_reference_media(prompt_text, items)
@@ -14878,6 +15340,14 @@ class MiniMaxH3EasySequenceSegment:
         state = cls._previous_state(config, previous_segment, index)
         motion_tail_latent = state["motion_tail_latent"]
         tail_frames = state["tail_frames"]
+        previous_second_pass_tail = None
+        if config.second_pass and previous_segment is not None:
+            previous_sample = previous_segment.sample
+            previous_video = previous_sample.video_latent
+            if isinstance(previous_video, torch.Tensor) and previous_video.ndim == 5:
+                previous_second_pass_tail = _segment_motion_context_tail_from_latent(
+                    previous_video, context_length,
+                )
         # 数字人模式的音频由驱动音轨整段锁定，不再叠加「上一段尾音」的上下文条件。
         audio_context_reference = None if digital_human else state["audio_reference"]
         # RGB Guide carries the visual tail; keep the matching audio tail too.
@@ -14947,6 +15417,7 @@ class MiniMaxH3EasySequenceSegment:
         from aicg3d_h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             STAGE_SAMPLE,
+            STAGE_SAMPLE_SECOND,
             RenderPreviewEncoder,
             RenderProgressReporter,
         )
@@ -14974,6 +15445,11 @@ class MiniMaxH3EasySequenceSegment:
                 return reporter.update_preview(preview.decode(x0))
             on_preview = preview_callback
 
+        want_segment_video = True
+        want_first_pass_video = True
+        first_pass_sample = None
+        first_pass_video = None
+        first_pass_preview_sent = False
         done = False
         try:
             sampling_steps = max(1, int(config.steps))
@@ -14987,7 +15463,7 @@ class MiniMaxH3EasySequenceSegment:
                 )
             second_steps = int(config.second_pass_steps or 4) if config.second_pass else 0
             total_steps = sampling_steps + second_steps
-            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, total_steps)
+            reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, sampling_steps)
             (sampled,) = AICG3DSamplerAdvanced().sample(
                 model,
                 conditioning,
@@ -15000,10 +15476,51 @@ class MiniMaxH3EasySequenceSegment:
                 sampler=config.sampler,
                 sigmas=config.sigmas,
                 on_step=lambda done, _total: reporter.update_stage(
-                    min(int(done or 0), sampling_steps), total_steps
+                    min(int(done or 0), sampling_steps), sampling_steps
                 ),
                 on_preview=on_preview,
             )
+            if want_first_pass_video and config.second_pass:
+                first_video, first_audio = _segment_latent_streams(sampled)
+                try:
+                    first_pass_sample = MiniMaxH3SegmentSample(
+                        video_latent=first_video.detach().to("cpu").contiguous(),
+                        audio_latent=first_audio.detach().to("cpu").contiguous(),
+                        head_frames=head_frames,
+                        delivery_frames=delivery_frames,
+                        output_frames=delivery_frames,
+                        prompt=prompt_text,
+                        media=tuple(items),
+                        source_media=tuple(available_items),
+                        active_voice_ids=active_voice_ids,
+                        motion_context_tail_latent=None,
+                    )
+                finally:
+                    del first_video, first_audio
+            if want_first_pass_video and config.second_pass:
+                reporter.begin_decode()
+                first_pass_video = cls._deliver_sample_video(
+                    config,
+                    first_pass_sample,
+                    int(index),
+                    int(timeline_start),
+                    source_audio,
+                    "一采视频输出解码",
+                )
+                preview = cls._temporary_video_preview(
+                    first_pass_video, f"AICG3D_segment_{index:03d}_first_pass"
+                )
+                reporter.sequence_video_ready("first_pass", preview)
+                preview_path = os.path.join(
+                    folder_paths.get_temp_directory(),
+                    str(preview.get("subfolder") or ""),
+                    str(preview.get("filename") or ""),
+                )
+                first_pass_video = InputImpl.VideoFromFile(preview_path)
+                first_pass_preview_sent = True
+                print(f"[MiniMax H3 Aicg] 视频段落 {index}：一采视频已推送预览。")
+            if config.second_pass and second_steps > 0:
+                reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS1_SAMPLE_END, 1.0, second_steps)
             sampled, continuity_video_stream = cls._apply_sequence_second_pass(
                 sampled,
                 conditioning,
@@ -15011,9 +15528,11 @@ class MiniMaxH3EasySequenceSegment:
                 model,
                 seed,
                 on_step=lambda done, _total: reporter.update_stage(
-                    sampling_steps + min(int(done or 0), second_steps), total_steps
+                    min(int(done or 0), second_steps), second_steps
                 ),
                 on_preview=on_preview,
+                boundary_frames=head_frames,
+                previous_second_pass_tail=previous_second_pass_tail,
             )
             if config.second_pass:
                 print(
@@ -15036,10 +15555,12 @@ class MiniMaxH3EasySequenceSegment:
                 prompt=prompt_text,
                 media=tuple(items),
                 source_media=tuple(available_items),
+                active_voice_ids=active_voice_ids,
                 motion_context_tail_latent=motion_context_tail_latent,
             )
+            if want_first_pass_video and first_pass_sample is None:
+                first_pass_sample = sample
             del sampled, video_stream, audio_stream
-            done = True
             print(
                 f"[MiniMax H3 Aicg] 视频段落 {index} 完成：{float(seconds):g}s -> {delivery_frames} 帧"
                 f"（衔接头 {head_frames} 帧，共采样 {sample_length} 帧）。"
@@ -15060,8 +15581,42 @@ class MiniMaxH3EasySequenceSegment:
                 cache_scope=cache_scope,
                 chain_key=chain_key,
                 node_id=node_id,
+                first_pass_sample=first_pass_sample,
             )
+            if want_first_pass_video and first_pass_video is None:
+                reporter.begin_decode()
+                first_pass_video = cls._deliver_first_pass_video(config, result)
+                if not first_pass_preview_sent:
+                    preview = cls._temporary_video_preview(
+                        first_pass_video, f"AICG3D_segment_{index:03d}_first_pass"
+                    )
+                    reporter.sequence_video_ready("first_pass", preview)
+                    preview_path = os.path.join(
+                        folder_paths.get_temp_directory(),
+                        str(preview.get("subfolder") or ""),
+                        str(preview.get("filename") or ""),
+                    )
+                    first_pass_video = InputImpl.VideoFromFile(preview_path)
+                print(f"[MiniMax H3 Aicg] 视频段落 {index}：已输出一采视频。")
+            video = None
+            if want_segment_video:
+                reporter.begin_decode()
+                video = cls._deliver_video(config, result)
+                preview = cls._temporary_video_preview(
+                    video, f"AICG3D_segment_{index:03d}_final"
+                )
+                reporter.sequence_video_ready("final", preview)
+                preview_path = os.path.join(
+                    folder_paths.get_temp_directory(),
+                    str(preview.get("subfolder") or ""),
+                    str(preview.get("filename") or ""),
+                )
+                video = InputImpl.VideoFromFile(preview_path)
+                print(f"[MiniMax H3 Aicg] 视频段落 {index}：已输出本段视频。")
+            if result.first_pass_sample is not None:
+                result = replace(result, first_pass_sample=None)
             _sequence_cache_store(result)
+            done = True
             return (result,)
         finally:
             reporter.finish(done)
@@ -15253,6 +15808,7 @@ class MiniMaxH3EasySequenceCombine:
             "continuity_mode": str(config.continuity_mode),
             "audio_mode": str(config.audio_mode or CONTEXT_AUDIO_GENERATED),
             "exposure_lock": str(config.exposure_lock or SEQUENCE_EXPOSURE_LOCK_ON),
+            "second_pass": bool(config.second_pass),
             "source_audio": source_audio,
             "shots": shots,
             # 显存档位跟着计划传进解码器：合成前要不要先卸主干由它决定。

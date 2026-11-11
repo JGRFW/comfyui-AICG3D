@@ -27,10 +27,21 @@ def test_silent_autofill_does_not_show_empty_errors() -> None:
     assert ui.count('if (options.silent !== true) notify(') >= 3
 
 
+def test_fill_button_reads_clipboard_before_batch_fill() -> None:
+    ui = (PLUGIN_ROOT / "web" / "aicg3d_prompt_split.js").read_text(encoding="utf-8")
+    assert "async function fillSegmentsFromClipboard(node)" in ui
+    assert "navigator.clipboard.readText()" in ui
+    assert "fillSegmentsFromClipboard(node);" in ui
+    assert 'source: "clipboard"' in ui
+    assert "取消文本框上一次还没执行的自动填入" in ui
+    assert "请允许浏览器剪贴板权限" in ui
+
+
 def main() -> None:
     tests = (
         test_clear_button_and_safe_scope_exist,
         test_silent_autofill_does_not_show_empty_errors,
+        test_fill_button_reads_clipboard_before_batch_fill,
     )
     for test in tests:
         test()

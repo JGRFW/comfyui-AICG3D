@@ -7,9 +7,11 @@ import { api } from "../../scripts/api.js";
 
 const VOICE_LIBRARY_CLASS = "MiniMaxH3EasyCharacterVoiceLibrary";
 const SEQUENCE_SEGMENT_CLASS = "MiniMaxH3EasySequenceSegment";
-const MIN_NODE_WIDTH = 640;
-const MIN_NODE_HEIGHT = 740;
-const PANEL_HEIGHT = 620;
+// Keep the responsive controls usable while allowing the node to shrink freely.
+const MIN_NODE_WIDTH = 300;
+const MIN_NODE_HEIGHT = 340;
+const MIN_PANEL_HEIGHT = 230;
+const PANEL_HEIGHT = 420;
 
 const DEFAULTS = [
     { id: "girl", name: "女孩", description: "稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。", language: "Chinese", age: "child", gender: "female", pitch: "high", pace: "natural" },
@@ -133,6 +135,27 @@ function normalizeState(value) {
             };
         }),
     };
+}
+
+function readEnabled(node) {
+    const value = getWidget(node, "enabled")?.value;
+    if (value == null) return true;
+    return value === true || !["0", "false", "off", "no"].includes(String(value).trim().toLowerCase());
+}
+
+function writeEnabled(node, enabled) {
+    const value = Boolean(enabled);
+    const widget = getWidget(node, "enabled");
+    if (widget) {
+        widget.value = value;
+        if (widget._state) widget._state.value = value;
+    }
+    node.properties ||= {};
+    node.properties.minimax_h3_character_voice_enabled = value;
+    render(node);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
 }
 
 function readState(node) {
@@ -262,6 +285,9 @@ function roleRow(node, state, role, selected) {
     insert.type = "button";
     insert.className = "h3-voice-insert";
     insert.textContent = "插入本段";
+    const libraryEnabled = readEnabled(node);
+    insert.disabled = !libraryEnabled;
+    insert.title = libraryEnabled ? "插入角色音色标记" : "请先打开角色音色库开关";
     insert.addEventListener("pointerdown", (event) => event.stopPropagation());
     insert.addEventListener("click", () => {
         const target = preferredTarget();
@@ -329,7 +355,7 @@ function editorPanel(node, state, role) {
     name.type = "text";
     name.value = role.name;
     name.addEventListener("change", () => update({ name: name.value.trim() || role.name }, true));
-    const mode = selectControl(["described", "reference"], { described: "描述音色（可生成固定参考）", reference: "克隆音色（推荐锁定）" }, role.mode);
+    const mode = selectControl(["described", "reference"], { described: "描述音色（生成试听参考）", reference: "克隆音色（严格锁定）" }, role.mode);
     mode.addEventListener("change", () => update({ mode: mode.value }, true));
     const pictureValues = Array.from({ length: 10 }, (_, index) => String(index));
     const pictureLabels = Object.fromEntries(pictureValues.map((value) => [value, Number(value) === 0 ? "不绑定画面" : `图像${value}`]));
@@ -478,8 +504,8 @@ function editorPanel(node, state, role) {
     const hint = document.createElement("div");
     hint.className = "h3-voice-hint";
     hint.textContent = role.mode === "reference"
-        ? "克隆音色会把参考音频作为 H3 音色锚点；本段仍需至少 1 张图片或视频，单段最多同时使用 3 个克隆角色。"
-        : "描述音色会朗读当前“固定声线描述”的原文并生成试听，随后自动保存为 H3 克隆参考。绑定图像后，插入提示词会写成 @角色N <Picture X>。";
+        ? "克隆音色会把参考音频作为 H3 音色锚点；@角色 或 (S1)～(S6) 会自动锁定到后续段落，明确切换座位时才换声。"
+        : "描述音色会朗读“固定声线描述”并生成试听；@角色 或 (S1)～(S6) 会跨段沿用。建议生成试听并转为克隆音色，锁定更稳。";
     panel.append(hint);
     return panel;
 }
@@ -488,6 +514,8 @@ function render(node) {
     const panel = node?.__h3VoicePanel;
     if (!panel) return;
     const state = readState(node);
+    const enabled = readEnabled(node);
+    panel.classList.toggle("is-disabled", !enabled);
     const selected = state.roles.find((role) => role.id === node.__h3VoiceSelected) || state.roles[0];
     node.__h3VoiceSelected = selected?.id || "";
     panel.textContent = "";
@@ -498,8 +526,23 @@ function render(node) {
     title.textContent = "固定角色音色库";
     const summary = document.createElement("div");
     summary.className = "h3-voice-summary";
-    summary.textContent = `6 个角色 · ${state.roles.filter((role) => role.mode === "reference").length} 个克隆`;
-    header.append(title, summary);
+    summary.textContent = enabled
+        ? `6 个角色 · ${state.roles.filter((role) => role.mode === "reference").length} 个克隆`
+        : "已关闭 · 本次运行不应用角色音色";
+    const headerMeta = document.createElement("div");
+    headerMeta.className = "h3-voice-header-meta";
+    const enableLabel = document.createElement("label");
+    enableLabel.className = "h3-voice-enable";
+    const enableSwitch = document.createElement("input");
+    enableSwitch.type = "checkbox";
+    enableSwitch.className = "h3-voice-enable-switch";
+    enableSwitch.checked = enabled;
+    enableSwitch.setAttribute("role", "switch");
+    enableSwitch.setAttribute("aria-label", "启用角色音色库");
+    enableSwitch.addEventListener("change", () => writeEnabled(node, enableSwitch.checked));
+    enableLabel.append(enableSwitch, document.createTextNode(enabled ? "启用" : "关闭"));
+    headerMeta.append(summary, enableLabel);
+    header.append(title, headerMeta);
     const rows = document.createElement("div");
     rows.className = "h3-voice-rows";
     for (const role of state.roles) rows.append(roleRow(node, state, role, role.id === selected?.id));
@@ -521,7 +564,15 @@ function installStyles() {
     }
     style.textContent = `
       .h3-voice-panel { container-type:inline-size; display:flex; flex-direction:column; gap:7px; width:100%; height:100%; min-width:0; min-height:0; box-sizing:border-box; padding:9px; border:1px solid #303840; border-radius:6px; background:#20262c; color:#dce5eb; overflow:auto; overscroll-behavior:contain; }
-      .h3-voice-header { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+      .h3-voice-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+      .h3-voice-header-meta { display:flex; align-items:center; justify-content:flex-end; gap:9px; min-width:0; }
+      .h3-voice-enable { display:flex; align-items:center; gap:5px; flex:0 0 auto; color:#b8c7d1; font-size:10px; cursor:pointer; user-select:none; }
+      .h3-voice-enable-switch { position:relative; appearance:none; width:29px; height:16px; margin:0; border:1px solid #4c5b66; border-radius:999px; background:#313a42; cursor:pointer; transition:background .15s ease,border-color .15s ease; }
+      .h3-voice-enable-switch::after { content:""; position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%; background:#b9c4cc; transition:transform .15s ease,background .15s ease; }
+      .h3-voice-enable-switch:checked { border-color:#34755f; background:#28634f; }
+      .h3-voice-enable-switch:checked::after { transform:translateX(13px); background:#dff9ed; }
+      .h3-voice-panel.is-disabled .h3-voice-rows,.h3-voice-panel.is-disabled .h3-voice-editor { opacity:.48; filter:saturate(.55); }
+      .h3-voice-insert:disabled { opacity:.45; cursor:not-allowed; }
       .h3-voice-title { font-size:14px; font-weight:700; color:#f2f6f8; }
       .h3-voice-summary,.h3-voice-hint,.h3-voice-target { color:#8ea0ad; font-size:10px; line-height:1.35; }
       .h3-voice-rows { display:flex; flex-direction:column; gap:4px; flex:0 0 auto; }
@@ -590,6 +641,7 @@ function syncVoiceDomLayout(node) {
     resizeVoiceNode(node);
     const widget = node.__h3VoiceWidget;
     const element = widget?.element;
+    const panel = node.__h3VoicePanel;
     if (element) {
         element.style.minWidth = "0";
         element.style.width = "100%";
@@ -599,13 +651,25 @@ function syncVoiceDomLayout(node) {
             // Classic Nodes can restore an old saved size after the DOM
             // widget was attached, while Vue Nodes can keep the first measured
             // width after a later resize. Keep the host tied to node width.
-            host.style.width = `${Math.max(320, Number(node.size?.[0] || 0) - 20)}px`;
-            const vueHost = host.classList.contains("col-span-2");
-            if (vueHost) {
-                host.style.height = "";
-                element.style.height = "100%";
-            } else if (parseFloat(host.style.height || "0") <= 0) {
-                host.style.height = `${PANEL_HEIGHT}px`;
+            const widthFloor = Math.max(1, MIN_NODE_WIDTH - 20);
+            host.style.width = `${Math.max(widthFloor, Number(node.size?.[0] || 0) - 20)}px`;
+            const panelHeight = Math.max(
+                MIN_PANEL_HEIGHT,
+                Number(node.size?.[1] || 0) - 110,
+            );
+            widget.computedHeight = panelHeight;
+            host.style.minHeight = "0";
+            host.style.height = `${panelHeight}px`;
+            host.style.maxHeight = `${panelHeight}px`;
+            host.style.overflow = "hidden";
+            element.style.height = `${panelHeight}px`;
+            if (panel) {
+                panel.style.minWidth = "0";
+                panel.style.width = `${Math.max(widthFloor, Number(node.size?.[0] || 0) - 20)}px`;
+                panel.style.maxWidth = "100%";
+                panel.style.minHeight = "0";
+                panel.style.height = `${panelHeight}px`;
+                panel.style.maxHeight = `${panelHeight}px`;
             }
         }
     }
@@ -631,14 +695,15 @@ function setup(node) {
     installStyles();
     resizeVoiceNode(node);
     setHiddenWidget(getWidget(node, "voice_state"));
+    setHiddenWidget(getWidget(node, "enabled"));
     const panel = document.createElement("div");
     panel.className = "h3-voice-panel";
     panel.addEventListener("pointerdown", (event) => event.stopPropagation());
     const widget = node.addDOMWidget("h3_character_voice_library", "h3_character_voice_library", panel, {
         serialize: false,
         hideOnZoom: false,
-        minNodeSize: [MIN_NODE_WIDTH, 0],
-        getMinHeight: () => PANEL_HEIGHT,
+        minNodeSize: [MIN_NODE_WIDTH, MIN_NODE_HEIGHT],
+        getMinHeight: () => MIN_PANEL_HEIGHT,
     });
     if (!widget) return;
     widget.serialize = false;
@@ -646,9 +711,9 @@ function setup(node) {
     widget.options ||= {};
     widget.options.serialize = false;
     widget.options.hideOnZoom = false;
-    widget.options.minNodeSize = [MIN_NODE_WIDTH, 0];
-    widget.options.getMinHeight = () => PANEL_HEIGHT;
-    widget.computeLayoutSize = () => ({ minHeight: PANEL_HEIGHT, minWidth: 0 });
+    widget.options.minNodeSize = [MIN_NODE_WIDTH, MIN_NODE_HEIGHT];
+    widget.options.getMinHeight = () => MIN_PANEL_HEIGHT;
+    widget.computeLayoutSize = () => ({ minHeight: MIN_PANEL_HEIGHT, minWidth: 0 });
     node.__h3VoiceWidget = widget;
     node.__h3VoicePanel = panel;
     if (!String(getWidget(node, "voice_state")?.value || "").trim()) writeState(node, defaultState(), false);

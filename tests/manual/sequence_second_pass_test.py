@@ -43,9 +43,9 @@ def main() -> None:
     ):
         assert name in required
 
-    first_video = torch.zeros((1, 24, 2, 4, 8), dtype=torch.float32)
+    first_video = torch.zeros((1, 24, 14, 4, 8), dtype=torch.float32)
     first_audio = torch.zeros((1, 32, 2, 1), dtype=torch.float32)
-    upscaled_video = torch.zeros((1, 24, 2, 6, 12), dtype=torch.float32)
+    upscaled_video = torch.zeros((1, 24, 14, 6, 12), dtype=torch.float32)
     first_latent = _segment_pack_latent(first_video, first_audio)
     conditioning = [[torch.zeros((1, 8), dtype=torch.float32), {}]]
     config = SimpleNamespace(
@@ -61,7 +61,13 @@ def main() -> None:
         sampler=None,
     )
     second_pass = {}
+    upscale_calls = []
+    previous_tail = torch.full((1, 24, 12, 6, 12), 0.25, dtype=torch.float32)
 
+    def fake_upscale(first_latent, *_args, **_kwargs):
+        video, audio = _segment_latent_streams(first_latent)
+        upscale_calls.append(int(video.shape[2]))
+        return torch.zeros((1, 24, video.shape[2], 6, 12), dtype=torch.float32), audio
     def fake_sample(
         model,
         second_conditioning,
@@ -82,12 +88,13 @@ def main() -> None:
             "denoise": denoise,
         })
         video, audio = _segment_latent_streams(second_latent)
-        return (_segment_pack_latent(video, torch.ones_like(audio)),)
+        refined_video = torch.full_like(video, 0.75)
+        return (_segment_pack_latent(refined_video, torch.ones_like(audio)),)
 
     with (
         patch(
             "aicg3d_h3easy.nodes.MiniMaxH3EasyRenderPass2._upscale_video_latent",
-            return_value=(upscaled_video, first_audio),
+            side_effect=fake_upscale,
         ),
         patch(
             "aicg3d_h3easy.nodes._resize_keyframe_conditioning",
@@ -104,17 +111,34 @@ def main() -> None:
             config,
             SimpleNamespace(load_device=torch.device("cpu")),
             123,
+            boundary_frames=39,
+            previous_second_pass_tail=previous_tail,
         )
 
     refined_video, refined_audio = _segment_latent_streams(refined)
     assert tuple(refined_video.shape) == tuple(upscaled_video.shape)
+    assert upscale_calls == [14], (
+        "Pass 2 must upscale the complete temporal sequence so the learned "
+        "5-token temporal convolutions never see a synthetic cut at the join"
+    )
     assert tuple(continuity_video.shape) == tuple(first_video.shape)
+    assert torch.count_nonzero(continuity_video) == 0, (
+        "continuity must stay on the native Pass 1 grid instead of inheriting "
+        "a downscaled Pass 2 tail, which softens the next segment"
+    )
     assert torch.equal(refined_audio, first_audio)
     mask_video, mask_audio = _segment_av_streams(
         second_pass["latent"].get("noise_mask"),
         "Smart Drama second-pass AV mask is missing",
     )
-    assert torch.all(mask_video > 0)
+    assert torch.all(mask_video[:, :, :12] == 0.0), (
+        "the hidden handoff must stay bit-identical to the previous Pass 2 tail"
+    )
+    assert torch.all(mask_video[:, :, 12:] == 1.0)
+    pass2_input_video, _pass2_input_audio = _segment_latent_streams(second_pass["latent"])
+    assert torch.equal(pass2_input_video[:, :, :12], previous_tail), (
+        "Pass 2 must start from the exact high-resolution tail of the previous segment"
+    )
     assert torch.count_nonzero(mask_audio) == 0
     assert second_pass["sampler_name"] == "er_sde"
     assert second_pass["scheduler"] == "beta"

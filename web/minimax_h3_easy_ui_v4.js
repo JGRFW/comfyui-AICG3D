@@ -30,10 +30,21 @@ const SEGMENT_DECODE_CLASS = "MiniMaxH3EasySegmentDecode";
 const OUTPUT_CLASS = "MiniMaxH3EasyOutput";
 const RENDER_CLASS = "MiniMaxH3EasyRenderAdvanced";
 const RENDER_ACCEL_CLASS = "MiniMaxH3EasyRenderAdvancedWithModel";
+const ADVANCED_OPTIONAL_INPUT_NAMES = Object.freeze([
+    "sampler",
+    "sigmas",
+    "guide_image",
+    "guide_audio",
+    "digital_human_lowres_model",
+    "digital_human_highres_model",
+]);
 /* AICG-渲染器（一采）：只跑一采，出成片，并顺手递一条「一采数据」给二采放大。 */
 const RENDER_PASS1_CLASS = "MiniMaxH3EasyRenderPass1";
 /* AICG-渲染器（二采放大）：接「一采数据」跑 Latent 放大 + 二采，面板和进度条与高级渲染器共用。 */
 const RENDER_PASS2_CLASS = "MiniMaxH3EasyRenderPass2";
+/* 成片高清二采放大：只处理最终合成后的整片，不介入视频段落接缝。 */
+const FINAL_UPSCALE_CLASS = "MiniMaxH3EasyFinalHighResUpscale";
+const FINAL_UPSCALE_PACKED_CLASS = "MiniMaxH3EasyFinalHighResUpscalePacked";
 /* AICG3D 无限段落顺序生成：视频段落只用一条 previous_segment 线串起来。 */
 const SEQUENCE_SEGMENT_CLASS = "MiniMaxH3EasySequenceSegment";
 const SEQUENCE_RESOURCE_PANEL_HEIGHT = 320;
@@ -222,6 +233,10 @@ const AUDIO_ICON_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/
 const PRIMARY_BROWSER_LANGUAGE = String(globalThis.navigator?.language || globalThis.navigator?.languages?.[0] || "");
 const ZH_BROWSER = /^(zh)(?:[-_]|$)/i.test(PRIMARY_BROWSER_LANGUAGE);
 const TEXT = {
+    finalUpscalePackedTitle: ZH_BROWSER ? "成片高清二采放大" : "Final HD Upscale",
+    finalUpscaleRefinerLora: ZH_BROWSER ? "二采精修 LoRA" : "Second-pass refiner LoRA",
+    finalUpscaleAdvancedSettings: ZH_BROWSER ? "展开高级设置" : "Show advanced settings",
+    finalSequenceData: ZH_BROWSER ? "成片数据" : "Final sequence data",
     image: ZH_BROWSER ? "\u56fe\u7247" : "Image",
     video: ZH_BROWSER ? "\u89c6\u9891" : "Video",
     audio: ZH_BROWSER ? "\u97f3\u9891" : "Audio",
@@ -393,6 +408,7 @@ const TEXT = {
     stepsLabel: ZH_BROWSER ? "\u6b65\u6570" : "Steps",
     denoiseLabel: ZH_BROWSER ? "\u964d\u566a" : "Denoise",
     cleanupLabel: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
+    showAdvancedInputsLabel: ZH_BROWSER ? "\u9ad8\u7ea7\u8f93\u5165" : "Advanced inputs",
     guideImageLabel: ZH_BROWSER ? "\u5f15\u5bfc\u56fe\u7247" : "Guide image",
     guideAudioLabel: ZH_BROWSER ? "\u5f15\u5bfc\u97f3\u9891" : "Guide audio",
     guideFrameLabel: ZH_BROWSER ? "\u5f15\u5bfc\u5e27\u4f4d\u7f6e" : "Guide frame index",
@@ -402,6 +418,7 @@ const TEXT = {
     digitalHumanLowresScaleLabel: ZH_BROWSER ? "\u4e8c\u91c7\u964d\u566a" : "Second-pass denoise",
     digitalHumanUpscaleScaleLabel: ZH_BROWSER ? "\u9ad8\u6e05\u653e\u5927\u500d\u6570" : "HD upscale factor",
     digitalHumanUpscalerLabel: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u653e\u5927\u5668" : "Latent upscaler",
+    digitalHumanRefinerLoraLabel: ZH_BROWSER ? "二采 2K Refiner LoRA" : "Second-pass 2K refiner LoRA",
     digitalHumanLowresModelLabel: ZH_BROWSER ? "\u9996\u91c7\u6a21\u578b" : "First-pass model",
     digitalHumanHighresModelLabel: ZH_BROWSER ? "\u4e8c\u91c7\u6a21\u578b" : "Second-pass model",
     digitalHumanRifeLabel: ZH_BROWSER ? "\u6570\u5b57\u4eba RIFE \u667a\u80fd\u63d2\u5e27" : "Digital Human RIFE",
@@ -418,6 +435,37 @@ const TEXT = {
     renderPass2Data: ZH_BROWSER ? "\u4e8c\u91c7\u6570\u636e" : "Pass-2 data",
     decodeFirstPassLabel: ZH_BROWSER ? "\u4e00\u91c7\u89e3\u7801\u89c6\u9891" : "Decode first-pass video",
     renderPass2Title: ZH_BROWSER ? "AICG-\u6e32\u67d3\u5668\uff08\u4e8c\u91c7\u653e\u5927\uff09" : "AICG Render (Pass 2)",
+    finalUpscaleTitle: ZH_BROWSER ? "\u6210\u7247\u9ad8\u6e05\u4e8c\u91c7\u653e\u5927" : "Final HD Upscale",
+    finalUpscalePrefix: ZH_BROWSER ? "\u8f93\u51fa\u6587\u4ef6\u540d\u524d\u7f00" : "Output filename prefix",
+    finalUpscaleSecondPass: ZH_BROWSER ? "H3 \u6f5c\u7a7a\u95f4\u4e8c\u91c7" : "H3 latent second pass",
+    finalUpscaleLatentModel: ZH_BROWSER ? "\u6f5c\u7a7a\u95f4\u653e\u5927\u6a21\u578b" : "Latent upscale model",
+    finalUpscaleMode: ZH_BROWSER ? "\u5c3a\u5bf8\u6a21\u5f0f" : "Size mode",
+    finalUpscaleScale: ZH_BROWSER ? "\u653e\u5927\u500d\u6570" : "Upscale factor",
+    finalUpscaleTargetWidth: ZH_BROWSER ? "\u76ee\u6807\u5bbd\u5ea6" : "Target width",
+    finalUpscaleTargetHeight: ZH_BROWSER ? "\u76ee\u6807\u9ad8\u5ea6" : "Target height",
+    finalUpscaleDevice: ZH_BROWSER ? "\u653e\u5927\u8bbe\u5907" : "Upscale device",
+    finalUpscalePrecision: ZH_BROWSER ? "\u653e\u5927\u7cbe\u5ea6" : "Upscale precision",
+    finalUpscaleSteps: ZH_BROWSER ? "\u91c7\u6837\u6b65\u6570" : "Sampling steps",
+    finalUpscaleDenoise: ZH_BROWSER ? "\u4e8c\u91c7\u964d\u566a" : "Second-pass denoise",
+    finalUpscaleSeed: ZH_BROWSER ? "\u4e8c\u91c7\u79cd\u5b50" : "Second-pass seed",
+    finalUpscaleTiled: ZH_BROWSER ? "\u5206\u5757\u91c7\u6837" : "Tiled sampling",
+    finalUpscaleRepairEngine: ZH_BROWSER ? "\u753b\u8d28\u4fee\u590d\u5f15\u64ce" : "Restoration engine",
+    finalUpscaleRepairModel: ZH_BROWSER ? "\u4fee\u590d\u6a21\u578b" : "Restoration model",
+    finalUpscaleRepairScale: ZH_BROWSER ? "\u4fee\u590d\u500d\u6570" : "Restoration scale",
+    finalUpscaleRepairBatch: ZH_BROWSER ? "\u4fee\u590d\u6279\u6b21\u5e27\u6570" : "Restoration batch frames",
+    finalUpscaleRepairOverlap: ZH_BROWSER ? "\u4fee\u590d\u65f6\u95f4\u91cd\u53e0" : "Restoration temporal overlap",
+    finalUpscaleRepairColor: ZH_BROWSER ? "\u4fee\u590d\u989c\u8272\u6821\u51c6" : "Restoration color correction",
+    finalUpscaleRepairQuality: ZH_BROWSER ? "\u4fee\u590d\u8d28\u91cf" : "Restoration quality",
+    finalUpscaleRepairDevice: ZH_BROWSER ? "\u4fee\u590d\u8bbe\u5907" : "Restoration device",
+    finalUpscaleRepairBlocks: ZH_BROWSER ? "SeedVR2 BlockSwap \u6570" : "SeedVR2 blocks to swap",
+    finalUpscaleRepairOffload: ZH_BROWSER ? "\u4fee\u590d\u7a7a\u95f2\u8bbe\u5907" : "Restoration offload device",
+    finalUpscaleRepairVaeTiling: ZH_BROWSER ? "SeedVR2 VAE \u5206\u5757" : "SeedVR2 VAE tiling",
+    finalUpscaleExposureLock: ZH_BROWSER ? "\u9501\u5b9a\u539f\u59cb\u66dd\u5149" : "Lock source exposure",
+    finalUpscaleWindowFrames: ZH_BROWSER ? "\u5355\u7a97\u53e3\u6700\u5927\u5e27\u6570" : "Maximum frames per window",
+    finalUpscaleWindowOverlap: ZH_BROWSER ? "\u7a97\u53e3\u91cd\u53e0\u5e27\u6570" : "Window overlap frames",
+    finalUpscalePreview: ZH_BROWSER ? "\u91c7\u6837\u9884\u89c8" : "Sampling preview",
+    finalUpscalePreviewInterval: ZH_BROWSER ? "\u9884\u89c8\u95f4\u9694" : "Preview interval",
+    finalUpscaleCleanup: ZH_BROWSER ? "\u8fd0\u884c\u540e\u6e05\u7406" : "Cleanup after run",
     renderFirstPassVideo: ZH_BROWSER ? "\u4e00\u91c7\u6210\u7247" : "First-pass video",
     pass2SeedLabel: ZH_BROWSER ? "\u4e8c\u91c7\u79cd\u5b50" : "Pass-2 seed",
     pass2DenoiseLabel: ZH_BROWSER ? "\u4e8c\u91c7\u964d\u566a" : "Pass-2 denoise",
@@ -770,6 +818,10 @@ const CANVAS_ASPECT_RATIOS = {
 };
 const CANVAS_DIMENSION_MULTIPLE = 32;
 const SEQUENCE_CANVAS_SIZE_ROW = 22;
+/* 与视频段落常用的 512x296 成片预览保持同一宽高比。高度随节点宽度计算，
+   不把视频硬塞进固定 150px 的小框里，也不会因为打开按钮/资源库自行改变节点宽度。 */
+const SEQUENCE_STAGE_PREVIEW_ASPECT = 512 / 296;
+const SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT = 120;
 
 let installed = false;
 let patchedCanvas = false;
@@ -980,6 +1032,20 @@ function isRenderPass1Node(node) {
 
 function isRenderPass2Node(node) {
     return nodeMatchesClass(node, RENDER_PASS2_CLASS, TEXT.renderPass2Title, "__h3RenderPass2NodeInstalled");
+}
+
+function isFinalUpscaleNode(node) {
+    return isFinalUpscalePackedNode(node)
+        || nodeMatchesClass(node, FINAL_UPSCALE_CLASS, TEXT.finalUpscaleTitle, "__h3FinalUpscaleNodeInstalled");
+}
+
+function isFinalUpscalePackedNode(node) {
+    return nodeMatchesClass(
+        node,
+        FINAL_UPSCALE_PACKED_CLASS,
+        TEXT.finalUpscalePackedTitle,
+        "__h3FinalUpscalePackedNodeInstalled",
+    );
 }
 
 function isSegmentSampleSetupNode(node) {
@@ -1231,6 +1297,56 @@ function trimMediaBridgeNodeDataInputs(nodeData) {
     }
 }
 
+/* 成片高清节点只把「显示值」中文化；实际提交到 Python 的枚举值会在
+   graphToPrompt 里统一转回稳定值，工作流和 API 都不会收到中文别名。 */
+const FINAL_UPSCALE_COMBO_DEFS = Object.freeze({
+    upscale_device: Object.freeze({ cuda: "GPU（CUDA）", cpu: "CPU" }),
+    upscale_precision: Object.freeze({
+        fp16: "FP16 半精度",
+        bf16: "BF16 混合精度",
+        fp32: "FP32 全精度",
+    }),
+    repair_color_correction: Object.freeze({
+        lab: "LAB 色彩",
+        wavelet: "小波",
+        wavelet_adaptive: "自适应小波",
+        hsv: "HSV 色相",
+        adain: "AdaIN 风格",
+        none: "不校准",
+    }),
+    repair_quality: Object.freeze({
+        ULTRA: "超高质量",
+        HIGH: "高质量",
+        MEDIUM: "中等质量",
+        LOW: "低质量",
+    }),
+    repair_device: Object.freeze({ cuda: "GPU（CUDA）", cpu: "CPU" }),
+    repair_offload_device: Object.freeze({ cpu: "CPU", none: "不卸载" }),
+});
+
+function canonicalFinalUpscaleOption(name, value) {
+    const raw = String(value ?? "");
+    const definition = FINAL_UPSCALE_COMBO_DEFS[name];
+    if (!definition) return raw;
+    for (const [key, label] of Object.entries(definition)) {
+        if (raw === key || raw === label) return key;
+    }
+    return raw;
+}
+
+function localizeFinalUpscaleCombo(widget) {
+    const name = String(widget?.name || "");
+    const definition = FINAL_UPSCALE_COMBO_DEFS[name];
+    if (!widget || !definition) return false;
+    const current = canonicalFinalUpscaleOption(name, widget.value);
+    widget.options ||= {};
+    widget.options.values = Object.values(definition);
+    widget.value = definition[current] ?? widget.value;
+    if (widget._state) widget._state.value = widget.value;
+    widget.__h3FinalOptionName = name;
+    return true;
+}
+
 function canonicalOption(name, value) {
     const raw = String(value ?? "");
     const alias = OPTION_ALIASES[name]?.[raw];
@@ -1367,8 +1483,78 @@ function setLocalizedSlotLabel(slot, label) {
     slot.localized_name = label;
 }
 
+function localizeFinalUpscaleWidgets(node) {
+    if (!node) return false;
+    const packed = isFinalUpscalePackedNode(node);
+    node.title = packed ? TEXT.finalUpscalePackedTitle : TEXT.finalUpscaleTitle;
+    const labels = {
+        refiner_lora: TEXT.finalUpscaleRefinerLora,
+        show_advanced_settings: TEXT.finalUpscaleAdvancedSettings,
+        filename_prefix: TEXT.finalUpscalePrefix,
+        second_pass: TEXT.finalUpscaleSecondPass,
+        latent_upscale_model: TEXT.finalUpscaleLatentModel,
+        upscale_mode: TEXT.finalUpscaleMode,
+        upscale_scale: TEXT.finalUpscaleScale,
+        target_width: TEXT.finalUpscaleTargetWidth,
+        target_height: TEXT.finalUpscaleTargetHeight,
+        upscale_device: TEXT.finalUpscaleDevice,
+        upscale_precision: TEXT.finalUpscalePrecision,
+        sampler_name: TEXT.samplerName,
+        scheduler: TEXT.schedulerLabel,
+        steps: TEXT.finalUpscaleSteps,
+        second_pass_denoise: TEXT.finalUpscaleDenoise,
+        second_pass_seed: TEXT.finalUpscaleSeed,
+        tiled_sampling: TEXT.finalUpscaleTiled,
+        tile_width: TEXT.tileWidth,
+        tile_height: TEXT.tileHeight,
+        tile_overlap: TEXT.tileOverlap,
+        tile_fade: TEXT.tileFade,
+        repair_engine: TEXT.finalUpscaleRepairEngine,
+        repair_model: TEXT.finalUpscaleRepairModel,
+        repair_scale: TEXT.finalUpscaleRepairScale,
+        repair_batch_size: TEXT.finalUpscaleRepairBatch,
+        repair_temporal_overlap: TEXT.finalUpscaleRepairOverlap,
+        repair_color_correction: TEXT.finalUpscaleRepairColor,
+        repair_quality: TEXT.finalUpscaleRepairQuality,
+        repair_device: TEXT.finalUpscaleRepairDevice,
+        repair_blocks_to_swap: TEXT.finalUpscaleRepairBlocks,
+        repair_offload_device: TEXT.finalUpscaleRepairOffload,
+        repair_vae_tiling: TEXT.finalUpscaleRepairVaeTiling,
+        lock_source_exposure: TEXT.finalUpscaleExposureLock,
+        max_window_frames: TEXT.finalUpscaleWindowFrames,
+        window_overlap_frames: TEXT.finalUpscaleWindowOverlap,
+        sample_preview: TEXT.finalUpscalePreview,
+        preview_interval: TEXT.finalUpscalePreviewInterval,
+        cleanup_after_run: TEXT.finalUpscaleCleanup,
+    };
+    for (const widget of node.widgets || []) {
+        if (labels[widget.name]) widget.label = labels[widget.name];
+        localizeFinalUpscaleCombo(widget);
+    }
+    for (const input of node.inputs || []) {
+        if (input.name === "final_sequence") setLocalizedSlotLabel(input, TEXT.finalSequenceData);
+        if (input.name === "video") setLocalizedSlotLabel(input, TEXT.renderVideo);
+        if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
+        if (input.name === "model") setLocalizedSlotLabel(input, TEXT.outputModel);
+    }
+    const outputLabels = {
+        video: TEXT.renderVideo,
+        saved_file: ZH_BROWSER ? "保存路径" : "Saved file",
+        upscale_report: ZH_BROWSER ? "高清处理报告" : "Upscale report",
+    };
+    for (const output of node.outputs || []) {
+        const label = outputLabels[String(output?.name || "").toLowerCase()];
+        if (label) setLocalizedSlotLabel(output, label);
+    }
+    return true;
+}
+
 function localizeNodeInstance(node) {
     if (!node) return;
+    if (isFinalUpscaleNode(node)) {
+        localizeFinalUpscaleWidgets(node);
+        return;
+    }
     const isPass1 = nodeMatchesClass(node, RENDER_PASS1_CLASS, TEXT.renderPass1Title, "__h3RenderPass1NodeInstalled");
     const isPass2 = nodeMatchesClass(node, RENDER_PASS2_CLASS, TEXT.renderPass2Title, "__h3RenderPass2NodeInstalled");
     const isRenderAccel = nodeMatchesClass(node, RENDER_ACCEL_CLASS, TEXT.renderAccelTitle, "__h3RenderNodeInstalled");
@@ -1381,6 +1567,7 @@ function localizeNodeInstance(node) {
             steps: TEXT.stepsLabel,
             denoise: TEXT.denoiseLabel,
             cleanup_after_run: TEXT.cleanupLabel,
+            show_advanced_inputs: TEXT.showAdvancedInputsLabel,
             decode_first_pass: TEXT.decodeFirstPassLabel,
             guide_frame_idx: TEXT.guideFrameLabel,
             digital_human_selflift: TEXT.digitalHumanSelfLiftLabel,
@@ -1389,6 +1576,7 @@ function localizeNodeInstance(node) {
             digital_human_lowres_scale: TEXT.digitalHumanLowresScaleLabel,
             digital_human_upscaler_model: TEXT.digitalHumanUpscalerLabel,
             digital_human_upscale_scale: TEXT.digitalHumanUpscaleScaleLabel,
+            digital_human_refiner_lora: TEXT.digitalHumanRefinerLoraLabel,
             second_pass_seed: TEXT.pass2SeedLabel,
             second_pass_denoise: TEXT.pass2DenoiseLabel,
             tiled_sampling: TEXT.pass2TiledLabel,
@@ -1750,7 +1938,7 @@ function localizeNodeInstance(node) {
 }
 
 function localizeNodeDefinition(nodeData) {
-    if (!nodeData || ![NODE_CLASS, CONTEXT_SEGMENTS_CLASS, SELECTED_VIDEO_CONTEXT_CLASS, LOADER_CLASS, ADAPTER_CLASS, MEDIA_LOADER_CLASS, MEDIA_BRIDGE_CLASS, MEDIA_SPLITTER_CLASS, OUTPUT_CLASS, EASY_SAMPLER_CLASS, SELFLIFT_STRATEGY_CLASS, SEGMENT_RENDER_CLASS, SEGMENT_SAMPLE_SETUP_CLASS, SEGMENT_STEP_CLASS, SEGMENT_COLLECT_CLASS, SEGMENT_REFINE_CLASS, SEGMENT_DECODE_CLASS, RENDER_CLASS, RENDER_PASS1_CLASS, RENDER_PASS2_CLASS].includes(h3ClassName(nodeData.name))) return;
+    if (!nodeData || ![NODE_CLASS, CONTEXT_SEGMENTS_CLASS, SELECTED_VIDEO_CONTEXT_CLASS, LOADER_CLASS, ADAPTER_CLASS, MEDIA_LOADER_CLASS, MEDIA_BRIDGE_CLASS, MEDIA_SPLITTER_CLASS, OUTPUT_CLASS, EASY_SAMPLER_CLASS, SELFLIFT_STRATEGY_CLASS, SEGMENT_RENDER_CLASS, SEGMENT_SAMPLE_SETUP_CLASS, SEGMENT_STEP_CLASS, SEGMENT_COLLECT_CLASS, SEGMENT_REFINE_CLASS, SEGMENT_DECODE_CLASS, RENDER_CLASS, RENDER_PASS1_CLASS, RENDER_PASS2_CLASS, FINAL_UPSCALE_CLASS, FINAL_UPSCALE_PACKED_CLASS].includes(h3ClassName(nodeData.name))) return;
     nodeData.display_name = h3ClassName(nodeData.name) === LOADER_CLASS
         ? TEXT.loaderTitle
         : h3ClassName(nodeData.name) === ADAPTER_CLASS
@@ -1789,6 +1977,10 @@ function localizeNodeDefinition(nodeData) {
             ? TEXT.renderPass1Title
             : h3ClassName(nodeData.name) === RENDER_PASS2_CLASS
             ? TEXT.renderPass2Title
+            : h3ClassName(nodeData.name) === FINAL_UPSCALE_PACKED_CLASS
+            ? TEXT.finalUpscalePackedTitle
+            : h3ClassName(nodeData.name) === FINAL_UPSCALE_CLASS
+            ? TEXT.finalUpscaleTitle
             : TEXT.mainTitle;
     nodeData.category = TEXT.category;
 }
@@ -3563,6 +3755,21 @@ function patchGraphToPrompt() {
             // Segment Refine has its own inputs and is intentionally excluded
             // from the main/context media patch above. Its localized combo
             // labels still need to be converted back to backend enum values.
+            if (isFinalUpscaleNode(node)) {
+                const promptNode = output[String(node.id)];
+                if (promptNode) {
+                    promptNode.inputs ||= {};
+                    for (const name of Object.keys(FINAL_UPSCALE_COMBO_DEFS)) {
+                        if (!Array.isArray(promptNode.inputs[name])) {
+                            promptNode.inputs[name] = canonicalFinalUpscaleOption(
+                                name,
+                                getWidgetValue(node, name, promptNode.inputs[name]),
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
             if (isSegmentRefineNode(node)) {
                 const promptNode = output[String(node.id)];
                 if (!promptNode) continue;
@@ -5724,6 +5931,239 @@ function setConditionalWidgetVisible(node, widget, visible, { adjustHeight = tru
     return true;
 }
 
+function advancedOptionalInputIsConnected(node, name) {
+    const input = (node?.inputs || []).find((slot) => String(slot?.name || "") === name);
+    if (!input) return false;
+    return input.link != null || (Array.isArray(input.links) && input.links.length > 0);
+}
+
+const advancedOptionalInputNameSet = new Set(ADVANCED_OPTIONAL_INPUT_NAMES);
+const advancedOptionalDomState = new Map();
+let advancedOptionalDomObserver = null;
+let advancedOptionalDomSyncRaf = 0;
+
+function advancedOptionalSlotKeys(node) {
+    // Keep the backend input array untouched. Nodes 2.0 exposes the stable slot
+    // key on its rendered row, so visibility is applied to that row only.
+    const nodeId = String(node?.id ?? "");
+    const keys = new Set();
+    if (!nodeId || nodeId === "undefined" || nodeId === "null") return keys;
+    for (const [index, input] of (node.inputs || []).entries()) {
+        if (!advancedOptionalInputNameSet.has(String(input?.name || ""))) continue;
+        keys.add(`${nodeId}-in-${index}`);
+    }
+    return keys;
+}
+
+function applyAdvancedOptionalDomRow(row, visible) {
+    if (!(row instanceof HTMLElement)) return;
+    row.hidden = !visible;
+    row.setAttribute("aria-hidden", visible ? "false" : "true");
+    if (visible) {
+        row.style.removeProperty("display");
+        delete row.dataset.aicg3dAdvancedCollapsed;
+    } else {
+        row.style.display = "none";
+        row.dataset.aicg3dAdvancedCollapsed = "true";
+    }
+}
+
+function applyAdvancedOptionalDomState(state) {
+    if (!state?.node || !state.keys?.size) return;
+    for (const element of document.querySelectorAll("[data-slot-key]")) {
+        const slotKey = String(element?.dataset?.slotKey || "");
+        if (!state.keys.has(slotKey)) continue;
+        const row = element.closest?.(".lg-slot.lg-slot--input");
+        applyAdvancedOptionalDomRow(row, state.visible);
+    }
+}
+
+function refreshAdvancedOptionalDomStates() {
+    const graphNodes = app.graph?._nodes || [];
+    for (const [nodeId, state] of advancedOptionalDomState) {
+        if (!graphNodes.includes(state.node)) {
+            advancedOptionalDomState.delete(nodeId);
+            continue;
+        }
+        applyAdvancedOptionalDomState(state);
+    }
+}
+
+function ensureAdvancedOptionalDomObserver() {
+    if (advancedOptionalDomObserver || typeof MutationObserver !== "function" || !document.body) return;
+    let refreshPending = false;
+    advancedOptionalDomObserver = new MutationObserver(() => {
+        if (refreshPending) return;
+        refreshPending = true;
+        const run = () => {
+            refreshPending = false;
+            refreshAdvancedOptionalDomStates();
+        };
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+        else setTimeout(run, 0);
+    });
+    advancedOptionalDomObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function scheduleAdvancedOptionalDomSync(node) {
+    if (!node) return;
+    const finalize = () => {
+        const nodeId = String(node?.id ?? "");
+        if (!nodeId || nodeId === "undefined" || nodeId === "null") return;
+        const visible = asBoolean(getWidgetValue(node, "show_advanced_inputs", false), false);
+        const state = { node, keys: advancedOptionalSlotKeys(node), visible };
+        advancedOptionalDomState.set(nodeId, state);
+        ensureAdvancedOptionalDomObserver();
+        applyAdvancedOptionalDomState(state);
+    };
+    finalize();
+    if (advancedOptionalDomSyncRaf) cancelAnimationFrame(advancedOptionalDomSyncRaf);
+    if (typeof requestAnimationFrame === "function") {
+        advancedOptionalDomSyncRaf = requestAnimationFrame(() => {
+            advancedOptionalDomSyncRaf = 0;
+            finalize();
+        });
+    }
+    setTimeout(finalize, 80);
+}
+
+function hiddenAdvancedOptionalCanvasInputs(node) {
+    return (node?.inputs || []).filter((input) =>
+        advancedOptionalInputNameSet.has(String(input?.name || ""))
+        && (input.hidden === true || input.visible === false)
+    );
+}
+
+function withCompactAdvancedOptionalCanvasLayout(node, draw) {
+    // Classic LiteGraph measures every input before positioning the widgets.
+    // During that one synchronous layout pass, place collapsed optional slots on
+    // the final visible input row, then restore their original slot data.
+    if (!node || globalThis.LiteGraph?.vueNodesMode) return draw();
+    const inputs = node.inputs || [];
+    const hiddenInputs = hiddenAdvancedOptionalCanvasInputs(node);
+    if (!hiddenInputs.length) return draw();
+    const firstOptionalIndex = inputs.findIndex((input) =>
+        advancedOptionalInputNameSet.has(String(input?.name || ""))
+    );
+    const anchorIndex = firstOptionalIndex > 0 ? firstOptionalIndex - 1 : -1;
+    const anchorPos = anchorIndex >= 0 ? node.getInputPos?.(anchorIndex) : null;
+    const rowHeight = Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20;
+    const compactPos = [
+        rowHeight * 0.5,
+        anchorPos ? anchorPos[1] - node.pos[1] : rowHeight * 0.7,
+    ];
+    const savedPositions = hiddenInputs.map((input) => ({
+        input,
+        own: Object.prototype.hasOwnProperty.call(input, "pos"),
+        pos: input.pos,
+    }));
+    for (const input of hiddenInputs) input.pos = [...compactPos];
+    try {
+        return draw();
+    } finally {
+        for (const saved of savedPositions) {
+            if (saved.own) saved.input.pos = saved.pos;
+            else delete saved.input.pos;
+        }
+    }
+}
+
+function installAdvancedOptionalCanvasSlotFilter(node) {
+    if (!node || typeof node.drawSlots !== "function" || node.__h3AdvancedDrawSlotsFiltered) return;
+    const originalDrawSlots = node.drawSlots;
+    node.__h3AdvancedDrawSlotsFiltered = true;
+    node.__h3AdvancedOriginalDrawSlots = originalDrawSlots;
+    node.drawSlots = function drawSlotsH3AdvancedWithoutCollapsedInputs(ctx, options) {
+        const concrete = this._concreteInputs;
+        const inputs = this.inputs || [];
+        if (!Array.isArray(concrete) || !concrete.length || !inputs.length) {
+            return originalDrawSlots.call(this, ctx, options);
+        }
+        const hiddenInputs = new Set(inputs.filter((input) =>
+            advancedOptionalInputNameSet.has(String(input?.name || ""))
+            && (input.hidden === true || input.visible === false)
+        ));
+        if (!hiddenInputs.size) return originalDrawSlots.call(this, ctx, options);
+        const hiddenNames = new Set([...hiddenInputs].map((input) => String(input?.name || "")));
+        const filtered = concrete.filter((slot, index) => {
+            if (hiddenInputs.has(slot)) return false;
+            if (index >= inputs.length) return true;
+            const indexedInput = inputs[index];
+            if (hiddenInputs.has(indexedInput)) return false;
+            return !(hiddenNames.has(String(slot?.name || ""))
+                && String(indexedInput?.name || "") === String(slot?.name || ""));
+        });
+        if (filtered.length === concrete.length) return originalDrawSlots.call(this, ctx, options);
+        this._concreteInputs = filtered;
+        try {
+            return originalDrawSlots.call(this, ctx, options);
+        } finally {
+            this._concreteInputs = concrete;
+        }
+    };
+    if (!node.__h3AdvancedCanvasLayoutFiltered && typeof node.arrange === "function") {
+        const originalArrange = node.arrange;
+        node.__h3AdvancedCanvasLayoutFiltered = true;
+        node.__h3AdvancedOriginalArrange = originalArrange;
+        node.arrange = function arrangeH3AdvancedWithoutCollapsedGap() {
+            return withCompactAdvancedOptionalCanvasLayout(this, () => originalArrange.call(this));
+        };
+    }
+}
+
+
+function setAdvancedOptionalInputVisible(node, input, visible) {
+    if (!node || !input) return false;
+    if (!Object.prototype.hasOwnProperty.call(input, "__h3AdvancedOrigHidden")) {
+        input.__h3AdvancedOrigHidden = Boolean(input.hidden);
+        input.__h3AdvancedOrigVisible = input.visible;
+        input.__h3AdvancedOrigStateHidden = input._state?.hidden;
+        input.__h3AdvancedOrigStateVisible = input._state?.visible;
+    }
+    const hidden = !visible;
+    const changed = Boolean(input.hidden) !== hidden || input.visible !== visible;
+    if (!changed) return false;
+    // Keep the slot object and its index intact so links and saved slot ids stay valid.
+    input.hidden = hidden;
+    input.visible = visible;
+    if (input._state) {
+        input._state.hidden = hidden;
+        input._state.visible = visible;
+    }
+    node._inputSlotsDirty = true;
+    node.setDirtyCanvas?.(true, true);
+    node.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function syncAdvancedOptionalInputs(node) {
+    const toggle = getWidget(node, "show_advanced_inputs");
+    if (!toggle) return false;
+    installAdvancedOptionalCanvasSlotFilter(node);
+    const hasConnection = ADVANCED_OPTIONAL_INPUT_NAMES.some(
+        (name) => advancedOptionalInputIsConnected(node, name),
+    );
+    if (hasConnection && !asBoolean(toggle.value, false)) {
+        setWidgetValue(node, "show_advanced_inputs", true);
+        node.graph?.change?.();
+    }
+    const visible = asBoolean(getWidgetValue(node, "show_advanced_inputs", false), false);
+    let changed = false;
+    for (const name of ADVANCED_OPTIONAL_INPUT_NAMES) {
+        const input = (node.inputs || []).find((slot) => String(slot?.name || "") === name);
+        changed = setAdvancedOptionalInputVisible(node, input, visible) || changed;
+    }
+    if (changed) {
+        restoreWidgetInputContracts(node);
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    // input.hidden alone is ignored by both renderers. Keep the real rows/slots
+    // in sync without changing input objects or their saved indexes.
+    scheduleAdvancedOptionalDomSync(node);
+    return changed;
+}
+
 function syncSegmentSummary(node) {
     if (!isSegmentMode(node)) return false;
     const localSecondsSpec = String(getWidgetValue(node, "segment_seconds", "") || "");
@@ -6047,6 +6487,7 @@ function syncAdvancedRenderSecondPassWidgets(node, { adjustHeight = true } = {})
         "digital_human_transition_step",
         "digital_human_lowres_scale",
         "digital_human_upscaler_model",
+        "digital_human_refiner_lora",
     ];
     const changed = names
         .map((name) => setConditionalWidgetVisible(node, getWidget(node, name), enabled, { adjustHeight }))
@@ -6058,6 +6499,119 @@ function syncAdvancedRenderSecondPassWidgets(node, { adjustHeight = true } = {})
         app.graph?.setDirtyCanvas?.(true, true);
     }
     return changed;
+}
+
+function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
+    if (!isFinalUpscaleNode(node)) return false;
+    const packed = isFinalUpscalePackedNode(node);
+    const secondPass = asBoolean(getWidgetValue(node, "second_pass", true));
+    const advanced = !packed || asBoolean(getWidgetValue(node, "show_advanced_settings", false));
+    const upscaleMode = String(getWidgetValue(node, "upscale_mode", "按倍数放大") || "");
+    const repairEngine = String(getWidgetValue(node, "repair_engine", "关闭（仅 H3 二采）") || "");
+    const tiled = String(getWidgetValue(node, "tiled_sampling", "关") || "").trim() === "开";
+    const previewOn = String(getWidgetValue(node, "sample_preview", "关") || "").trim() === "开";
+    const repairSeedVR2 = repairEngine.includes("SeedVR2");
+    const repairRtx = repairEngine.includes("RTX VSR");
+    const repairVosr2 = repairEngine.includes("VOSR2");
+    const repairActive = repairSeedVR2 || repairRtx || repairVosr2;
+    const targetSize = secondPass && upscaleMode.includes("目标分辨率");
+    const repairOnly = secondPass && upscaleMode.includes("仅采样修复");
+    const scaleByFactor = secondPass && !targetSize && !repairOnly;
+    const windowSettings = secondPass || repairActive;
+    const advancedWindowSettings = advanced && windowSettings;
+    const changed = [
+        setConditionalWidgetVisible(node, getWidget(node, "show_advanced_settings"), packed, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "refiner_lora"), packed && secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "latent_upscale_model"), secondPass && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_mode"), secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_scale"), scaleByFactor, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "target_width"), targetSize, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "target_height"), targetSize, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_device"), secondPass && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "upscale_precision"), secondPass && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "sampler_name"), secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "scheduler"), secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "steps"), secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "second_pass_denoise"), secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "second_pass_seed"), secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tiled_sampling"), secondPass && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_width"), secondPass && tiled && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_height"), secondPass && tiled && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_overlap"), secondPass && tiled && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "tile_fade"), secondPass && tiled && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "max_window_frames"), advancedWindowSettings, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "window_overlap_frames"), advancedWindowSettings, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "sample_preview"), secondPass && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "preview_interval"), secondPass && previewOn && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_engine"), advanced || repairActive, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_model"), advanced && (repairSeedVR2 || repairVosr2), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_scale"), advanced && repairActive, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_batch_size"), advanced && repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_temporal_overlap"), advanced && repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_color_correction"), advanced && (repairSeedVR2 || repairVosr2), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_quality"), advanced && repairRtx, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_device"), advanced && (repairSeedVR2 || repairVosr2), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_blocks_to_swap"), advanced && repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_offload_device"), advanced && repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "repair_vae_tiling"), advanced && repairSeedVR2, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "lock_source_exposure"), windowSettings, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "cleanup_after_run"), advanced, { adjustHeight }),
+    ].some(Boolean);
+    if (changed) {
+        refreshVueNodeWidgets(node);
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
+function installFinalUpscaleNode(nodeType, nodeData) {
+    const className = h3ClassName(nodeData?.name);
+    const packed = className === FINAL_UPSCALE_PACKED_CLASS;
+    if (className !== FINAL_UPSCALE_CLASS && !packed) return;
+    if (nodeType.prototype.__h3FinalUpscaleNodeInstalled) return;
+    nodeType.prototype.__h3FinalUpscaleNodeInstalled = true;
+    if (packed) nodeType.prototype.__h3FinalUpscalePackedNodeInstalled = true;
+    const setup = (node, adjustHeight = true) => {
+        if (!node) return;
+        const localized = localizeFinalUpscaleWidgets(node);
+        for (const name of ["second_pass", "show_advanced_settings", "upscale_mode", "repair_engine", "tiled_sampling", "sample_preview"]) {
+            const widget = getWidget(node, name);
+            if (!widget || widget.__h3FinalUpscaleSyncBound) continue;
+            widget.__h3FinalUpscaleSyncBound = true;
+            const originalCallback = widget.callback;
+            widget.callback = (value) => {
+                originalCallback?.call(widget, value);
+                syncFinalUpscaleWidgets(node);
+                node.setDirtyCanvas?.(true, true);
+            };
+        }
+        syncFinalUpscaleWidgets(node, { adjustHeight });
+        return localized;
+    };
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3FinalUpscale() {
+        const result = originalCreated?.apply(this, arguments);
+        setup(this, false);
+        if (packed) {
+            // Python exposes every control as a linkable slot contract. ComfyUI
+            // keeps widget-backed slots invisible, but its first size estimate still
+            // counts them. Size this leaf once after folding, so a newly inserted
+            // node starts compact without reacting to later parameter changes.
+            const computed = this.computeSize?.();
+            const height = Number(computed?.[1]);
+            const width = Math.max(360, Number(computed?.[0]) || 0, Number(this.size?.[0]) || 0);
+            if (Number.isFinite(height) && height > 0) this.setSize?.([width, height]);
+        }
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3FinalUpscale(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        setup(this, false);
+        return result;
+    };
 }
 
 function syncSequenceSecondPassWidgets(node, { adjustHeight = true } = {}) {
@@ -8711,6 +9265,42 @@ function reconcileWidgetValuesByName(node, info) {
     if (!widgets.length) return false;
     const stored = Array.isArray(info.widgets_values) ? info.widgets_values : [];
 
+    // Advanced renderer 1.1.x stored the tail as [sample_preview, refiner_lora].
+    // Repair that tail before the generic name comparison below, otherwise the
+    // old LoRA filename is compared with the new Boolean toggle at the same index
+    // and the dense rebuild writes the filename into show_advanced_inputs.
+    const nodeClassName = String(node.type || node.comfyClass || "");
+    const hasAdvancedToggle = Object.prototype.hasOwnProperty.call(named, "show_advanced_inputs");
+    const isPreviewValue = (value) => typeof value === "boolean"
+        || ["开", "关", "true", "false"].includes(String(value ?? "").trim().toLowerCase());
+    if (nodeClassName === "AICG3D_H3RenderAdvancedWithModel" && !hasAdvancedToggle && stored.length >= 2) {
+        const last = stored.length - 1;
+        if (isPreviewValue(stored[last - 1]) && typeof stored[last] === "string") {
+            const previewValue = stored[last - 1];
+            const refinerValue = stored[last];
+            stored.splice(last - 1, 2, refinerValue, false, previewValue);
+            info.widgets_values = stored;
+            named.digital_human_refiner_lora = refinerValue;
+            named.show_advanced_inputs = false;
+            named.sample_preview = previewValue;
+            // ComfyUI loads widget values before onConfigure. The legacy tail order
+            // can therefore put the LoRA filename directly into the Boolean toggle,
+            // so re-apply the migrated named values and rebuild the dense archive.
+            const dense = widgets.map((widget) => {
+                const name = String(widget.name ?? "");
+                const value = Object.prototype.hasOwnProperty.call(named, name)
+                    ? named[name]
+                    : widget.value;
+                h3ApplyWidgetValue(widget, value);
+                return value ?? null;
+            });
+            info.widgets_values = dense;
+            info.__h3WidgetValuesReconciled = true;
+            node._widgetSlotsDirty = true;
+            return true;
+        }
+    }
+
     // 先按前端 configure() 的规则回放一次：位置数据跟控件名数据对得上就什么都不做。
     let compared = 0;
     let drifted = false;
@@ -8771,6 +9361,10 @@ function installWidgetValueReconcileNode(nodeType, nodeData) {
 /* === h3-widget-values-reconcile:end === */
 
 function repairConfiguredWidgetValues(node, info) {
+    // The advanced renderer has a named schema and dedicated migrations. Applying
+    // the generic H3 loader defaults here would replace its archive with unrelated
+    // base-node fields after the dedicated migration has already completed.
+    if (String(node?.type || node?.comfyClass || "") === "AICG3D_H3RenderAdvancedWithModel") return;
     const raw = Array.isArray(info?.widgets_values) ? [...info.widgets_values] : [];
     if (!raw.length) return;
 
@@ -9638,11 +10232,61 @@ function sequenceWidgetGrid(node) {
     return node?.__h3DomWidget?.element?.closest?.(".lg-node-widgets") || null;
 }
 
+function sequenceStagePreviewHeight(node) {
+    // The Nodes 2.0 widget column insets both sides by 12 px. Deriving the
+    // preview from the node width keeps the 512:296 video aspect stable while
+    // the user resizes, without depending on a delayed DOM layout pass.
+    const width = Math.max(160, (Number(node?.size?.[0]) || 320) - 24);
+    const height = Math.max(
+        SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT,
+        Math.round(width / SEQUENCE_STAGE_PREVIEW_ASPECT),
+    );
+    return height;
+}
+
+function applySequenceStagePreviewSize(node) {
+    if (!node) return 0;
+    const height = sequenceStagePreviewHeight(node);
+    const value = `${height}px`;
+    node.__h3SequenceStagePreviewHeight = height;
+    node.__h3SequenceStagePreviewPanel?.style?.setProperty("--h3-sequence-stage-preview-height", value);
+    const grid = sequenceWidgetGrid(node);
+    grid?.style?.setProperty("--h3-sequence-stage-preview-height", value);
+    const widget = node.__h3SequenceStagePreviewWidget;
+    if (widget) {
+        widget.computedHeight = height;
+        widget.options ||= {};
+        widget.options.getMinHeight = () => sequenceStagePreviewHeight(node);
+        widget.options.getMaxHeight = () => sequenceStagePreviewHeight(node);
+        widget.computeLayoutSize = () => ({
+            minHeight: sequenceStagePreviewHeight(node),
+            maxHeight: sequenceStagePreviewHeight(node),
+            minWidth: 0,
+        });
+    }
+    return height;
+}
+
+function scheduleSequenceStagePreviewSize(node) {
+    if (!isSequenceSegmentNode(node) || node.__h3SequenceStagePreviewTimer) return;
+    const run = () => {
+        node.__h3SequenceStagePreviewTimer = null;
+        applySequenceStagePreviewSize(node);
+        node.setDirtyCanvas?.(true, true);
+    };
+    if (typeof requestAnimationFrame === "function") {
+        node.__h3SequenceStagePreviewTimer = requestAnimationFrame(run);
+    } else {
+        node.__h3SequenceStagePreviewTimer = setTimeout(run, 0);
+    }
+}
+
 function applySequenceWidgetGrid(node, resourceOpen = Boolean(node?.__h3InlineMediaPanelWidget)) {
     const grid = sequenceWidgetGrid(node);
     if (!grid) return false;
     grid.classList.add("h3-sequence-widget-grid");
     grid.classList.toggle("h3-sequence-resource-open", Boolean(resourceOpen));
+    applySequenceStagePreviewSize(node);
     return true;
 }
 
@@ -9660,6 +10304,137 @@ function scheduleSequenceWidgetGrid(node) {
     else setTimeout(run, 0);
 }
 
+function sequenceStagePreviewCard(label) {
+    const card = document.createElement("div");
+    card.className = "h3-sequence-stage-card";
+    const title = document.createElement("div");
+    title.className = "h3-sequence-stage-title";
+    title.textContent = label;
+    const video = document.createElement("video");
+    video.className = "h3-sequence-stage-video";
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.hidden = true;
+    const placeholder = document.createElement("div");
+    placeholder.className = "h3-sequence-stage-placeholder";
+    placeholder.textContent = `等待${label}...`;
+    card.append(title, video, placeholder);
+    return { card, video, placeholder };
+}
+
+function installSequenceStagePreviewWidget(node) {
+    if (!node || node.__h3SequenceStagePreviewWidget || typeof node.addDOMWidget !== "function") return false;
+    let style = document.getElementById("h3-sequence-stage-preview-styles");
+    if (!style) {
+        style = document.createElement("style");
+        style.id = "h3-sequence-stage-preview-styles";
+        style.textContent = `
+          .h3-sequence-stage-previews { display:block; width:100%; height:var(--h3-sequence-stage-preview-height, ${SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT}px); min-height:var(--h3-sequence-stage-preview-height, ${SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT}px); max-height:var(--h3-sequence-stage-preview-height, ${SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT}px); box-sizing:border-box; overflow:hidden; }
+          .h3-sequence-stage-card { position:relative; display:block; width:100%; height:100%; min-width:0; min-height:0; box-sizing:border-box; padding:0; border:1px solid #35434d; border-radius:6px; background:#000; overflow:hidden; }
+          .h3-sequence-stage-title { position:absolute; z-index:2; top:6px; left:6px; padding:2px 6px; border:1px solid rgba(92,112,128,.58); border-radius:4px; background:rgba(10,15,19,.76); color:#e6eef5; font-size:11px; font-weight:650; line-height:1.35; pointer-events:none; }
+          .h3-sequence-stage-video { display:block; width:100%; height:100%; border-radius:5px; background:#000; object-fit:contain; }
+          .h3-sequence-stage-video[hidden] { display:none !important; }
+          .h3-sequence-stage-placeholder { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; min-height:0; color:#81909a; font-size:10px; text-align:center; }
+          .h3-sequence-stage-placeholder[hidden] { display:none !important; }
+        `;
+        document.head.append(style);
+    }
+    const panel = document.createElement("div");
+    panel.className = "h3-sequence-stage-previews";
+    const final = sequenceStagePreviewCard("本段视频");
+    panel.append(final.card);
+    const widget = node.addDOMWidget("h3_sequence_stage_previews", "h3_sequence_stage_previews", panel, {
+        serialize: false,
+        hideOnZoom: false,
+        getMinHeight: () => sequenceStagePreviewHeight(node),
+        getMaxHeight: () => sequenceStagePreviewHeight(node),
+    });
+    if (!widget) return false;
+    widget.serialize = false;
+    widget.computedHeight = sequenceStagePreviewHeight(node);
+    widget.options ||= {};
+    widget.options.serialize = false;
+    node.__h3SequenceStagePreviewWidget = widget;
+    node.__h3SequenceStagePreviewPanel = panel;
+    node.__h3SequenceStageFinal = final;
+    if (typeof ResizeObserver === "function") {
+        const observer = new ResizeObserver(() => {
+            const nextHeight = sequenceStagePreviewHeight(node);
+            if (Math.abs(nextHeight - Number(node.__h3SequenceStagePreviewHeight || 0)) > 1) {
+                applySequenceStagePreviewSize(node);
+                node.setDirtyCanvas?.(true, true);
+            }
+        });
+        observer.observe(panel);
+        node.__h3SequenceStagePreviewObserver = observer;
+    }
+    applySequenceStagePreviewSize(node);
+    const growToFit = () => {
+        try {
+            const computed = node.computeSize?.();
+            const current = Number(node.size?.[1]) || 0;
+            if (Array.isArray(computed) && Number(computed[1]) > current + 1) {
+                setNodeSizeExact(node, [Number(node.size?.[0]) || computed[0], Number(computed[1])]);
+            }
+        } catch {}
+    };
+    (globalThis.requestAnimationFrame || ((callback) => setTimeout(callback, 0)))(growToFit);
+    return true;
+}
+
+const SEQUENCE_VIDEO_PREVIEW_EVENT = "aicg3d_sequence_video_preview";
+let sequenceVideoPreviewListenerReady = false;
+
+function sequenceStagePreviewUrl(video) {
+    const params = new URLSearchParams({
+        filename: String(video?.filename || ""),
+        subfolder: String(video?.subfolder || ""),
+        type: String(video?.type || "temp"),
+    });
+    return `/view?${params.toString()}`;
+}
+
+function setSequenceStagePreview(node, kind, video) {
+    if (kind !== "final") return false;
+    const target = node?.__h3SequenceStageFinal;
+    if (!target?.video || !video?.filename) return false;
+    const url = sequenceStagePreviewUrl(video);
+    target.video.pause?.();
+    target.video.src = url;
+    target.video.hidden = false;
+    target.placeholder.hidden = true;
+    target.video.load?.();
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function resetSequenceStagePreviews() {
+    for (const node of app.graph?._nodes || []) {
+        if (!isSequenceSegmentNode(node)) continue;
+        const target = node.__h3SequenceStageFinal;
+        if (!target?.video) continue;
+        target.video.pause?.();
+        target.video.removeAttribute?.("src");
+        target.video.load?.();
+        target.video.hidden = true;
+        target.placeholder.hidden = false;
+    }
+}
+
+function installSequenceStageVideoPreviewListener() {
+    if (sequenceVideoPreviewListenerReady) return;
+    sequenceVideoPreviewListenerReady = true;
+    api.addEventListener(SEQUENCE_VIDEO_PREVIEW_EVENT, (event) => {
+        const detail = event?.detail;
+        const node = renderProgressNodeFor(detail?.node_id);
+        if (!node || !isSequenceSegmentNode(node)) return;
+        setSequenceStagePreview(node, String(detail?.kind || ""), detail?.video);
+    });
+    api.addEventListener("execution_start", resetSequenceStagePreviews);
+}
+
 function installSequenceActionRow(node) {
     if (!node || !isSequenceSegmentNode(node) || node.__h3SequenceActionRow || typeof node.addDOMWidget !== "function") return;
     if (typeof document === "undefined" || !document.head) return;
@@ -9668,8 +10443,8 @@ function installSequenceActionRow(node) {
         style = document.createElement("style");
         style.id = "h3-sequence-action-styles";
         style.textContent = `
-          .lg-node-widgets.h3-sequence-widget-grid{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px !important;}
-          .lg-node-widgets.h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px ${SEQUENCE_RESOURCE_PANEL_HEIGHT}px !important;}
+          .lg-node-widgets.h3-sequence-widget-grid{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px var(--h3-sequence-stage-preview-height, ${SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT}px) !important;}
+          .lg-node-widgets.h3-sequence-widget-grid.h3-sequence-resource-open{grid-template-rows:minmax(120px,1fr) 24px 24px 24px 32px var(--h3-sequence-stage-preview-height, ${SEQUENCE_STAGE_PREVIEW_MIN_HEIGHT}px) ${SEQUENCE_RESOURCE_PANEL_HEIGHT}px !important;}
         `;
         document.head.append(style);
     }
@@ -9712,7 +10487,7 @@ function installSequenceActionRow(node) {
         domWidget.computeLayoutSize = () => ({ minHeight: 32, maxHeight: 32, minWidth: 0 });
         try { delete domWidget.computeSize; } catch { domWidget.computeSize = undefined; }
         let host = row.parentElement;
-        for (let depth = 0; host && depth < 2; depth += 1, host = host.parentElement) {
+        for (let depth = 0; host && depth < 3; depth += 1, host = host.parentElement) {
             host.style.height = "32px";
             host.style.minHeight = "32px";
             host.style.maxHeight = "32px";
@@ -9724,6 +10499,7 @@ function installSequenceActionRow(node) {
             widgetGrid.classList.add("h3-sequence-widget-grid");
             widgetGrid.classList.toggle("h3-sequence-resource-open", Boolean(node.__h3InlineMediaPanelWidget));
         }
+        applySequenceStagePreviewSize(node);
         return true;
     };
     domWidget = node.addDOMWidget("h3_sequence_actions", "h3_sequence_actions", row, {
@@ -9777,6 +10553,7 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         mediaLoaderHideStateWidget(getWidget(node, "inline_media_state"));
         mediaLoaderHideStateWidget(getWidget(node, "sequence_scope"));
         installSequenceActionRow(node);
+        installSequenceStagePreviewWidget(node);
         scheduleSequenceSegmentPromptLayout(node);
         schedulePromptSplitSegmentLimitSync(160);
         scheduleMissingMediaValidation({ prompt: false, delay: 1400 });
@@ -9794,6 +10571,13 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         this.__h3SequencePromptLayoutTimer = null;
         if (this.__h3SequenceGridTimer) clearTimeout(this.__h3SequenceGridTimer);
         this.__h3SequenceGridTimer = null;
+        if (this.__h3SequenceStagePreviewTimer) {
+            if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.__h3SequenceStagePreviewTimer);
+            clearTimeout(this.__h3SequenceStagePreviewTimer);
+        }
+        this.__h3SequenceStagePreviewObserver?.disconnect?.();
+        this.__h3SequenceStagePreviewObserver = null;
+        this.__h3SequenceStagePreviewTimer = null;
         if (this.__h3DrawSession) finishSequenceDrawSession(this);
         closeSequenceMediaPopup(this);
         return originalRemoved?.apply(this, arguments);
@@ -9829,6 +10613,8 @@ function installSequenceSegmentNode(nodeType, nodeData) {
         if (Array.isArray(resolved) && resolved.length >= 2) {
             this.__h3EditorStableSize = [Number(resolved[0]), Number(resolved[1])];
         }
+        applySequenceStagePreviewSize(this);
+        setTimeout(() => applySequenceStagePreviewSize(this), 0);
         return result;
     };
 }
@@ -9882,16 +10668,69 @@ function installSequenceCanvasSizeStyles() {
         document.head.append(style);
     }
     style.textContent = `
-      .h3-sequence-canvas-size { display:flex; align-items:center; gap:6px; width:100%; height:100%; box-sizing:border-box; padding:0 6px; color:var(--h3-native-widget-text,#ddd); font-size:12px; line-height:1; }
+      .h3-sequence-canvas-size { display:flex; align-items:center; gap:6px; width:100%; height:${SEQUENCE_CANVAS_SIZE_ROW}px; min-height:${SEQUENCE_CANVAS_SIZE_ROW}px; max-height:${SEQUENCE_CANVAS_SIZE_ROW}px; flex:0 0 ${SEQUENCE_CANVAS_SIZE_ROW}px; align-self:flex-start; box-sizing:border-box; padding:0 6px; color:var(--h3-native-widget-text,#ddd); font-size:12px; line-height:1; }
       .h3-sequence-canvas-size-label { opacity:.68; }
       .h3-sequence-canvas-size-value { font-weight:600; letter-spacing:.02em; }
     `;
+}
+
+function lockSequenceCanvasSizeRow(node) {
+    const widget = node?.__h3SequenceSizeWidget;
+    const row = widget?.element;
+    if (!widget || !row) return false;
+    const height = SEQUENCE_CANVAS_SIZE_ROW;
+    widget.options ||= {};
+    widget.computedHeight = height;
+    if (widget._state) widget._state.computedHeight = height;
+    widget.options.getMinHeight = () => height;
+    widget.options.getMaxHeight = () => height;
+    widget.options.getHeight = () => height;
+    widget.computeLayoutSize = () => ({ minHeight: height, maxHeight: height, minWidth: 0 });
+    // Vue nodes distribute extra node height across growable DOM widgets. Keep
+    // this read-only row fixed so scrolling or zoom cannot turn it into a blank block.
+    let host = row.parentElement;
+    for (let depth = 0; host && depth < 3; depth += 1, host = host.parentElement) {
+        host.style.height = `${height}px`;
+        host.style.minHeight = `${height}px`;
+        host.style.maxHeight = `${height}px`;
+        host.style.flex = `0 0 ${height}px`;
+        host.style.alignSelf = "start";
+        host.style.overflow = "visible";
+    }
+    // Vue nodes also mark the DOM widget's grid track as auto. Replace only
+    // this widget's track so the following parameter rows move up immediately.
+    const widgetRow = row.closest?.(".lg-node-widget")?.parentElement || null;
+    const widgetGrid = widgetRow?.parentElement || null;
+    const template = String(widgetGrid?.style?.gridTemplateRows || "").trim();
+    if (widgetRow && widgetGrid && template) {
+        const rowIndex = Array.from(widgetGrid.children).indexOf(widgetRow);
+        const rows = template.split(/\s+/);
+        if (rowIndex >= 0 && rowIndex < rows.length) {
+            rows[rowIndex] = `${height}px`;
+            widgetGrid.style.gridTemplateRows = rows.join(" ");
+        }
+    }
+    row.style.height = `${height}px`;
+    row.style.minHeight = `${height}px`;
+    row.style.maxHeight = `${height}px`;
+    row.style.flex = `0 0 ${height}px`;
+    return true;
+}
+
+function scheduleSequenceCanvasSizeRow(node) {
+    if (!node) return;
+    clearTimeout(node.__h3SequenceCanvasSizeTimer);
+    node.__h3SequenceCanvasSizeTimer = setTimeout(() => {
+        node.__h3SequenceCanvasSizeTimer = null;
+        lockSequenceCanvasSizeRow(node);
+    }, 0);
 }
 
 function syncSequenceCanvasSize(node) {
     if (!node) return false;
     const value = sequenceCanvasSize(node);
     if (!value) return false;
+    lockSequenceCanvasSizeRow(node);
     const target = node.__h3SequenceSizeValue;
     if (target && target.textContent !== value) target.textContent = value;
     node.__h3SequenceSizeText = value;
@@ -9956,11 +10795,16 @@ function installSequenceGlobalNode(nodeType, nodeData) {
             const domWidget = node.addDOMWidget("h3_sequence_canvas_size", "h3_sequence_canvas_size", row, {
                 serialize: false,
                 getMinHeight: () => SEQUENCE_CANVAS_SIZE_ROW,
+                getMaxHeight: () => SEQUENCE_CANVAS_SIZE_ROW,
+                getHeight: () => SEQUENCE_CANVAS_SIZE_ROW,
+                afterResize: () => lockSequenceCanvasSizeRow(node),
+                onDraw: () => lockSequenceCanvasSizeRow(node),
             });
             if (domWidget) {
                 domWidget.serialize = false;
                 setWidgetOption(domWidget, "serialize", false);
                 node.__h3SequenceSizeWidget = domWidget;
+                lockSequenceCanvasSizeRow(node);
                 node.__h3SequenceSizeValue = value;
                 // 挪到「宽高比」下面，也就是原来宽 / 高两行的位置。
                 const currentIndex = node.widgets?.indexOf(domWidget) ?? -1;
@@ -9998,6 +10842,18 @@ function installSequenceGlobalNode(nodeType, nodeData) {
         const result = originalAdded?.apply(this, arguments);
         setup(this);
         return result;
+    };
+    const originalResize = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function onResizeH3SequenceGlobal(size) {
+        const result = originalResize?.apply(this, arguments);
+        scheduleSequenceCanvasSizeRow(this);
+        return result;
+    };
+    const originalRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function onRemovedH3SequenceGlobal() {
+        if (this.__h3SequenceCanvasSizeTimer) clearTimeout(this.__h3SequenceCanvasSizeTimer);
+        this.__h3SequenceCanvasSizeTimer = null;
+        return originalRemoved?.apply(this, arguments);
     };
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3SequenceGlobal(info) {
@@ -12160,6 +13016,7 @@ function install() {
     installNativePromptControlTracking();
     installNativeThemeWatcher();
     installRenderProgressListener();
+    installSequenceStageVideoPreviewListener();
     installMediaLoaderClipboardPaste();
     for (const delay of [0, 100, 500, 1200]) setTimeout(() => patchCanvas(), delay);
     setTimeout(() => installQuickCreateCapture(app.canvas), 0);
@@ -12773,28 +13630,83 @@ function installRenderNode(nodeType, nodeData) {
         setWidgetOption(widget, "serialize", false);
         node.__h3Pass2RerunWidget = widget;
     };
-    const migrateAdvancedWidgetOrder = (info) => {
+    const migrateAdvancedWidgetOrder = (info, migrateAdvancedInputs = false) => {
         const values = info?.widgets_values;
-        if (!Array.isArray(values) || values.length < 5) return;
         const named = info?.widgets_values_named;
-        if (named && Object.prototype.hasOwnProperty.call(named, "digital_human_upscale_scale")) return;
+        if (!Array.isArray(values) || values.length < 5) return;
         let scale;
-        if (values.length <= 6) {
-            scale = 1.5;
-            values.splice(1, 0, scale);
-        } else if (
-            values.length >= 7
-            && typeof values[5] === "boolean"
-            && typeof values[6] === "number"
-        ) {
-            scale = values.splice(6, 1)[0];
-            values.splice(1, 0, scale);
+        if (!named || !Object.prototype.hasOwnProperty.call(named, "digital_human_upscale_scale")) {
+            if (values.length <= 6) {
+                scale = 1.5;
+                values.splice(1, 0, scale);
+            } else if (
+                values.length >= 7
+                && typeof values[5] === "boolean"
+                && typeof values[6] === "number"
+            ) {
+                scale = values.splice(6, 1)[0];
+                values.splice(1, 0, scale);
+            }
+            if (named && typeof named === "object" && scale !== undefined) {
+                named.digital_human_upscale_scale = scale;
+            }
         }
-        if (named && typeof named === "object" && scale !== undefined) {
-            named.digital_human_upscale_scale = scale;
+        if (!migrateAdvancedInputs) return;
+        // Version before advanced-input folding stored [.., sample_preview, refiner_lora].
+        // The new order is [.., refiner_lora, show_advanced_inputs, sample_preview].
+        const isPreviewValue = (value) => typeof value === "boolean"
+            || ["\u5f00", "\u5173", "true", "false"].includes(String(value ?? "").trim().toLowerCase());
+        const last = values.length - 1;
+        const hasNewTriplet = values.length >= 3
+            && typeof values[last - 2] === "string"
+            && typeof values[last - 1] === "boolean"
+            && isPreviewValue(values[last]);
+        if (!hasNewTriplet) {
+            if (values.length >= 2 && isPreviewValue(values[last - 1]) && typeof values[last] === "string") {
+                // Most 1.1.x workflows already have the refiner LoRA widget.
+                const previewValue = values[last - 1];
+                const refinerValue = values[last];
+                values.splice(last - 1, 2, refinerValue, false, previewValue);
+            } else if (isPreviewValue(values[last])) {
+                // Older workflows predate the refiner LoRA widget.
+                values.splice(last, 0, "none", false);
+            }
+            if (named && typeof named === "object") named.show_advanced_inputs = false;
         }
     };
-    const normalizeAdvancedTwoPassValues = (info) => {
+    const repairAdvancedInputWidgetOrder = (node, info) => {
+        const values = info?.widgets_values;
+        if (!Array.isArray(values) || values.length < 2) return false;
+        const named = info?.widgets_values_named;
+        const isPreviewValue = (value) => typeof value === "boolean"
+            || ["\u5f00", "\u5173", "true", "false"].includes(String(value ?? "").trim().toLowerCase());
+        const last = values.length - 1;
+        let refinerValue = null;
+        let previewValue = null;
+        if (isPreviewValue(values[last - 1]) && typeof values[last] === "string") {
+            previewValue = values[last - 1];
+            refinerValue = values[last];
+            values.splice(last - 1, 2, refinerValue, false, previewValue);
+        } else if (values.length <= 14 && isPreviewValue(values[last]) && typeof values[last - 1] === "string") {
+            previewValue = values[last];
+            refinerValue = String(named?.digital_human_refiner_lora || "none");
+            values.splice(last, 0, refinerValue, false);
+        } else {
+            return false;
+        }
+        if (named && typeof named === "object") {
+            named.digital_human_refiner_lora = refinerValue;
+            named.show_advanced_inputs = false;
+            named.sample_preview = previewValue;
+        }
+        // Native loading may apply widgets_values_named before onConfigure.
+        // Re-apply the three widgets affected by the old tail order afterward.
+        setWidgetValue(node, "digital_human_refiner_lora", refinerValue);
+        setWidgetValue(node, "show_advanced_inputs", false);
+        setWidgetValue(node, "sample_preview", previewValue);
+        return true;
+    };
+    const normalizeAdvancedTwoPassValues = (node, info) => {
         const named = info?.widgets_values_named;
         const values = info?.widgets_values;
         const clamp = (value, minimum, maximum, fallback) => {
@@ -12810,10 +13722,91 @@ function installRenderNode(nodeType, nodeData) {
             named.digital_human_cfg = 1.0;
         }
         if (Array.isArray(values) && values.length >= 7) {
-            values[3] = clamp(values[3], 1, 6, steps);
-            values[4] = clamp(values[4], 0.05, 0.35, denoise);
-            values[2] = 1.0;
+            const widgets = h3SerializableWidgets(node);
+            const setByWidgetName = (name, value) => {
+                const index = widgets.findIndex((widget) => String(widget.name ?? "") === name);
+                if (index >= 0 && index < values.length) values[index] = value;
+            };
+            // control_after_generate shifts every later positional value, so use
+            // the actual widget names instead of fixed offsets.
+            setByWidgetName("digital_human_transition_step", steps);
+            setByWidgetName("digital_human_lowres_scale", denoise);
+            setByWidgetName("digital_human_cfg", 1.0);
         }
+    };
+    const orderAdvancedRendererAdvancedInput = (node) => {
+        if (!isRenderAccel || !Array.isArray(node?.widgets)) return false;
+        const toggle = getWidget(node, "show_advanced_inputs");
+        const seed = getWidget(node, "noise_seed");
+        if (!toggle || !seed || toggle === seed) return false;
+        // Keep the Python field order for positional save compatibility, but expose
+        // the fold switch where users expect it in both canvas renderers.
+        if (!Array.isArray(node.__h3AdvancedCanonicalWidgetNames)) {
+            node.__h3AdvancedCanonicalWidgetNames = node.widgets
+                .map((widget) => String(widget?.name || ""))
+                .filter(Boolean);
+        }
+        const toggleIndex = node.widgets.indexOf(toggle);
+        const seedIndex = node.widgets.indexOf(seed);
+        if (toggleIndex < 0 || seedIndex < 0 || toggleIndex === seedIndex - 1) return false;
+        node.widgets.splice(toggleIndex, 1);
+        const nextSeedIndex = node.widgets.indexOf(seed);
+        node.widgets.splice(nextSeedIndex, 0, toggle);
+        if (Array.isArray(node._widgets) && node._widgets !== node.widgets) {
+            const legacyToggleIndex = node._widgets.indexOf(toggle);
+            if (legacyToggleIndex >= 0) node._widgets.splice(legacyToggleIndex, 1);
+            const legacySeedIndex = node._widgets.indexOf(seed);
+            if (legacySeedIndex >= 0) node._widgets.splice(legacySeedIndex, 0, toggle);
+        }
+        markWidgetSlotLayoutDirty(node);
+        return true;
+    };
+    const scheduleAdvancedRendererAdvancedInputOrder = (node) => {
+        if (!isRenderAccel || !node || node.__h3AdvancedOrderScheduled) return;
+        node.__h3AdvancedOrderScheduled = true;
+        const run = () => {
+            node.__h3AdvancedOrderScheduled = false;
+            if (!node.graph) return;
+            orderAdvancedRendererAdvancedInput(node);
+        };
+        setTimeout(run, 0);
+    };
+    const canonicalizeAdvancedRendererSerialization = (node, info) => {
+        if (!isRenderAccel || !node || !info || typeof info !== "object") return false;
+        const canonicalNames = node.__h3AdvancedCanonicalWidgetNames;
+        const visualWidgets = h3SerializableWidgets(node);
+        if (!Array.isArray(canonicalNames) || !canonicalNames.length || !visualWidgets.length) return false;
+        const visualValues = Array.isArray(info.widgets_values) ? info.widgets_values : [];
+        const named = info.widgets_values_named && typeof info.widgets_values_named === "object"
+            ? info.widgets_values_named
+            : {};
+        const valuesByName = new Map();
+        for (let index = 0; index < visualWidgets.length; index += 1) {
+            const widget = visualWidgets[index];
+            const name = String(widget?.name || "");
+            if (!name) continue;
+            const value = index < visualValues.length
+                ? visualValues[index]
+                : Object.prototype.hasOwnProperty.call(named, name) ? named[name] : widget.value;
+            const queue = valuesByName.get(name);
+            if (queue) queue.push(value);
+            else valuesByName.set(name, [value]);
+        }
+        const canonicalValues = [];
+        const canonicalNamed = {};
+        for (const rawName of canonicalNames) {
+            const name = String(rawName || "");
+            if (!name) continue;
+            const queue = valuesByName.get(name);
+            if (!queue?.length) continue;
+            const value = queue.shift();
+            canonicalValues.push(value);
+            canonicalNamed[name] = value;
+        }
+        if (!canonicalValues.length) return false;
+        info.widgets_values = canonicalValues;
+        info.widgets_values_named = { ...named, ...canonicalNamed };
+        return true;
     };
     const className = h3ClassName(nodeData?.name);
     const isPass1 = className === RENDER_PASS1_CLASS;
@@ -12863,6 +13856,7 @@ function installRenderNode(nodeType, nodeData) {
     };
     const setup = (node, adjustHeight = true) => {
         if (!node) return;
+        scheduleAdvancedRendererAdvancedInputOrder(node);
         localizeNodeInstance(node);
         if (isPass1) ensurePass1VideoDecoded(node);
         if (isPass2) ensurePass2FirstPassDecoded(node);
@@ -12879,7 +13873,19 @@ function installRenderNode(nodeType, nodeData) {
                     node.setDirtyCanvas?.(true, true);
                 };
             }
+            const advancedInputsWidget = isRenderAccel ? getWidget(node, "show_advanced_inputs") : null;
+            if (advancedInputsWidget && !advancedInputsWidget.__h3AdvancedInputsBound) {
+                advancedInputsWidget.__h3AdvancedInputsBound = true;
+                const originalCallback = advancedInputsWidget.callback;
+                advancedInputsWidget.callback = (value) => {
+                    originalCallback?.call(advancedInputsWidget, value);
+                    syncAdvancedOptionalInputs(node);
+                    node.graph?.change?.();
+                    node.setDirtyCanvas?.(true, true);
+                };
+            }
             syncAdvancedRenderSecondPassWidgets(node, { adjustHeight });
+            if (isRenderAccel) syncAdvancedOptionalInputs(node);
             return;
         }
         const syncedWidgets = isPass1
@@ -12909,6 +13915,7 @@ function installRenderNode(nodeType, nodeData) {
         const result = originalConnectionsChange?.apply(this, args);
         if (isPass1) ensurePass1VideoDecoded(this);
         else if (isPass2) ensurePass2FirstPassDecoded(this);
+        else if (isRenderAccel) syncAdvancedOptionalInputs(this);
         return result;
     };
     const originalConfigure = nodeType.prototype.onConfigure;
@@ -12916,10 +13923,17 @@ function installRenderNode(nodeType, nodeData) {
         if (isPass1) migrateLegacyPass1OutputMetadata(this, info);
         if (isPass2) migratePass2PreviewWidgetOrder(info);
         if (isPass2) migrateLegacyPass2OutputMetadata(this, info);
-        if (!isPass1 && !isPass2) migrateAdvancedWidgetOrder(info);
-        if (!isPass1 && !isPass2) normalizeAdvancedTwoPassValues(info);
+        if (!isPass1 && !isPass2) migrateAdvancedWidgetOrder(info, isRenderAccel);
+        if (!isPass1 && !isPass2) normalizeAdvancedTwoPassValues(this, info);
         const result = originalConfigure?.apply(this, arguments);
+        if (!isPass1 && !isPass2 && isRenderAccel) repairAdvancedInputWidgetOrder(this, info);
         setup(this, false);
+        return result;
+    };
+    const originalSerialize = nodeType.prototype.onSerialize;
+    nodeType.prototype.onSerialize = function onSerializeH3Render(info) {
+        const result = originalSerialize?.apply(this, arguments);
+        canonicalizeAdvancedRendererSerialization(this, info);
         return result;
     };
     // 底部永久留出进度条的位置，免得它压住最后一个参数控件。
@@ -12940,6 +13954,7 @@ function installRenderNode(nodeType, nodeData) {
     const originalRemoved = nodeType.prototype.onRemoved;
     nodeType.prototype.onRemoved = function onRemovedH3Render() {
         forgetRenderProgress(this);
+        if (isRenderAccel) advancedOptionalDomState.delete(String(this?.id ?? ""));
         return originalRemoved?.apply(this, arguments);
     };
 }
@@ -12971,12 +13986,16 @@ app.registerExtension({
         installSegmentStepNode(nodeType, nodeData);
         installSegmentCollectNode(nodeType, nodeData);
         installRenderNode(nodeType, nodeData);
+        installFinalUpscaleNode(nodeType, nodeData);
         installSequenceSegmentNode(nodeType, nodeData);
         installSequenceGlobalNode(nodeType, nodeData);
         installNode(nodeType, nodeData);
         installWidgetValueReconcileNode(nodeType, nodeData);
     },
     loadedGraphNode(node) {
+        if (h3ClassName(node?.type || node?.comfyClass) === RENDER_ACCEL_CLASS) {
+            syncAdvancedOptionalInputs(node);
+        }
         if (isMediaLoader(node) || isSequenceSegmentNode(node)) {
             scheduleMissingMediaValidation({ prompt: true, delay: 1400 });
         }

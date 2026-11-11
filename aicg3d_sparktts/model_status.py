@@ -32,6 +32,9 @@ _MODEL_FILE_GROUPS: tuple[tuple[str, ...], ...] = (
 
 
 def _models_root() -> Path:
+    configured = os.environ.get("COMFYUI_MODELS_DIR", "").strip()
+    if configured:
+        return Path(configured)
     try:
         import folder_paths
 
@@ -40,9 +43,6 @@ def _models_root() -> Path:
             return Path(root)
     except Exception:
         pass
-    configured = os.environ.get("COMFYUI_MODELS_DIR", "").strip()
-    if configured:
-        return Path(configured)
     return Path.cwd() / "models"
 
 

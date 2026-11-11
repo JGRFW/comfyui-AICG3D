@@ -179,13 +179,10 @@ def test_frontend_uses_generated_reference_audio() -> None:
 
 
 def test_edge_tts_dependency_is_declared() -> None:
-    requirements = (PLUGIN_ROOT / "requirements.txt").read_text(encoding="utf-8")
-    pyproject = (PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    requirements = (PLUGIN_ROOT / "requirements-optional.txt").read_text(encoding="utf-8")
     assert "edge-tts" in requirements
-    assert "edge-tts" in pyproject
     for dependency in ("omegaconf", "soundfile", "soxr", "einx", "transformers"):
         assert dependency in requirements
-        assert dependency in pyproject
 
 
 def main() -> None:

@@ -21,7 +21,10 @@ def test_voice_library_backend_contract() -> None:
         MiniMaxH3EasySequenceSegment,
     )
 
-    assert "voice_state" in MiniMaxH3EasyCharacterVoiceLibrary.INPUT_TYPES()["required"]
+    required = MiniMaxH3EasyCharacterVoiceLibrary.INPUT_TYPES()["required"]
+    assert "voice_state" in required
+    assert required["enabled"][0] == "BOOLEAN"
+    assert required["enabled"][1]["default"] is True
     optional = MiniMaxH3EasySequenceSegment.INPUT_TYPES().get("optional", {})
     assert "voice_cast" in optional
     assert optional["voice_cast"][0] == "AICG3D_CHARACTER_VOICE_CAST"
@@ -62,7 +65,8 @@ def test_voice_cast_node_is_strictly_optional() -> None:
     assert result_items == items
     assert result_prompt == "plain prompt"
     source = (PLUGIN_ROOT / "aicg3d_h3easy" / "nodes.py").read_text(encoding="utf-8")
-    assert "inherited_cast = previous_segment.sample.voice_cast" not in source
+    assert "active_voice_ids: tuple[str, ...] = ()" in source
+    assert "forced_role_ids=active_voice_ids" in source
 
 
 def test_voice_library_ui_and_workflows_are_packaged() -> None:
@@ -73,9 +77,14 @@ def test_voice_library_ui_and_workflows_are_packaged() -> None:
     assert voice_bridge.is_file()
     assert voice_preview.is_file()
     assert "@角色${role.seat}" in voice_ui.read_text(encoding="utf-8")
+    assert "h3-voice-enable-switch" in voice_ui.read_text(encoding="utf-8")
+    assert "本次运行不应用角色音色" in voice_ui.read_text(encoding="utf-8")
     voice_ui_source = voice_ui.read_text(encoding="utf-8")
     assert 'if (role.mode !== "reference") {' in voice_ui_source
     assert "panel.append(descriptionBox);" in voice_ui_source
+    assert "描述音色（生成试听参考）" in voice_ui_source
+    assert "克隆音色（严格锁定）" in voice_ui_source
+    assert "描述音色（可生成固定参考）" not in voice_ui_source
     backend_source = (PLUGIN_ROOT / "aicg3d_h3easy" / "nodes.py").read_text(encoding="utf-8")
     assert "timbre is defined only by the attached " in backend_source
     preview_source = voice_preview.read_text(encoding="utf-8")

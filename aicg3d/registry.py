@@ -15,6 +15,8 @@ import aicg3d.routes as routes
 import aicg3d.prompt_split as prompt_split
 import aicg3d_h3easy.nodes as h3
 import aicg3d_h3easy.character_motion as character_motion
+import aicg3d_h3easy.final_upscale as final_upscale
+import aicg3d_h3easy.final_sequence_packed as final_sequence_packed
 from aicg3d_h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
 
 NODE_ID_PREFIX = "AICG3D_H3"
@@ -53,6 +55,10 @@ def _h3_easy() -> tuple[dict, dict]:
     display = dict(h3.NODE_DISPLAY_NAME_MAPPINGS)
     mapping.update(character_motion.NODE_CLASS_MAPPINGS)
     display.update(character_motion.NODE_DISPLAY_NAME_MAPPINGS)
+    mapping.update(final_upscale.NODE_CLASS_MAPPINGS)
+    display.update(final_upscale.NODE_DISPLAY_NAME_MAPPINGS)
+    mapping.update(final_sequence_packed.NODE_CLASS_MAPPINGS)
+    display.update(final_sequence_packed.NODE_DISPLAY_NAME_MAPPINGS)
     mapping["MiniMaxH3EasySamplerAdvanced"] = AICG3DSamplerAdvanced
     display["MiniMaxH3EasySamplerAdvanced"] = "AICG-采样器（高级）"
     return mapping, display

@@ -25,6 +25,7 @@ from aicg3d_h3easy.nodes import (  # noqa: E402
     MiniMaxH3EasyRenderPass2,
     MiniMaxH3EasyRenderPass1,
     MiniMaxH3EasyRenderAdvancedWithModel,
+    _apply_secondary_refiner_lora,
     _resolve_h3_secondary_upscaler,
     _segment_av_streams,
     _segment_latent_streams,
@@ -43,6 +44,19 @@ def main() -> None:
     assert scale_spec[1]["default"] == 1.5
     assert scale_spec[1]["min"] == 1.0
     assert scale_spec[1]["max"] == 4.0
+    refiner_spec = required["digital_human_refiner_lora"]
+    assert refiner_spec[1]["default"] == "none"
+    refiner_name = "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors"
+    assert refiner_name in refiner_spec[0]
+    source_model = object()
+    patched_model = object()
+    with patch("aicg3d_h3easy.nodes.nodes.LoraLoaderModelOnly") as loader_cls:
+        loader_cls.return_value.load_lora_model_only.return_value = (patched_model,)
+        assert _apply_secondary_refiner_lora(source_model, refiner_name) is patched_model
+        loader_cls.return_value.load_lora_model_only.assert_called_once_with(
+            source_model, refiner_name, 1.0
+        )
+    assert _apply_secondary_refiner_lora(source_model, "none") is source_model
     assert MiniMaxH3EasyRenderPass2.RETURN_TYPES == ("AICG3D_H3_PASS1", "VIDEO", "VIDEO")
     assert "run_nonce" in MiniMaxH3EasyRenderPass1.INPUT_TYPES()["required"]
     assert MiniMaxH3EasyRenderPass1.RETURN_NAMES == ("pass1", "video")

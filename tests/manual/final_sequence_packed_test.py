@@ -53,6 +53,15 @@ def test_packed_upscale_has_one_linked_input_and_compact_order() -> None:
     assert "h3_bundle" not in names
     assert "model" not in names
     assert inputs["required"]["show_advanced_settings"][1]["default"] is False
+    relay_names = [
+        "relay_vsr_enabled",
+        "relay_vsr_model",
+        "relay_vsr_vae",
+        "relay_vsr_detail",
+        "relay_lock_source_exposure",
+    ]
+    assert names[-5:] == relay_names
+    assert inputs["required"]["relay_vsr_enabled"][1]["default"] is False
 
 
 def test_sequence_combine_appends_packet_after_legacy_outputs() -> None:
@@ -145,6 +154,19 @@ def test_workflow_uses_one_final_sequence_wire() -> None:
         "none",
         False,
     ]
+    assert upscale["widgets_values"][-5:] == [
+        False,
+        "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
+        "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
+        0.5,
+        True,
+    ]
+    named = upscale["widgets_values_named"]
+    assert named["relay_vsr_enabled"] is False
+    assert named["relay_vsr_model"].endswith("relayvsr_x2_lightx2v_int8_convrot.safetensors")
+    assert named["relay_vsr_vae"].endswith("relayvsr_flash_vae_x2_fp32.safetensors")
+    assert named["relay_vsr_detail"] == 0.5
+    assert named["relay_lock_source_exposure"] is True
 
     links = {int(link[0]): link for link in workflow["links"]}
     assert 358 not in links

@@ -663,7 +663,12 @@
         0.3,
         "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
         false,
-        "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors"
+        "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors",
+        false,
+        "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
+        "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
+        0.5,
+        true
       ],
       "widgets_values_named": {
         "noise_seed": 357482398646636,
@@ -681,7 +686,12 @@
         "digital_human_lowres_scale": 0.3,
         "digital_human_upscaler_model": "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
         "sample_preview": false,
-        "digital_human_refiner_lora": "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors"
+        "digital_human_refiner_lora": "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors",
+        "relay_vsr_enabled": false,
+        "relay_vsr_model": "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
+        "relay_vsr_vae": "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
+        "relay_vsr_detail": 0.5,
+        "relay_lock_source_exposure": true
       }
     },
     {

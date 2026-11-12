@@ -26,6 +26,7 @@ from comfy_api.latest import InputImpl, Types
 from comfy_extras import nodes_minimax_h3 as h3
 
 from aicg3d_h3easy import nodes as base
+from aicg3d_h3easy import relay_vsr
 
 
 class MiniMaxH3EasyFinalHighResUpscale:
@@ -39,6 +40,7 @@ class MiniMaxH3EasyFinalHighResUpscale:
     DESCRIPTION = (
         "接在最终合成视频之后。先对整条成片做 H3 Latent 3D 放大与低降噪二采，"
         "再可选叠加 SeedVR2 / RTX VSR / VOSR2 画质修复或视频超分。"
+        "整片还可追加 RelayVSR 放大；RelayVSR 不接收音频，最后仍封装原始音轨。"
         "长片自动按带重叠的时间窗口处理，只取各窗口中段，不在分段接缝处做混合；"
         "最终曝光对齐未处理成片，音频原轨直接封装，不经过二采或超分。"
     )
@@ -263,6 +265,53 @@ class MiniMaxH3EasyFinalHighResUpscale:
                 "cleanup_after_run": (
                     list(base.RENDER_CLEANUP_CHOICES),
                     {"default": base.RENDER_CLEANUP_UNLOAD},
+                ),
+                "relay_vsr_enabled": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "打开后在整片时间窗口内追加 RelayVSR 放大。它与 H3 二采、画质修复相互独立；"
+                            "关闭时不加载 RelayVSR 模型。"
+                        ),
+                    },
+                ),
+                "relay_vsr_model": (
+                    relay_vsr.relay_model_choices(),
+                    {
+                        "default": relay_vsr.default_relay_model(),
+                        "tooltip": (
+                            "选择 RelayVSR 放大模型。模型放在 models/diffusion_models/RelayVSR/；"
+                            "x2 模型必须搭配 x2 Flash VAE，x4 同理。"
+                        ),
+                    },
+                ),
+                "relay_vsr_vae": (
+                    relay_vsr.relay_vae_choices(),
+                    {
+                        "default": relay_vsr.default_relay_vae(relay_vsr.default_relay_model()),
+                        "tooltip": (
+                            "选择 RelayVSR Flash VAE。必须和放大模型同为 x2 或 x4；"
+                            "VAE 放在 models/vae/RelayVSR/。"
+                        ),
+                    },
+                ),
+                "relay_vsr_detail": (
+                    "FLOAT",
+                    {
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "RelayVSR Flash 解码细节强度；0.5 与参考工作流一致。",
+                    },
+                ),
+                "relay_lock_source_exposure": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "把 RelayVSR 每帧亮度锁回处理前画面，避免整片超分后曝光漂移。",
+                    },
                 ),
             },
             "optional": {
@@ -787,6 +836,11 @@ class MiniMaxH3EasyFinalHighResUpscale:
         sample_preview=base.RENDER_PREVIEW_OFF,
         preview_interval=base.RENDER_PREVIEW_INTERVAL,
         cleanup_after_run=base.RENDER_CLEANUP_UNLOAD,
+        relay_vsr_enabled=False,
+        relay_vsr_model="",
+        relay_vsr_vae="",
+        relay_vsr_detail=0.5,
+        relay_lock_source_exposure=True,
         model=None,
         sampler=None,
         sigmas=None,
@@ -799,14 +853,15 @@ class MiniMaxH3EasyFinalHighResUpscale:
         use_second_pass = bool(second_pass)
         repair_engine = str(repair_engine or base.PASS2_REPAIR_OFF).strip()
         repair_active = repair_engine != base.PASS2_REPAIR_OFF
+        use_relay_vsr = bool(relay_vsr_enabled)
         if repair_engine not in base.PASS2_REPAIR_CHOICES:
             raise ValueError(f"未知的成片修复引擎：{repair_engine}")
-        if not use_second_pass and not repair_active:
-            raise ValueError("H3 二次采样和超分/修复都没有开启，成片不会有任何处理。")
+        if not use_second_pass and not repair_active and not use_relay_vsr:
+            raise ValueError("H3 二次采样、RelayVSR 和超分/修复都没有开启，成片不会有任何处理。")
         if use_second_pass and (
             not latent_upscale_model or str(latent_upscale_model).startswith("(")
         ):
-            raise ValueError("请选择 H3 Latent 3D 放大器模型，或关闭 H3 二次采样只使用超分修复。")
+            raise ValueError("请选择 H3 Latent 3D 放大器模型，或关闭 H3 二次采样只使用 RelayVSR / 超分修复。")
 
         fps = float(video.get_frame_rate() or h3.FPS)
         total_frames = int(video.get_frame_count())
@@ -826,6 +881,7 @@ class MiniMaxH3EasyFinalHighResUpscale:
         output_width = 0
         output_height = 0
         h3_model = model
+        relay_runner = None
         done = False
         try:
             source_path, source_start, source_duration = cls._source_video_file(
@@ -835,6 +891,14 @@ class MiniMaxH3EasyFinalHighResUpscale:
             )
             if use_second_pass and h3_model is None:
                 h3_model = h3_bundle.model_for("fl2va")
+
+            if use_relay_vsr:
+                relay_runner = relay_vsr.RelayVSRRunner(
+                    relay_vsr_model,
+                    relay_vsr_vae,
+                    detail=float(relay_vsr_detail),
+                    lock_source_exposure=bool(relay_lock_source_exposure),
+                )
 
             for index, (decode_start, decode_end, kept_start, kept_end) in enumerate(
                 plans,
@@ -894,6 +958,11 @@ class MiniMaxH3EasyFinalHighResUpscale:
                         offload_device=repair_offload_device,
                         vae_tiling=bool(repair_vae_tiling),
                     )
+
+                if relay_runner is not None:
+                    # RelayVSR only sees images. The original audio never enters this
+                    # branch; it is muxed from the source file after all windows finish.
+                    working = relay_runner.enhance(working)
 
                 working = (
                     working[..., :3]
@@ -961,6 +1030,8 @@ class MiniMaxH3EasyFinalHighResUpscale:
             report = (
                 f"成片高清完成：{total_frames} 帧，{len(plans)} 个时间窗口；"
                 f"H3 二采 {'开' if use_second_pass else '关'}；"
+                f"RelayVSR {'开' if use_relay_vsr else '关'}"
+                f"{f'（{relay_vsr_model} + {relay_vsr_vae}）' if use_relay_vsr else ''}；"
                 f"修复引擎 {repair_engine}；"
                 f"源曝光锁定 {'开' if bool(lock_source_exposure) else '关'}；"
                 "音频原轨直接封装。"

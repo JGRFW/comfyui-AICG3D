@@ -234,6 +234,11 @@ const PRIMARY_BROWSER_LANGUAGE = String(globalThis.navigator?.language || global
 const ZH_BROWSER = /^(zh)(?:[-_]|$)/i.test(PRIMARY_BROWSER_LANGUAGE);
 const TEXT = {
     finalUpscalePackedTitle: ZH_BROWSER ? "成片高清二采放大" : "Final HD Upscale",
+    finalUpscaleRelayEnabled: ZH_BROWSER ? "RelayVSR 放大" : "RelayVSR upscale",
+    finalUpscaleRelayModel: ZH_BROWSER ? "RelayVSR 放大模型" : "RelayVSR model",
+    finalUpscaleRelayVae: ZH_BROWSER ? "RelayVSR Flash VAE" : "RelayVSR Flash VAE",
+    finalUpscaleRelayDetail: ZH_BROWSER ? "RelayVSR 细节强度" : "RelayVSR detail",
+    finalUpscaleRelayExposureLock: ZH_BROWSER ? "RelayVSR 曝光锁定" : "RelayVSR exposure lock",
     finalUpscaleRefinerLora: ZH_BROWSER ? "二采精修 LoRA" : "Second-pass refiner LoRA",
     finalUpscaleAdvancedSettings: ZH_BROWSER ? "展开高级设置" : "Show advanced settings",
     finalSequenceData: ZH_BROWSER ? "成片数据" : "Final sequence data",
@@ -1526,6 +1531,11 @@ function localizeFinalUpscaleWidgets(node) {
         sample_preview: TEXT.finalUpscalePreview,
         preview_interval: TEXT.finalUpscalePreviewInterval,
         cleanup_after_run: TEXT.finalUpscaleCleanup,
+        relay_vsr_enabled: TEXT.finalUpscaleRelayEnabled,
+        relay_vsr_model: TEXT.finalUpscaleRelayModel,
+        relay_vsr_vae: TEXT.finalUpscaleRelayVae,
+        relay_vsr_detail: TEXT.finalUpscaleRelayDetail,
+        relay_lock_source_exposure: TEXT.finalUpscaleRelayExposureLock,
     };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
@@ -1577,6 +1587,11 @@ function localizeNodeInstance(node) {
             digital_human_upscaler_model: TEXT.digitalHumanUpscalerLabel,
             digital_human_upscale_scale: TEXT.digitalHumanUpscaleScaleLabel,
             digital_human_refiner_lora: TEXT.digitalHumanRefinerLoraLabel,
+            relay_vsr_enabled: TEXT.finalUpscaleRelayEnabled,
+            relay_vsr_model: TEXT.finalUpscaleRelayModel,
+            relay_vsr_vae: TEXT.finalUpscaleRelayVae,
+            relay_vsr_detail: TEXT.finalUpscaleRelayDetail,
+            relay_lock_source_exposure: TEXT.finalUpscaleRelayExposureLock,
             second_pass_seed: TEXT.pass2SeedLabel,
             second_pass_denoise: TEXT.pass2DenoiseLabel,
             tiled_sampling: TEXT.pass2TiledLabel,
@@ -6492,13 +6507,21 @@ function syncAdvancedRenderSecondPassWidgets(node, { adjustHeight = true } = {})
     const changed = names
         .map((name) => setConditionalWidgetVisible(node, getWidget(node, name), enabled, { adjustHeight }))
         .some(Boolean);
-    if (changed) {
+    const relayEnabled = asBoolean(getWidgetValue(node, "relay_vsr_enabled", false));
+    const relayChanged = [
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_enabled"), true, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_model"), relayEnabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_vae"), relayEnabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_detail"), relayEnabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_lock_source_exposure"), relayEnabled, { adjustHeight }),
+    ].some(Boolean);
+    if (changed || relayChanged) {
         refreshVueNodeWidgets(node);
         node._widgetSlotsDirty = true;
         node.setDirtyCanvas?.(true, true);
         app.graph?.setDirtyCanvas?.(true, true);
     }
-    return changed;
+    return changed || relayChanged;
 }
 
 function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
@@ -6510,6 +6533,7 @@ function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
     const repairEngine = String(getWidgetValue(node, "repair_engine", "关闭（仅 H3 二采）") || "");
     const tiled = String(getWidgetValue(node, "tiled_sampling", "关") || "").trim() === "开";
     const previewOn = String(getWidgetValue(node, "sample_preview", "关") || "").trim() === "开";
+    const relayOn = asBoolean(getWidgetValue(node, "relay_vsr_enabled", false));
     const repairSeedVR2 = repairEngine.includes("SeedVR2");
     const repairRtx = repairEngine.includes("RTX VSR");
     const repairVosr2 = repairEngine.includes("VOSR2");
@@ -6543,6 +6567,11 @@ function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "window_overlap_frames"), advancedWindowSettings, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "sample_preview"), secondPass && advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "preview_interval"), secondPass && previewOn && advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_enabled"), true, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_model"), relayOn, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_vae"), relayOn, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_vsr_detail"), relayOn, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "relay_lock_source_exposure"), relayOn, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "repair_engine"), advanced || repairActive, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "repair_model"), advanced && (repairSeedVR2 || repairVosr2), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "repair_scale"), advanced && repairActive, { adjustHeight }),
@@ -6576,7 +6605,7 @@ function installFinalUpscaleNode(nodeType, nodeData) {
     const setup = (node, adjustHeight = true) => {
         if (!node) return;
         const localized = localizeFinalUpscaleWidgets(node);
-        for (const name of ["second_pass", "show_advanced_settings", "upscale_mode", "repair_engine", "tiled_sampling", "sample_preview"]) {
+        for (const name of ["second_pass", "show_advanced_settings", "upscale_mode", "repair_engine", "tiled_sampling", "sample_preview", "relay_vsr_enabled"]) {
             const widget = getWidget(node, name);
             if (!widget || widget.__h3FinalUpscaleSyncBound) continue;
             widget.__h3FinalUpscaleSyncBound = true;
@@ -10316,11 +10345,15 @@ function sequenceStagePreviewCard(label) {
     video.preload = "metadata";
     video.playsInline = true;
     video.hidden = true;
+    const image = document.createElement("img");
+    image.className = "h3-sequence-stage-image";
+    image.alt = "采样预览";
+    image.hidden = true;
     const placeholder = document.createElement("div");
     placeholder.className = "h3-sequence-stage-placeholder";
     placeholder.textContent = `等待${label}...`;
-    card.append(title, video, placeholder);
-    return { card, video, placeholder };
+    card.append(title, image, video, placeholder);
+    return { card, image, video, placeholder };
 }
 
 function installSequenceStagePreviewWidget(node) {
@@ -10335,6 +10368,8 @@ function installSequenceStagePreviewWidget(node) {
           .h3-sequence-stage-title { position:absolute; z-index:2; top:6px; left:6px; padding:2px 6px; border:1px solid rgba(92,112,128,.58); border-radius:4px; background:rgba(10,15,19,.76); color:#e6eef5; font-size:11px; font-weight:650; line-height:1.35; pointer-events:none; }
           .h3-sequence-stage-video { display:block; width:100%; height:100%; border-radius:5px; background:#000; object-fit:contain; }
           .h3-sequence-stage-video[hidden] { display:none !important; }
+          .h3-sequence-stage-image { display:block; width:100%; height:100%; border-radius:5px; background:#000; object-fit:contain; }
+          .h3-sequence-stage-image[hidden] { display:none !important; }
           .h3-sequence-stage-placeholder { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; min-height:0; color:#81909a; font-size:10px; text-align:center; }
           .h3-sequence-stage-placeholder[hidden] { display:none !important; }
         `;
@@ -10384,6 +10419,8 @@ function installSequenceStagePreviewWidget(node) {
 }
 
 const SEQUENCE_VIDEO_PREVIEW_EVENT = "aicg3d_sequence_video_preview";
+const SEQUENCE_SAMPLING_IMAGE_PREFIX = "data" + ":" + "image" + "/" + "jpeg" + ";base64,";
+const SEQUENCE_SAMPLING_PREVIEW_EVENT = "aicg3d_sequence_sampling_preview";
 let sequenceVideoPreviewListenerReady = false;
 
 function sequenceStagePreviewUrl(video) {
@@ -10396,17 +10433,32 @@ function sequenceStagePreviewUrl(video) {
 }
 
 function setSequenceStagePreview(node, kind, video) {
-    if (kind !== "final") return false;
+    if (kind !== "first_pass" && kind !== "final") return false;
     const target = node?.__h3SequenceStageFinal;
     if (!target?.video || !video?.filename) return false;
     const url = sequenceStagePreviewUrl(video);
     target.video.pause?.();
     target.video.src = url;
     target.video.hidden = false;
+    target.image.hidden = true;
     target.placeholder.hidden = true;
     target.video.load?.();
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function setSequenceSamplingPreview(node, image) {
+    const target = node?.__h3SequenceStageFinal;
+    const encoded = String(image || "");
+    if (!target?.image || !encoded) return false;
+    target.video.pause?.();
+    target.video.hidden = true;
+    target.image.src = encoded.startsWith(SEQUENCE_SAMPLING_IMAGE_PREFIX)
+        ? encoded
+        : SEQUENCE_SAMPLING_IMAGE_PREFIX + encoded;
+    target.image.hidden = false;
+    target.placeholder.hidden = true;
     return true;
 }
 
@@ -10419,6 +10471,8 @@ function resetSequenceStagePreviews() {
         target.video.removeAttribute?.("src");
         target.video.load?.();
         target.video.hidden = true;
+        target.image?.removeAttribute?.("src");
+        if (target.image) target.image.hidden = true;
         target.placeholder.hidden = false;
     }
 }
@@ -10431,6 +10485,12 @@ function installSequenceStageVideoPreviewListener() {
         const node = renderProgressNodeFor(detail?.node_id);
         if (!node || !isSequenceSegmentNode(node)) return;
         setSequenceStagePreview(node, String(detail?.kind || ""), detail?.video);
+    });
+    api.addEventListener(SEQUENCE_SAMPLING_PREVIEW_EVENT, (event) => {
+        const detail = event?.detail;
+        const node = renderProgressNodeFor(detail?.node_id);
+        if (!node || !isSequenceSegmentNode(node)) return;
+        setSequenceSamplingPreview(node, detail?.image);
     });
     api.addEventListener("execution_start", resetSequenceStagePreviews);
 }
@@ -13736,30 +13796,59 @@ function installRenderNode(nodeType, nodeData) {
     };
     const orderAdvancedRendererAdvancedInput = (node) => {
         if (!isRenderAccel || !Array.isArray(node?.widgets)) return false;
-        const toggle = getWidget(node, "show_advanced_inputs");
-        const seed = getWidget(node, "noise_seed");
-        if (!toggle || !seed || toggle === seed) return false;
-        // Keep the Python field order for positional save compatibility, but expose
-        // the fold switch where users expect it in both canvas renderers.
+        // Record the backend order before any visual movement. onSerialize maps
+        // values back to this order so positional workflow compatibility is kept.
         if (!Array.isArray(node.__h3AdvancedCanonicalWidgetNames)) {
             node.__h3AdvancedCanonicalWidgetNames = node.widgets
                 .map((widget) => String(widget?.name || ""))
                 .filter(Boolean);
         }
-        const toggleIndex = node.widgets.indexOf(toggle);
-        const seedIndex = node.widgets.indexOf(seed);
-        if (toggleIndex < 0 || seedIndex < 0 || toggleIndex === seedIndex - 1) return false;
-        node.widgets.splice(toggleIndex, 1);
-        const nextSeedIndex = node.widgets.indexOf(seed);
-        node.widgets.splice(nextSeedIndex, 0, toggle);
-        if (Array.isArray(node._widgets) && node._widgets !== node.widgets) {
-            const legacyToggleIndex = node._widgets.indexOf(toggle);
-            if (legacyToggleIndex >= 0) node._widgets.splice(legacyToggleIndex, 1);
-            const legacySeedIndex = node._widgets.indexOf(seed);
-            if (legacySeedIndex >= 0) node._widgets.splice(legacySeedIndex, 0, toggle);
+        const lists = [node.widgets];
+        if (Array.isArray(node._widgets) && node._widgets !== node.widgets) lists.push(node._widgets);
+        const toggle = getWidget(node, "show_advanced_inputs");
+        const seed = getWidget(node, "noise_seed");
+        let changed = false;
+        if (toggle && seed && toggle !== seed) {
+            for (const list of lists) {
+                const toggleIndex = list.indexOf(toggle);
+                const seedIndex = list.indexOf(seed);
+                if (toggleIndex < 0 || seedIndex < 0 || toggleIndex === seedIndex - 1) continue;
+                list.splice(toggleIndex, 1);
+                list.splice(list.indexOf(seed), 0, toggle);
+                changed = true;
+            }
         }
-        markWidgetSlotLayoutDirty(node);
-        return true;
+        // RelayVSR is an independent final-film pass. Put its switch and
+        // controls directly between the H3 second-pass controls and preview.
+        const relayNames = [
+            "relay_vsr_enabled",
+            "relay_vsr_model",
+            "relay_vsr_vae",
+            "relay_vsr_detail",
+            "relay_lock_source_exposure",
+        ];
+        const preview = getWidget(node, "sample_preview");
+        const relayWidgets = relayNames.map((name) => getWidget(node, name)).filter(Boolean);
+        const refiner = getWidget(node, "digital_human_refiner_lora");
+        if (preview && refiner && relayWidgets.length === relayNames.length) {
+            const tailWidgets = [refiner, ...relayWidgets, preview];
+            for (const list of lists) {
+                if (!tailWidgets.every((widget) => list.includes(widget))) continue;
+                const firstTailIndex = Math.min(...tailWidgets.map((widget) => list.indexOf(widget)));
+                const alreadyOrdered = tailWidgets.every(
+                    (widget, index) => list[firstTailIndex + index] === widget,
+                );
+                if (alreadyOrdered) continue;
+                for (const widget of tailWidgets) {
+                    const index = list.indexOf(widget);
+                    if (index >= 0) list.splice(index, 1);
+                }
+                list.splice(Math.min(firstTailIndex, list.length), 0, ...tailWidgets);
+                changed = true;
+            }
+        }
+        if (changed) markWidgetSlotLayoutDirty(node);
+        return changed;
     };
     const scheduleAdvancedRendererAdvancedInputOrder = (node) => {
         if (!isRenderAccel || !node || node.__h3AdvancedOrderScheduled) return;
@@ -13869,6 +13958,16 @@ function installRenderNode(nodeType, nodeData) {
                 const originalCallback = secondPassWidget.callback;
                 secondPassWidget.callback = (value) => {
                     originalCallback?.call(secondPassWidget, value);
+                    syncAdvancedRenderSecondPassWidgets(node);
+                    node.setDirtyCanvas?.(true, true);
+                };
+            }
+            const relayWidget = getWidget(node, "relay_vsr_enabled");
+            if (relayWidget && !relayWidget.__h3RelayVsrBound) {
+                relayWidget.__h3RelayVsrBound = true;
+                const originalCallback = relayWidget.callback;
+                relayWidget.callback = (value) => {
+                    originalCallback?.call(relayWidget, value);
                     syncAdvancedRenderSecondPassWidgets(node);
                     node.setDirtyCanvas?.(true, true);
                 };

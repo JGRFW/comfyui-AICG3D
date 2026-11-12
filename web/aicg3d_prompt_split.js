@@ -3,7 +3,7 @@
 
    给「AICG3D 分段提示词解析」节点加两件事：
      1. 一个按钮：一键把解析结果填进画布上每个「视频段落」节点。
-     2. 自动填入：改了剧本文本，就自动重填一次（可在节点上关掉）。
+     2. 全局提示词：统一拼接到每一段，不写入剪贴板或自动覆盖。
      3. 提示词优化：复用全局优化器，保持分段数量和时长后写回文本。
 
    解析规则与 prompt_split.py 保持一致。
@@ -13,9 +13,9 @@ import { app } from "../../scripts/app.js";
 
 const NODE_CLASS = "AICG3D_H3PromptSegmentSplit";
 const LEGACY_NODE_CLASS = "AICG3DPromptSegmentSplit";
+const GLOBAL_PROMPT_TOGGLE_LABEL = "显示全局提示词";
 /* 一次最多解析并填入多少段。段落节点够多就能一直往后加，这里只留个安全上限。 */
 const MAX_SEGMENTS = 64;
-const AUTOFILL_DELAY = 400;
 const BUTTON_PREFIX = "一键填入全部视频段落";
 const SEED_MAX = 4294967294;
 const SEED_CONTROL_NAMES = ["control_after_generate", "control_before_generate"];
@@ -233,6 +233,142 @@ function writeWidget(node, name, value) {
     return true;
 }
 
+function promptSplitWidgetIsHidden(widget) {
+    return Boolean(
+        widget?.hidden === true
+        || widget?.type === "hidden"
+        || widget?.options?.hidden === true
+        || widget?._state?.hidden === true
+        || widget?._state?.type === "hidden"
+    );
+}
+
+function promptSplitWidgetRowHeight(node, widget) {
+    const stored = Number(widget?.__aicg3dGlobalPromptRowHeight);
+    if (Number.isFinite(stored) && stored > 0) return stored;
+    const measure = widget?.__aicg3dGlobalPromptOrigComputeSize || widget?.computeSize;
+    try {
+        const measured = measure?.call(widget, Math.max(120, Number(node?.size?.[0]) || 320));
+        const height = Number(measured?.[1]);
+        if (Number.isFinite(height) && height > 0) {
+            widget.__aicg3dGlobalPromptRowHeight = height;
+            return height;
+        }
+    } catch (err) {
+        /* 旧前端拿不到控件尺寸时退回标准行高。 */
+    }
+    const fallback = Number(widget?.computedHeight) > 0
+        ? Number(widget.computedHeight)
+        : Number(globalThis.LiteGraph?.NODE_WIDGET_HEIGHT) || 20;
+    widget.__aicg3dGlobalPromptRowHeight = fallback;
+    return fallback;
+}
+
+function adjustPromptSplitNodeHeight(node, delta) {
+    if (!node?.size || !Number.isFinite(delta) || !delta) return;
+    const width = Number(node.size[0]) || 0;
+    const height = Math.max(80, (Number(node.size[1]) || 0) + delta);
+    node.setSize?.([width, height]);
+    if (Array.isArray(node.size)) {
+        node.size[0] = width;
+        node.size[1] = height;
+    } else {
+        node.size = [width, height];
+    }
+}
+
+function refreshPromptSplitWidgets(node) {
+    if (!Array.isArray(node?.widgets) || !node.widgets.length) return;
+    try {
+        if (globalThis.LiteGraph?.vueNodesMode) {
+            const last = node.widgets[node.widgets.length - 1];
+            node.widgets.pop();
+            node.widgets.push(last);
+        }
+    } catch (err) {
+        /* 某些前端把 widgets 暴露为只读字段。 */
+    }
+    node._widgetSlotsDirty = true;
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function hidePromptSplitWidget(widget) {
+    if (!widget || promptSplitWidgetIsHidden(widget)) return false;
+    if (!Object.prototype.hasOwnProperty.call(widget, "__aicg3dGlobalPromptOrigType")) {
+        widget.__aicg3dGlobalPromptOrigType = widget.type;
+        widget.__aicg3dGlobalPromptOrigHidden = widget.hidden;
+        widget.__aicg3dGlobalPromptOrigOptionsHidden = widget.options?.hidden;
+        widget.__aicg3dGlobalPromptOrigOptionsCanvasOnly = widget.options?.canvasOnly;
+        widget.__aicg3dGlobalPromptOrigComputedHeight = widget.computedHeight;
+        widget.__aicg3dGlobalPromptHadComputedHeight = Object.prototype.hasOwnProperty.call(widget, "computedHeight");
+        widget.__aicg3dGlobalPromptHadComputeSize = Object.prototype.hasOwnProperty.call(widget, "computeSize");
+        widget.__aicg3dGlobalPromptOrigComputeSize = widget.computeSize;
+        widget.__aicg3dGlobalPromptInputDisplay = widget.inputEl?.style?.display || "";
+        widget.__aicg3dGlobalPromptElementDisplay = widget.element?.style?.display || "";
+    }
+    widget.hidden = true;
+    widget.type = "hidden";
+    widget.computeSize = () => [0, -4];
+    widget.computedHeight = 0;
+    widget.options ||= {};
+    widget.options.hidden = true;
+    widget.options.canvasOnly = true;
+    if (widget.inputEl?.style) widget.inputEl.style.display = "none";
+    if (widget.element?.style) widget.element.style.display = "none";
+    if (widget._state) {
+        widget._state.hidden = true;
+        widget._state.type = "hidden";
+        widget._state.computedHeight = 0;
+        widget._state.options ||= {};
+        widget._state.options.hidden = true;
+        widget._state.options.canvasOnly = true;
+    }
+    return true;
+}
+
+function showPromptSplitWidget(widget) {
+    if (!widget || !promptSplitWidgetIsHidden(widget)) return false;
+    widget.hidden = widget.__aicg3dGlobalPromptOrigHidden ?? false;
+    widget.type = widget.__aicg3dGlobalPromptOrigType || "customtext";
+    if (widget.__aicg3dGlobalPromptHadComputeSize) widget.computeSize = widget.__aicg3dGlobalPromptOrigComputeSize;
+    else delete widget.computeSize;
+    if (widget.__aicg3dGlobalPromptHadComputedHeight) {
+        widget.computedHeight = widget.__aicg3dGlobalPromptOrigComputedHeight;
+    } else {
+        delete widget.computedHeight;
+    }
+    widget.options ||= {};
+    if (widget.__aicg3dGlobalPromptOrigOptionsHidden === undefined) delete widget.options.hidden;
+    else widget.options.hidden = widget.__aicg3dGlobalPromptOrigOptionsHidden;
+    if (widget.__aicg3dGlobalPromptOrigOptionsCanvasOnly === undefined) delete widget.options.canvasOnly;
+    else widget.options.canvasOnly = widget.__aicg3dGlobalPromptOrigOptionsCanvasOnly;
+    if (widget.inputEl?.style) widget.inputEl.style.display = widget.__aicg3dGlobalPromptInputDisplay || "";
+    if (widget.element?.style) widget.element.style.display = widget.__aicg3dGlobalPromptElementDisplay || "";
+    if (widget._state) {
+        widget._state.hidden = widget.hidden;
+        widget._state.type = widget.type;
+        widget._state.options ||= {};
+        if (widget.options?.hidden === undefined) delete widget._state.options.hidden;
+        else widget._state.options.hidden = widget.options.hidden;
+        if (widget.options?.canvasOnly === undefined) delete widget._state.options.canvasOnly;
+        else widget._state.options.canvasOnly = widget.options.canvasOnly;
+    }
+    return true;
+}
+
+function setGlobalPromptExpanded(node, expanded, { adjustHeight = true } = {}) {
+    const widget = findWidget(node, "global_text");
+    if (!widget) return false;
+    const visible = Boolean(expanded);
+    const rowHeight = promptSplitWidgetRowHeight(node, widget);
+    const changed = visible ? showPromptSplitWidget(widget) : hidePromptSplitWidget(widget);
+    node.__aicg3dGlobalPromptExpanded = visible;
+    if (adjustHeight && changed) adjustPromptSplitNodeHeight(node, visible ? rowHeight + 4 : -(rowHeight + 4));
+    if (changed) refreshPromptSplitWidgets(node);
+    return changed;
+}
+
 function sequenceSeed(base, index) {
     const span = SEED_MAX;
     const normalized = Math.trunc(Number(base) || 0) - 1 + Number(index || 0);
@@ -297,16 +433,27 @@ function notify(message, severity = "success") {
     else console.info("[AICG3D 分段提示词] " + message);
 }
 
+function composeSegmentPrompt(globalText, segmentText) {
+    const globalValue = normalizeText(globalText).trim();
+    const segmentValue = normalizeText(segmentText).trim();
+    if (!globalValue) return segmentValue;
+    if (!segmentValue) return globalValue;
+    if (segmentValue === globalValue || segmentValue.startsWith(globalValue + "\n")) {
+        return segmentValue;
+    }
+    return `${globalValue}\n\n${segmentValue}`;
+}
+
 function buttonOf(node) {
     return (node?.widgets || []).find(
         (widget) => typeof widget?.name === "string" && widget.name.startsWith(BUTTON_PREFIX),
     ) || null;
 }
 
-function setButtonLabel(node, count) {
+function setButtonLabel(node) {
     const button = buttonOf(node);
     if (!button) return;
-    button.name = count > 0 ? `${BUTTON_PREFIX}（已填 ${count} 段）` : BUTTON_PREFIX;
+    button.name = BUTTON_PREFIX;
 }
 
 /* -------------------------------------------------- 找「视频段落」并排好序 */
@@ -425,6 +572,7 @@ function fillSegments(node, options = {}) {
     if (!graph) return 0;
 
     const text = readWidget(node, "text", "");
+    const globalText = readWidget(node, "global_text", "");
     const mode = readWidget(node, "mode", "自动识别");
     const customRegex = readWidget(node, "custom_regex", "");
     const keepHeader = Boolean(readWidget(node, "keep_header", false));
@@ -467,7 +615,7 @@ function fillSegments(node, options = {}) {
     let seedsWritten = 0;
     for (let index = 0; index < used; index += 1) {
         const target = targets[index];
-        writePrompt(target, prompts[index]);
+        writePrompt(target, composeSegmentPrompt(globalText, prompts[index]));
         if (secondsMode !== SECONDS_KEEP) {
             const value = secondsMode === SECONDS_FIXED ? defaultSeconds : seconds[index];
             writeWidget(target, "seconds", roundSeconds(value));
@@ -493,7 +641,7 @@ function fillSegments(node, options = {}) {
     if (options.silent !== true) {
         const linked = targets.filter((target) => promptTakenByLink(node, target, graph)).length;
         const notes = [`已把 ${used} 段写进「视频段落」节点`];
-        if (options.source === "clipboard") notes.push("内容来自系统剪贴板");
+        if (String(globalText || "").trim()) notes.push("全局提示词已拼接到每段");
         if (seedsWritten) {
             notes.push(`种子按顺序写入 ${seedBase}–${sequenceSeed(seedBase, seedsWritten - 1)}`);
         }
@@ -523,65 +671,10 @@ function promptTakenByLink(parserNode, target, graph) {
     return originId !== parserNode.id;
 }
 
-function scheduleAutoFill(node) {
-    if (!Boolean(readWidget(node, "auto_fill", true))) return;
-    if (node.__aicg3dAutoFillTimer) clearTimeout(node.__aicg3dAutoFillTimer);
-    node.__aicg3dAutoFillTimer = setTimeout(() => {
-        node.__aicg3dAutoFillTimer = null;
-        setButtonLabel(node, fillSegments(node, { silent: true }));
-    }, AUTOFILL_DELAY);
-}
-
-async function fillSegmentsFromClipboard(node) {
-    const button = buttonOf(node);
-    const oldName = button?.name || BUTTON_PREFIX;
-    let count = 0;
-    const existingText = String(readWidget(node, "text", "") || "").trim();
-
-    // 取消文本框上一次还没执行的自动填入，防止同一批提示词被再次写入并更换种子。
-    if (node.__aicg3dAutoFillTimer) {
-        clearTimeout(node.__aicg3dAutoFillTimer);
-        node.__aicg3dAutoFillTimer = null;
-    }
-    if (button) {
-        button.name = "正在读取系统剪贴板...";
-        button.disabled = true;
-    }
-
-    try {
-        if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
-            throw new Error("当前浏览器不支持自动读取系统剪贴板");
-        }
-        const clipboardText = normalizeText(await navigator.clipboard.readText());
-        if (!clipboardText.trim()) {
-            if (!existingText) {
-                notify("系统剪贴板和节点文本框都没有文字。", "error");
-                return;
-            }
-            notify("系统剪贴板里没有文字，已按节点文本框中的现有内容填入。", "warn");
-            count = fillSegments(node, { silent: true });
-        } else if (writeWidget(node, "text", clipboardText)) {
-            node.setDirtyCanvas?.(true, true);
-            app.graph?.setDirtyCanvas?.(true, true);
-            count = fillSegments(node, { source: "clipboard" });
-        } else {
-            throw new Error("节点文本框不可写");
-        }
-    } catch (error) {
-        const detail = error?.message || String(error || "未知错误");
-        if (existingText) {
-            count = fillSegments(node, { silent: true });
-            notify(`无法读取系统剪贴板（${detail}）。请允许浏览器剪贴板权限；本次已按节点文本框里的现有内容填入。`, "warn");
-        } else {
-            notify(`无法读取系统剪贴板（${detail}）。请允许浏览器剪贴板权限，或先手动粘贴到文本框。`, "error");
-        }
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.name = oldName;
-        }
-        setButtonLabel(node, count);
-    }
+function fillSegmentsFromText(node) {
+    const count = fillSegments(node);
+    setButtonLabel(node);
+    return count;
 }
 
 async function optimizePromptScript(node, button) {
@@ -635,8 +728,7 @@ async function optimizePromptScript(node, button) {
             }).join("\n\n");
         }
         writeWidget(node, "text", optimized);
-        notify(`已优化 ${parsed.prompts.length} 段提示词。`, "success");
-        scheduleAutoFill(node);
+        notify(`已优化 ${parsed.prompts.length} 段；确认后点击「一键填入全部视频段落」。`, "success");
         node.setDirtyCanvas?.(true, true);
         app.graph?.setDirtyCanvas?.(true, true);
     } catch (error) {
@@ -673,12 +765,9 @@ function clearPromptValue(node) {
 function clearAllPrompts(node) {
     const graph = node?.graph || app.graph;
     if (!graph) return 0;
-    if (node.__aicg3dAutoFillTimer) {
-        clearTimeout(node.__aicg3dAutoFillTimer);
-        node.__aicg3dAutoFillTimer = null;
-    }
 
     writeWidget(node, "text", "");
+    writeWidget(node, "global_text", "");
     const targets = orderSegmentNodes(graph, anchorSegmentNode(node, graph));
     for (const target of targets) {
         clearPromptValue(target);
@@ -686,15 +775,11 @@ function clearAllPrompts(node) {
         target.setDirtyCanvas?.(true, true);
     }
 
-    if (node.__aicg3dAutoFillTimer) {
-        clearTimeout(node.__aicg3dAutoFillTimer);
-        node.__aicg3dAutoFillTimer = null;
-    }
     setButtonLabel(node, 0);
     graph.setDirtyCanvas?.(true, true);
     try { graph.change?.(); } catch (err) { /* 清空结果已生效 */ }
     node.setDirtyCanvas?.(true, true);
-    notify(`已清除解析文本和 ${targets.length} 个视频段落提示词，段落连线和生成参数保持不变。`);
+    notify(`已清除分段剧情、全局提示词和 ${targets.length} 个视频段落提示词，段落连线和生成参数保持不变。`);
     return targets.length;
 }
 
@@ -709,12 +794,38 @@ function install(node) {
     if (node.__aicg3dPromptSplitInstalled) return;
     node.__aicg3dPromptSplitInstalled = true;
 
+    const globalTextWidget = findWidget(node, "global_text");
+    if (globalTextWidget) {
+        const globalToggle = node.addWidget("toggle", GLOBAL_PROMPT_TOGGLE_LABEL, false, (value) => {
+            setGlobalPromptExpanded(node, Boolean(value));
+        });
+        if (globalToggle) {
+            globalToggle.serialize = false;
+            globalToggle.value = false;
+            globalToggle.options ||= {};
+            globalToggle.options.serialize = false;
+            globalToggle.tooltip = "默认折叠；开启后显示全局提示词输入框，关闭时保留已填写内容。";
+            globalToggle.__aicg3dGlobalPromptToggle = true;
+            node.__aicg3dGlobalPromptToggle = globalToggle;
+            const lists = [node.widgets];
+            if (Array.isArray(node._widgets) && node._widgets !== node.widgets) lists.push(node._widgets);
+            for (const list of lists) {
+                const toggleIndex = list.indexOf(globalToggle);
+                const textIndex = list.indexOf(globalTextWidget);
+                if (toggleIndex < 0 || textIndex < 0) continue;
+                list.splice(toggleIndex, 1);
+                list.splice(list.indexOf(globalTextWidget), 0, globalToggle);
+            }
+            setGlobalPromptExpanded(node, false);
+        }
+    }
+
     const button = node.addWidget("button", BUTTON_PREFIX, null, () => {
-        fillSegmentsFromClipboard(node);
+        fillSegmentsFromText(node);
     });
     if (button) {
         button.serialize = false;
-        button.tooltip = "点击后自动读取系统剪贴板，按画布顺序写入每段提示词、秒数和连续种子；顺序种子会固定为 fixed，运行后不再自动变。";
+        button.tooltip = "只按当前节点文本框里的内容，把全局提示词和分段提示词写入每个视频段落；不会读取系统剪贴板。";
     }
 
     const clearButton = node.addWidget("button", "✕ 一键清除全部提示词", null, () => {
@@ -734,6 +845,7 @@ function install(node) {
     }
 
     const labels = {
+        global_text: "全局提示词（自动拼接到每段）",
         mode: "解析方式",
         custom_regex: "自定义正则",
         keep_header: "保留段标题",
@@ -763,12 +875,17 @@ function install(node) {
 
     const textWidget = findWidget(node, "text");
     if (textWidget) {
-        const original = textWidget.callback;
-        textWidget.callback = function aicg3dPromptSplitCallback(...args) {
-            const result = original?.apply(this, args);
-            scheduleAutoFill(node);
-            return result;
-        };
+        textWidget.label = "分段剧情提示词（粘贴第1段…）";
+        textWidget.tooltip = "只粘贴按顺序排列的分段剧情；确认内容后点击上方「一键填入全部视频段落」。";
+    }
+
+    const autoFillWidget = findWidget(node, "auto_fill");
+    if (autoFillWidget) {
+        writeWidget(node, "auto_fill", false);
+        autoFillWidget.hidden = true;
+        autoFillWidget.type = "hidden";
+        autoFillWidget.computeSize = () => [0, -4];
+        autoFillWidget.tooltip = "旧版兼容项。批量写入现在只在点击按钮时执行。";
     }
 }
 

@@ -100,6 +100,7 @@ except ImportError:
     scan_latent_upscaler_models = None
 from aicg3d import prompt_guides as prompt_guide_lib
 from aicg3d_h3easy import accel as accel_lib
+from aicg3d_h3easy import relay_vsr
 
 
 
@@ -8430,6 +8431,56 @@ class MiniMaxH3EasyRenderAdvanced:
                         ),
                     },
                 ),
+                "relay_vsr_enabled": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "打开后，在本节点生成和解码完成后追加 RelayVSR 视频超分放大；"
+                            "音频仍使用原片音轨。关闭时不加载 RelayVSR 模型。"
+                        ),
+                    },
+                ),
+                "relay_vsr_model": (
+                    relay_vsr.relay_model_choices(),
+                    {
+                        "default": relay_vsr.default_relay_model(),
+                        "tooltip": (
+                            "选择 RelayVSR 放大模型。模型放在 models/diffusion_models/RelayVSR/；"
+                            "x2 模型必须搭配 x2 Flash VAE，x4 同理。"
+                        ),
+                    },
+                ),
+                "relay_vsr_vae": (
+                    relay_vsr.relay_vae_choices(),
+                    {
+                        "default": relay_vsr.default_relay_vae(relay_vsr.default_relay_model()),
+                        "tooltip": (
+                            "选择 RelayVSR Flash VAE。必须与上方放大模型同为 x2 或同为 x4；"
+                            "VAE 放在 models/vae/RelayVSR/。"
+                        ),
+                    },
+                ),
+                "relay_vsr_detail": (
+                    "FLOAT",
+                    {
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": (
+                            "RelayVSR Flash 解码细节强度。0.5 与参考工作流一致，画面更自然；"
+                            "越高细节越强，也越容易出现锐化感。"
+                        ),
+                    },
+                ),
+                "relay_lock_source_exposure": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "把 RelayVSR 每帧亮度锁回未放大原片，避免超分后整体曝光变化；不改变原音频。",
+                    },
+                ),
             },
             "optional": {
                 # MODEL 补丁链显式连线优先；未连接时继续使用 h3_context 自带模型。
@@ -8483,6 +8534,8 @@ class MiniMaxH3EasyRenderAdvanced:
             "digital_human_lowres_model", "digital_human_highres_model",
             "sample_preview",
             "digital_human_refiner_lora",
+            "relay_vsr_enabled", "relay_vsr_model", "relay_vsr_vae",
+            "relay_vsr_detail", "relay_lock_source_exposure",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
 
@@ -9031,6 +9084,11 @@ class MiniMaxH3EasyRenderAdvanced:
         digital_human_upscale_scale=1.5,
         digital_human_refiner_lora="none",
         show_advanced_inputs=False,
+        relay_vsr_enabled=False,
+        relay_vsr_model="",
+        relay_vsr_vae="",
+        relay_vsr_detail=0.5,
+        relay_lock_source_exposure=True,
     ):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("Connect the H3 Context output from a MiniMax H3 Aicg node")
@@ -9179,6 +9237,14 @@ class MiniMaxH3EasyRenderAdvanced:
                         frame_rate=Fraction(str(float(h3_context.fps or h3.FPS))),
                     )
                 )
+            if bool(relay_vsr_enabled):
+                relay_runner = relay_vsr.RelayVSRRunner(
+                    relay_vsr_model,
+                    relay_vsr_vae,
+                    detail=float(relay_vsr_detail),
+                    lock_source_exposure=bool(relay_lock_source_exposure),
+                )
+                video = relay_vsr.apply_to_video(video, relay_runner)
             done = True
             return (video,)
         finally:
@@ -9380,6 +9446,16 @@ class MiniMaxH3EasyRenderAdvancedWithModel(MiniMaxH3EasyRenderAdvanced):
         preview_definition = required.pop("sample_preview")
         refiner_definition = required.pop("digital_human_refiner_lora")
         required["digital_human_refiner_lora"] = refiner_definition
+        relay_definitions = {
+            name: required.pop(name)
+            for name in (
+                "relay_vsr_enabled",
+                "relay_vsr_model",
+                "relay_vsr_vae",
+                "relay_vsr_detail",
+                "relay_lock_source_exposure",
+            )
+        }
         required["show_advanced_inputs"] = (
             "BOOLEAN",
             {
@@ -9391,6 +9467,9 @@ class MiniMaxH3EasyRenderAdvancedWithModel(MiniMaxH3EasyRenderAdvanced):
             },
         )
         required["sample_preview"] = preview_definition
+        # RelayVSR controls stay after every legacy widget. The frontend moves
+        # them visually, while old positional workflow values remain valid.
+        required.update(relay_definitions)
         return {"required": required, "optional": optional}
 
 
@@ -15442,7 +15521,8 @@ class MiniMaxH3EasySequenceSegment:
             def preview_callback(x0, step=None, total=None, *_info):
                 if not should_push(step, total):
                     return None
-                return reporter.update_preview(preview.decode(x0))
+                reporter.sequence_sampling_preview(preview.decode(x0), step, total)
+                return None
             on_preview = preview_callback
 
         want_segment_video = True

@@ -187,6 +187,25 @@ async function main() {
             stagePreviewSingleCard = stageCards.length === 1;
             if (!stagePreviewSingleCard) throw new Error("Sequence stage preview must contain exactly one card");
             if (!String(stageCards[0].textContent || "").includes("本段视频")) throw new Error("Final segment preview label is missing");
+            const stagePreviewImage = stageCards[0].querySelector(".h3-sequence-stage-image");
+            const stagePreviewVideo = stageCards[0].querySelector(".h3-sequence-stage-video");
+            if (!stagePreviewImage || !stagePreviewVideo) throw new Error("Sequence stage card must share one sampling image and one video surface");
+            if (!stagePreviewImage.hidden || !stagePreviewVideo.hidden) throw new Error("Sequence stage media must start hidden behind the placeholder");
+            const stageSizeBeforeSampling = [...segments[0].size];
+            const sequenceApi = (await import("/scripts/api.js")).api;
+            const samplingCanvas = document.createElement("canvas");
+            samplingCanvas.width = 8;
+            samplingCanvas.height = 8;
+            samplingCanvas.getContext("2d").fillRect(0, 0, 8, 8);
+            sequenceApi.dispatchEvent(new CustomEvent("aicg3d_sequence_sampling_preview", {
+                detail: { node_id: String(segments[0].id), image: samplingCanvas.toDataURL("image/jpeg", 0.8) },
+            }));
+            await sleep(80);
+            if (stagePreviewImage.hidden || !stagePreviewVideo.hidden) throw new Error("Sampling preview did not use the shared stage image surface");
+            if (stagePreviewPanel.querySelectorAll(".h3-sequence-stage-card").length !== 1) throw new Error("Sampling preview created a second stage card");
+            if (!approx(segments[0].size[0], stageSizeBeforeSampling[0], 1) || !approx(segments[0].size[1], stageSizeBeforeSampling[1], 1)) {
+                throw new Error("Sampling preview changed the sequence node size");
+            }
             if (String(stagePreviewPanel.textContent || "").includes("一采视频")) throw new Error("First-pass preview is still visible");
             const stageCardRect = stageCards[0].getBoundingClientRect();
             stagePreviewFullWidth = approx(stageCardRect.width, stagePreviewRect.width, 2);
@@ -256,8 +275,39 @@ async function main() {
 
         const parser = create("AICG3D_H3PromptSegmentSplit", [1000, 40]);
         await sleep(500);
+        const globalToggle = parser.__aicg3dGlobalPromptToggle;
+        const globalTextWidget = widget(parser, "global_text");
+        if (!globalToggle || !globalTextWidget) throw new Error("Prompt-split global prompt fold controls are missing");
+        const promptSplitWidthBeforeFold = Number(parser.size?.[0] || 0);
+        const parserHeightCollapsed = Number(parser.size?.[1] || 0);
+        const globalPromptStartsCollapsed = globalToggle.value === false && Boolean(globalTextWidget.hidden);
+        setWidget(parser, "显示全局提示词", true);
+        await sleep(350);
+        const parserHeightExpanded = Number(parser.size?.[1] || 0);
+        const globalPromptExpanded = !Boolean(globalTextWidget.hidden);
+        setWidget(parser, "显示全局提示词", false);
+        await sleep(350);
+        const parserHeightClosedAgain = Number(parser.size?.[1] || 0);
+        const globalPromptFoldStable = globalPromptStartsCollapsed
+            && globalPromptExpanded
+            && parserHeightExpanded > parserHeightCollapsed + 8
+            && approx(parserHeightCollapsed, parserHeightClosedAgain, 4)
+            && approx(promptSplitWidthBeforeFold, parser.size?.[0], 1);
+        if (!globalPromptFoldStable) {
+            throw new Error("Prompt-split global prompt fold is unstable: " + JSON.stringify({
+                globalPromptStartsCollapsed,
+                globalPromptExpanded,
+                parserHeightCollapsed,
+                parserHeightExpanded,
+                parserHeightClosedAgain,
+                widthBefore: promptSplitWidthBeforeFold,
+                widthAfter: parser.size?.[0],
+            }));
+        }
         setWidget(parser, "auto_fill", false);
         setWidget(parser, "max_segments", 3);
+        const globalPrompt = "统一古风画风，角色参考 @图片1，全片禁止字幕。";
+        setWidget(parser, "global_text", globalPrompt);
         setWidget(parser, "text", [
             "第1段（3秒）：女子看向门口并说：你终于来了。",
             "第2段（5秒）：男子走向桌边并说：我带了你要的东西。",
@@ -271,6 +321,12 @@ async function main() {
         await sleep(1200);
         const filled = segments.map((node) => String(widget(node, "prompt")?.value || ""));
         const sizesAfterFill = segments.map((node) => [...node.size]);
+        const globalPromptApplied = filled.every((value) => value.startsWith(globalPrompt + "\\n\\n"));
+        if (!globalPromptApplied) {
+            throw new Error("Global prompt did not prefix every segment: " + JSON.stringify(filled));
+        }
+        const fillButtonLabelStable = fillButton.name === "一键填入全部视频段落";
+        if (!fillButtonLabelStable) throw new Error("Batch-fill button label changed after filling");
         if (!filled.every((value, index) => value.includes("第" + (index + 1) + "段"))) {
             const expected = ["你终于来了", "我带了你要的东西", "两人同时望向窗外"];
             if (!filled.every((value, index) => value.includes(expected[index]))) {
@@ -381,6 +437,48 @@ async function main() {
         const advancedCollapsed = Number(advancedToggle.value) === 0
             && advancedOptionalInputs.every((input) => Boolean(input.hidden) && input.visible === false);
         const previewWidgetIsLast = String(advancedNode.widgets?.at(-1)?.name || "") === "sample_preview";
+        const relayNames = [
+            "relay_vsr_enabled",
+            "relay_vsr_model",
+            "relay_vsr_vae",
+            "relay_vsr_detail",
+            "relay_lock_source_exposure",
+        ];
+        const relayDependents = relayNames.slice(1);
+        const relayWidthBefore = Number(advancedNode.size?.[0] || 0);
+        const relayHiddenBefore = relayDependents.map((name) => Boolean(widget(advancedNode, name)?.hidden));
+        const relaySwitchVisible = !Boolean(widget(advancedNode, "relay_vsr_enabled")?.hidden);
+        setWidget(advancedNode, "relay_vsr_enabled", true);
+        await sleep(400);
+        const relayVisibleOn = relayDependents.map((name) => !Boolean(widget(advancedNode, name)?.hidden));
+        setWidget(advancedNode, "relay_vsr_enabled", false);
+        await sleep(400);
+        const relayHiddenOff = relayDependents.map((name) => Boolean(widget(advancedNode, name)?.hidden));
+        const relayWidthStable = approx(relayWidthBefore, advancedNode.size?.[0]);
+        const relayLabelsChinese = [
+            "RelayVSR 放大",
+            "RelayVSR 放大模型",
+            "RelayVSR Flash VAE",
+            "RelayVSR 细节强度",
+            "RelayVSR 曝光锁定",
+        ].every((label, index) => String(widget(advancedNode, relayNames[index])?.label || "") === label);
+        const expectedRelayTail = ["digital_human_refiner_lora", ...relayNames, "sample_preview"];
+        const actualWidgetNames = (advancedNode.widgets || []).map((item) => String(item?.name || ""));
+        const relayOrderStable = expectedRelayTail.every(
+            (name, index) => actualWidgetNames[actualWidgetNames.length - expectedRelayTail.length + index] === name,
+        );
+        const relayConditionalUi = relaySwitchVisible
+            && relayHiddenBefore.every(Boolean)
+            && relayVisibleOn.every(Boolean)
+            && relayHiddenOff.every(Boolean)
+            && relayWidthStable && relayLabelsChinese && relayOrderStable;
+        if (!relayConditionalUi) {
+            throw new Error("Advanced renderer RelayVSR controls are not stable: " + JSON.stringify({
+                relaySwitchVisible, relayHiddenBefore, relayVisibleOn, relayHiddenOff,
+                relayWidthBefore, relayWidthAfter: advancedNode.size?.[0], relayLabelsChinese,
+                expectedRelayTail, actualTail: actualWidgetNames.slice(-expectedRelayTail.length),
+            }));
+        }
         const advancedSizeBefore = [...advancedNode.size];
         const firstVisibleWidgetY = () => {
             advancedNode.arrange?.();
@@ -446,7 +544,7 @@ async function main() {
             setWidget(advancedNode, "show_advanced_inputs", true);
             await sleep(500);
             domRowsExpanded = advancedDomRows().every((row) =>
-                row.found && row.display !== "none" && row.height > 15 && !row.hidden);
+                row.found && row.display !== "none" && row.height > 5 && !row.hidden);
             setWidget(advancedNode, "show_advanced_inputs", false);
             await sleep(500);
             domRowsClosedAgain = advancedDomRows().every((row) =>
@@ -543,6 +641,8 @@ async function main() {
             "repair_color_correction", "repair_quality", "repair_device", "repair_blocks_to_swap",
             "repair_offload_device", "repair_vae_tiling", "lock_source_exposure", "max_window_frames",
             "window_overlap_frames", "sample_preview", "preview_interval", "cleanup_after_run",
+            "relay_vsr_enabled", "relay_vsr_model", "relay_vsr_vae",
+            "relay_vsr_detail", "relay_lock_source_exposure",
         ];
         if (finalPacked) finalNames.push("refiner_lora", "show_advanced_settings");
         const finalInputsPresent = finalNames.every((name) => Boolean(finalWidget(name)));
@@ -564,6 +664,11 @@ async function main() {
             repair_quality: "修复质量",
             sample_preview: "采样预览",
             cleanup_after_run: "运行后清理",
+            relay_vsr_enabled: "RelayVSR 放大",
+            relay_vsr_model: "RelayVSR 放大模型",
+            relay_vsr_vae: "RelayVSR Flash VAE",
+            relay_vsr_detail: "RelayVSR 细节强度",
+            relay_lock_source_exposure: "RelayVSR 曝光锁定",
         };
         const finalLabelsChinese = Object.entries(finalLabels)
             .every(([name, label]) => String(finalWidget(name)?.label || "") === label);
@@ -578,6 +683,31 @@ async function main() {
         }
         globalThis.__aicg3dSmokeProgress = "final-labels";
         const finalWidth = Number(finalNode.size?.[0] || 0);
+        const finalRelayNames = [
+            "relay_vsr_enabled",
+            "relay_vsr_model",
+            "relay_vsr_vae",
+            "relay_vsr_detail",
+            "relay_lock_source_exposure",
+        ];
+        const finalRelayDependents = finalRelayNames.slice(1);
+        const finalRelaySwitchVisible = !finalHidden("relay_vsr_enabled");
+        const finalRelayHiddenBefore = finalRelayDependents.map(finalHidden);
+        setWidget(finalNode, "relay_vsr_enabled", true);
+        await sleep(450);
+        const finalRelayVisibleOn = finalRelayDependents.map((name) => !finalHidden(name));
+        setWidget(finalNode, "relay_vsr_enabled", false);
+        await sleep(450);
+        const finalRelayHiddenOff = finalRelayDependents.map(finalHidden);
+        const finalRelayConditionalUi = finalRelaySwitchVisible
+            && finalRelayHiddenBefore.every(Boolean)
+            && finalRelayVisibleOn.every(Boolean)
+            && finalRelayHiddenOff.every(Boolean);
+        if (!finalRelayConditionalUi) {
+            throw new Error("Final RelayVSR controls are not showing/hiding correctly: " + JSON.stringify({
+                finalRelaySwitchVisible, finalRelayHiddenBefore, finalRelayVisibleOn, finalRelayHiddenOff,
+            }));
+        }
         let finalPackedStartsCollapsed = true;
         if (finalPacked) {
             const packedAdvancedNames = [
@@ -677,13 +807,23 @@ async function main() {
             && finalPromptInputs.repair_color_correction === "adain"
             && finalPromptInputs.repair_quality === "ULTRA"
             && finalPromptInputs.repair_offload_device === "none";
-        if (!finalChineseValuesSerialize) {
+        const finalRelayValuesSerialize = finalPromptInputs.relay_vsr_enabled === false
+            && String(finalPromptInputs.relay_vsr_model || "").includes("relayvsr")
+            && String(finalPromptInputs.relay_vsr_vae || "").includes("relayvsr")
+            && Number(finalPromptInputs.relay_vsr_detail) === 0.5
+            && finalPromptInputs.relay_lock_source_exposure === true;
+        if (!finalChineseValuesSerialize || !finalRelayValuesSerialize) {
             throw new Error("Final upscale Chinese menu values did not serialize back to backend enums: " + JSON.stringify({
                 upscale_device: finalPromptInputs.upscale_device,
                 upscale_precision: finalPromptInputs.upscale_precision,
                 repair_color_correction: finalPromptInputs.repair_color_correction,
                 repair_quality: finalPromptInputs.repair_quality,
                 repair_offload_device: finalPromptInputs.repair_offload_device,
+                relay_vsr_enabled: finalPromptInputs.relay_vsr_enabled,
+                relay_vsr_model: finalPromptInputs.relay_vsr_model,
+                relay_vsr_vae: finalPromptInputs.relay_vsr_vae,
+                relay_vsr_detail: finalPromptInputs.relay_vsr_detail,
+                relay_lock_source_exposure: finalPromptInputs.relay_lock_source_exposure,
             }));
         }
         setWidget(finalNode, "second_pass", false);
@@ -693,6 +833,9 @@ async function main() {
             nodes: (graph._nodes || []).length,
             promptFillCount: filled.length,
             promptFillSizeStable: fillSizeStable,
+            globalPromptFoldStable,
+            globalPromptApplied,
+            fillButtonLabelStable,
             mediaLibraryWidthStable: widthStableWhileOpen,
             mediaLibraryOpenHeight: sizeOpen[1],
             mediaLibraryClosedHeight: sizeClosed[1],
@@ -720,6 +863,7 @@ async function main() {
                 h3Slot: advancedH3SlotY,
             },
             advancedSamplePreviewLast: previewWidgetIsLast,
+            advancedRelayVsrConditionalUi: relayConditionalUi,
             advancedLegacyMigration: legacyMigrationStable,
             finalUpscaleInputsPresent: finalInputsPresent,
             finalUpscaleLabelsChinese: finalLabelsChinese && finalComboLabelsChinese,
@@ -727,6 +871,8 @@ async function main() {
             finalUpscaleConditionalUi: finalSeedVr2Visible && finalRtxVisible && finalVosrVisible
                 && finalScaleMode && finalTargetMode && finalRepairOnlyMode && finalNestedControls,
             finalUpscaleChineseValuesSerialize: finalChineseValuesSerialize,
+            finalUpscaleRelayConditionalUi: finalRelayConditionalUi,
+            finalUpscaleRelayValuesSerialize: finalRelayValuesSerialize,
             finalUpscalePacked: finalPacked,
             finalUpscalePackedStartsCollapsed: finalPackedStartsCollapsed,
             finalUpscaleLinkedInputs: finalInputSlots,

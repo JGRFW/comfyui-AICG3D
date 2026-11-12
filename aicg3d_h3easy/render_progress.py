@@ -21,6 +21,8 @@
 """
 from __future__ import annotations
 
+import base64
+import io
 import time
 from typing import Any, Optional
 
@@ -175,6 +177,31 @@ class RenderProgressReporter:
         （``SAMPLE_PREVIEW_ENABLED``）时根本不会走到这里。拿不到图时返回 None。
         """
         return preview_native_tuple(image)
+
+    def sequence_sampling_preview(self, image: Any, step: Any = None, total: Any = None) -> None:
+        """把段落采样帧送到节点自己的“本段视频”卡片，不创建原生预览框。"""
+        server = progress_server()
+        if server is None or not self.node_id or image is None:
+            return
+        try:
+            payload_image = image.convert("RGB") if getattr(image, "mode", "RGB") != "RGB" else image
+            buffer = io.BytesIO()
+            payload_image.save(buffer, format="JPEG", quality=84, optimize=False)
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            payload = {
+                "node_id": self.node_id,
+                "prompt_id": self.prompt_id,
+                "image": f"data:image/jpeg;base64,{encoded}",
+                "step": int(step) if step is not None else None,
+                "total": int(total) if total is not None else None,
+            }
+            server.send_sync(
+                "aicg3d_sequence_sampling_preview",
+                payload,
+                getattr(server, "client_id", None),
+            )
+        except Exception:
+            pass
 
     def begin_decode(self) -> None:
         """解码 / 合成阶段：没有可拆分的步数，只报阶段名。"""

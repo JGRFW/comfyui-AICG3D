@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
+from PIL import Image
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +21,7 @@ for path in (str(COMFY_ROOT), str(PLUGIN_ROOT)):
         sys.path.insert(0, path)
 
 from aicg3d_h3easy import nodes as h3_nodes  # noqa: E402
+from aicg3d_h3easy.render_progress import RenderProgressReporter  # noqa: E402
 from aicg3d_h3easy.nodes import (  # noqa: E402
     MiniMaxH3EasySequenceSegment,
     MiniMaxH3SegmentSample,
@@ -34,6 +36,16 @@ class FakeVAEDecode:
         assert video.shape == (1, 24, 2, 4, 8)
         frames = torch.arange(20, dtype=torch.float32).reshape(20, 1, 1, 1)
         return (frames.repeat(1, 8, 8, 3),)
+
+
+class FakePreviewServer:
+    client_id = "preview-test-client"
+
+    def __init__(self):
+        self.events = []
+
+    def send_sync(self, event, payload, _client_id=None):
+        self.events.append((event, payload))
 
 
 def main() -> None:
@@ -87,6 +99,17 @@ def main() -> None:
     first_pass_components = first_pass_video.get_components()
     assert first_pass_components.images.shape[0] == 10
     assert first_pass_components.audio is not None
+
+    preview_server = FakePreviewServer()
+    reporter = RenderProgressReporter(node_id="74", prompt_id="preview-test")
+    with patch("aicg3d_h3easy.render_progress.progress_server", return_value=preview_server):
+        assert reporter.sequence_sampling_preview(Image.new("RGB", (8, 8), (24, 36, 48)), 1, 4) is None
+    assert len(preview_server.events) == 1
+    event_name, payload = preview_server.events[0]
+    assert event_name == "aicg3d_sequence_sampling_preview"
+    expected_prefix = "data" + ":" + "image" + "/" + "jpeg" + ";base64,"
+    assert payload["image"].startswith(expected_prefix)
+    assert payload["node_id"] == "74" and payload["step"] == 1 and payload["total"] == 4
     print("Sequence segment staged preview decoding: ok")
 
 

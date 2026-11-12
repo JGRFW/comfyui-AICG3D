@@ -13,7 +13,8 @@
 1. 一键填入（推荐，不用拉线）
     节点上的按钮「一键填入全部视频段落」会按画布上的段落顺序，
     把每一段写进对应「视频段落」节点的提示词框。
-    打开「自动填入」后，改一次剧本文本就自动重填一次。
+    「全局提示词」会拼接到每一段前面，可统一约束画风、角色身份和素材引用。
+    批量写入只在点击按钮时发生，不自动读取系统剪贴板，也不会自动覆盖文本。
     开启「顺序写入种子」后，会用一个起点按段落顺序填写 seed，并固定每段的生成后种子控制。
 
 2. 图内走线（走 API / 队列也一样认）
@@ -42,7 +43,6 @@ SECONDS_KEEP = "不改动"
 SECONDS_MODES = (SECONDS_FROM_TEXT, SECONDS_FIXED, SECONDS_KEEP)
 
 DEFAULT_SECONDS = 5.0
-
 EXAMPLE_TEXT = """第1段（5秒）
 竖屏9:16电影感情绪短片，冷调低饱和，阴天柔光。人物：女主，二十多岁女性，齐肩微卷短发，米白色针织毛衣。
 镜头缓慢推近，她抬头看向远处的高楼，霓虹灯在湿润路面上拉出长长的光带。
@@ -333,6 +333,20 @@ def split_prompt_text(
     return prompts[:cap], seconds[:cap]
 
 
+def compose_global_prompt(global_text, segment_text) -> str:
+    """Prepend the shared production constraints without disturbing segment text."""
+    global_value = normalize_text(global_text).strip()
+    segment_value = normalize_text(segment_text).strip()
+    if not global_value:
+        return segment_value
+    if not segment_value:
+        return global_value
+    # A pasted complete script may already contain the same global preamble.
+    if segment_value == global_value or segment_value.startswith(global_value + "\n"):
+        return segment_value
+    return f"{global_value}\n\n{segment_value}"
+
+
 class AICG3DPromptSegmentSplit:
     """分段提示词解析：一段文本进，每段提示词分别出。"""
 
@@ -346,7 +360,9 @@ class AICG3DPromptSegmentSplit:
     DESCRIPTION = (
         "把一整篇分段剧本（第1段 / 第2段）自动拆开，再一段一段填进画布上的「视频段落」节点。"
         "节点上的「一键填入全部视频段落」按钮会把结果直接写进画布上每个「MiniMax H3 Aicg 视频段落」节点，"
-        "不用手动拉线；打开「自动填入」后改文本就自动重填。"
+        "不用手动拉线。"
+        "「全局提示词」会放在每段前共同生效，可填写统一画风、角色约束和 @图片1 等素材引用。"
+        "批量写入只在你点击「一键填入全部视频段落」时执行，不会自动读取系统剪贴板。"
         "开启「顺序写入种子」后，提示词、秒数和种子会按段落顺序一起填写；"
         "第1段使用起点种子，后续每段依次 +1，并自动固定生成后不再随机变换。"
         "唯一那根「段1提示词」输出接不接都不影响按钮；接上就相当于第一段走线、后面几段照旧一键填。"
@@ -426,6 +442,19 @@ class AICG3DPromptSegmentSplit:
                         ),
                     },
                 ),
+                # 新控件必须放在最后，旧工作流按位置保存的值才不会错位。
+                "global_text": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "dynamicPrompts": False,
+                        "default": "",
+                        "tooltip": (
+                            "全片共用提示词：统一画风、角色身份、摄影要求、负面约束等。"
+                            "一键填入时会拼接到每一段提示词前面；可写 @图片1、@视频1、@音频1 绑定各段素材。"
+                        ),
+                    },
+                ),
             },
         }
 
@@ -441,6 +470,7 @@ class AICG3DPromptSegmentSplit:
         randomize_seed=True,
         max_segments=MAX_SEGMENTS,
         seed_start=0,
+        global_text="",
     ):
         del auto_fill, randomize_seed, seed_start, seconds_mode  # 只给界面按钮用，走线时不影响
 
@@ -467,8 +497,8 @@ class AICG3DPromptSegmentSplit:
                     len(prompts), cap, MAX_SEGMENTS
                 )
             )
-        # 只把第一段交给输出；其余段落由节点上的「一键填入全部视频段落」按钮铺开。
-        return (prompts[0],)
+        # 图形界面按钮会把全局提示词拼到每一段；走线时也保持一致。
+        return (compose_global_prompt(global_text, prompts[0]),)
 
 
 class AICG3DPromptSegmentSplitLegacy(AICG3DPromptSegmentSplit):

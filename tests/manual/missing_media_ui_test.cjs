@@ -3,6 +3,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE_PATH);
 
 (async () => {
   const workflowPath = process.env.WORKFLOW_PATH;
+  const comfyUrl = process.env.AICG3D_COMFY_URL || "http://127.0.0.1:8188/";
   if (!workflowPath || !fs.existsSync(workflowPath)) {
     throw new Error("WORKFLOW_PATH does not point to a workflow JSON file");
   }
@@ -20,7 +21,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE_PATH);
     await (acceptDialog ? dialog.accept() : dialog.dismiss());
   });
 
-  await page.goto("http://127.0.0.1:8188", {
+  await page.goto(comfyUrl, {
     waitUntil: "domcontentloaded",
     timeout: 120000,
   });

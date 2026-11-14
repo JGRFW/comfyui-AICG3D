@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
+from importlib.metadata import PackageNotFoundError, version as package_version
 from typing import Any
 
 import folder_paths
@@ -22,7 +24,28 @@ import aicg3d.prompt_guides as guide_lib
 import aicg3d.skills as skill_lib
 from aicg3d_sparktts.model_status import spark_model_status
 
-VERSION = "1.1.26"
+
+def _project_version() -> str:
+    """Read the checked-out release version, then installed metadata."""
+    try:
+        pyproject = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+        with open(pyproject, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        project_table = source.split("[project]", 1)[-1]
+        match = re.search(r'(?m)^\s*version\s*=\s*["\']([^"\']+)["\']', project_table)
+        if match:
+            return match.group(1)
+    except (OSError, TypeError):
+        pass
+    try:
+        return package_version("aicg3d-h3-suite")
+    except PackageNotFoundError:
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
+VERSION = _project_version()
 PROJECT_NAME = "短剧工作台"
 PROJECT_DESCRIPTION = "无限时长视频的 MiniMax H3 ComfyUI 工作流与插件"
 REPOSITORY_URL = "https://github.com/JGRFW/comfyui-AICG3D"
@@ -152,7 +175,10 @@ def list_loras() -> list[dict[str, Any]]:
 
 
 def lora_preview_path(name: str) -> str:
-    path = folder_paths.get_full_path("loras", name)
+    try:
+        path = folder_paths.get_full_path("loras", name)
+    except Exception:
+        return ""
     if not path:
         return ""
     preview = _lora_preview(path)
@@ -757,7 +783,12 @@ def register_routes() -> bool:
             import edge_tts
         except ImportError:
             return web.json_response(
-                {"error": "缺少 edge-tts。请重启 ComfyUI 自动安装依赖，或执行：python -m pip install edge-tts"},
+                {
+                    "error": (
+                        "缺少 edge-tts。请在当前 ComfyUI 的 Python 环境执行："
+                        "python.exe -m pip install edge-tts"
+                    )
+                },
                 status=503,
             )
 

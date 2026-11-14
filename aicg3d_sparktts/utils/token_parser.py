@@ -64,12 +64,7 @@ EMO_MAP = {
 
 
 class TokenParser:
-    """Turn label to special token"""
-
-    def __init__(self):
-        pass
-
-    """Parse the attributes of a person."""
+    """Parse the attributes of a person and turn labels into special tokens."""
 
     def __init__(self):
         pass

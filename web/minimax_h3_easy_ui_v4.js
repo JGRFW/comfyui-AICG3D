@@ -45,6 +45,7 @@ const RENDER_PASS2_CLASS = "MiniMaxH3EasyRenderPass2";
 /* 成片高清二采放大：只处理最终合成后的整片，不介入视频段落接缝。 */
 const FINAL_UPSCALE_CLASS = "MiniMaxH3EasyFinalHighResUpscale";
 const FINAL_UPSCALE_PACKED_CLASS = "MiniMaxH3EasyFinalHighResUpscalePacked";
+const FINAL_SEQUENCE_UPSCALE_CLASS = "MiniMaxH3EasyFinalSequenceUpscale";
 /* AICG3D 无限段落顺序生成：视频段落只用一条 previous_segment 线串起来。 */
 const SEQUENCE_SEGMENT_CLASS = "MiniMaxH3EasySequenceSegment";
 const SEQUENCE_RESOURCE_PANEL_HEIGHT = 320;
@@ -74,17 +75,18 @@ const PROMPT_DOC_PROP = "minimax_h3_prompt_reference_doc";
 const PROMPT_VIEW_PROP = "minimax_h3_prompt_view_mode";
 const PROMPT_AUTO_MARKER_PROP = "minimax_h3_auto_prompt_marker";
 const SEQUENCE_GRAPH_SCOPE_PROP = "aicg3d_h3_sequence_cache_scope";
+const FINAL_SEQUENCE_MANUAL_DRAW_PROP = "aicg3d_h3_final_sequence_manual_draw";
 let sequenceDrawEventsInstalled = false;
 let renderFullRunQueueHookInstalled = false;
 let sequenceQueueHookInstalled = false;
-let sequenceStitchPending = false;
-let sequenceStitchGraph = null;
 let sequenceCombineInFlight = false;
 let sequenceCombinePromptId = null;
 const sequenceDrawSessions = new Map();
 const sequenceDrawTargetNodes = new Map();
 const sequenceCacheOnlyNodes = new Set();
 const sequenceCacheOnlyCounts = new Map();
+const sequenceCacheOnlyIndices = new Map();
+const sequenceCacheOnlySegmentIds = new Map();
 const sequenceCacheOnlyChainKeys = new Map();
 const PROMPT_OPTIMIZER_SETTINGS_ENDPOINT = "/aicg3d/h3easy/prompt-optimizer/settings";
 const PROMPT_OPTIMIZER_LOCAL_MODELS_ENDPOINT = "/aicg3d/h3easy/prompt-optimizer/local-models";
@@ -234,6 +236,7 @@ const PRIMARY_BROWSER_LANGUAGE = String(globalThis.navigator?.language || global
 const ZH_BROWSER = /^(zh)(?:[-_]|$)/i.test(PRIMARY_BROWSER_LANGUAGE);
 const TEXT = {
     finalUpscalePackedTitle: ZH_BROWSER ? "成片高清二采放大" : "Final HD Upscale",
+    finalSequenceUpscaleTitle: ZH_BROWSER ? "最终合成 · 高清成片" : "Final Film · HD",
     finalUpscaleRelayEnabled: ZH_BROWSER ? "RelayVSR 放大" : "RelayVSR upscale",
     finalUpscaleRelayModel: ZH_BROWSER ? "RelayVSR 放大模型" : "RelayVSR model",
     finalUpscaleRelayVae: ZH_BROWSER ? "RelayVSR Flash VAE" : "RelayVSR Flash VAE",
@@ -241,7 +244,11 @@ const TEXT = {
     finalUpscaleRelayExposureLock: ZH_BROWSER ? "RelayVSR 曝光锁定" : "RelayVSR exposure lock",
     finalUpscaleRefinerLora: ZH_BROWSER ? "二采精修 LoRA" : "Second-pass refiner LoRA",
     finalUpscaleAdvancedSettings: ZH_BROWSER ? "展开高级设置" : "Show advanced settings",
+    finalSequenceFullAuto: ZH_BROWSER ? "全自动" : "Automatic",
+    finalSequenceManualDraw: ZH_BROWSER ? "手动抽卡" : "Manual redraw",
+    finalSequenceConfirmCompose: ZH_BROWSER ? "确认合成" : "Compose now",
     finalSequenceData: ZH_BROWSER ? "成片数据" : "Final sequence data",
+    finalSegmentInput: ZH_BROWSER ? "最后一段" : "Final segment",
     image: ZH_BROWSER ? "\u56fe\u7247" : "Image",
     video: ZH_BROWSER ? "\u89c6\u9891" : "Video",
     audio: ZH_BROWSER ? "\u97f3\u9891" : "Audio",
@@ -534,7 +541,6 @@ const TEXT = {
     vramPolicy: ZH_BROWSER ? "\u663e\u5b58\u6536\u5c3e" : "VRAM cleanup",
     vramTier: ZH_BROWSER ? "\u663e\u5b58\u6863\u4f4d" : "VRAM tier",
     sequenceConfig: ZH_BROWSER ? "\u5168\u5c40\u8bbe\u7f6e" : "Global settings",
-    sequenceSecondPassLabel: ZH_BROWSER ? "\u4e8c\u91c7\u9ad8\u6e05\u653e\u5927" : "Two-pass HD upscale",
     sequenceSegmentOutput: ZH_BROWSER ? "\u89c6\u9891\u6bb5\u843d" : "Video segment",
     aicg3dNoTarget: ZH_BROWSER
         ? "\u8bf7\u5148\u628a AICG3D\u8d44\u6e90\u5e93 \u8fde\u63a5\u5230\u4e3b\u8282\u70b9\u6216\u89c6\u9891\u6bb5\u843d\u7684 AICG3D \u53e3\uff0c\u4e3b\u8282\u70b9\u8fd8\u9700\u5207\u5230\u53c2\u8003\u6216\u5206\u6bb5\u6a21\u5f0f\u3002"
@@ -1041,6 +1047,7 @@ function isRenderPass2Node(node) {
 
 function isFinalUpscaleNode(node) {
     return isFinalUpscalePackedNode(node)
+        || isFinalSequenceUpscaleNode(node)
         || nodeMatchesClass(node, FINAL_UPSCALE_CLASS, TEXT.finalUpscaleTitle, "__h3FinalUpscaleNodeInstalled");
 }
 
@@ -1050,6 +1057,15 @@ function isFinalUpscalePackedNode(node) {
         FINAL_UPSCALE_PACKED_CLASS,
         TEXT.finalUpscalePackedTitle,
         "__h3FinalUpscalePackedNodeInstalled",
+    );
+}
+
+function isFinalSequenceUpscaleNode(node) {
+    return nodeMatchesClass(
+        node,
+        FINAL_SEQUENCE_UPSCALE_CLASS,
+        TEXT.finalSequenceUpscaleTitle,
+        "__h3FinalSequenceUpscaleNodeInstalled",
     );
 }
 
@@ -1490,8 +1506,13 @@ function setLocalizedSlotLabel(slot, label) {
 
 function localizeFinalUpscaleWidgets(node) {
     if (!node) return false;
-    const packed = isFinalUpscalePackedNode(node);
-    node.title = packed ? TEXT.finalUpscalePackedTitle : TEXT.finalUpscaleTitle;
+    const combined = isFinalSequenceUpscaleNode(node);
+    const packed = isFinalUpscalePackedNode(node) || combined;
+    node.title = combined
+        ? TEXT.finalSequenceUpscaleTitle
+        : packed
+            ? TEXT.finalUpscalePackedTitle
+            : TEXT.finalUpscaleTitle;
     const labels = {
         refiner_lora: TEXT.finalUpscaleRefinerLora,
         show_advanced_settings: TEXT.finalUpscaleAdvancedSettings,
@@ -1543,6 +1564,7 @@ function localizeFinalUpscaleWidgets(node) {
     }
     for (const input of node.inputs || []) {
         if (input.name === "final_sequence") setLocalizedSlotLabel(input, TEXT.finalSequenceData);
+        if (input.name === "final_segment") setLocalizedSlotLabel(input, TEXT.finalSegmentInput);
         if (input.name === "video") setLocalizedSlotLabel(input, TEXT.renderVideo);
         if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
         if (input.name === "model") setLocalizedSlotLabel(input, TEXT.outputModel);
@@ -1550,6 +1572,7 @@ function localizeFinalUpscaleWidgets(node) {
     const outputLabels = {
         video: TEXT.renderVideo,
         saved_file: ZH_BROWSER ? "保存路径" : "Saved file",
+        seam_report: ZH_BROWSER ? "接缝报告" : "Seam report",
         upscale_report: ZH_BROWSER ? "高清处理报告" : "Upscale report",
     };
     for (const output of node.outputs || []) {
@@ -1953,7 +1976,7 @@ function localizeNodeInstance(node) {
 }
 
 function localizeNodeDefinition(nodeData) {
-    if (!nodeData || ![NODE_CLASS, CONTEXT_SEGMENTS_CLASS, SELECTED_VIDEO_CONTEXT_CLASS, LOADER_CLASS, ADAPTER_CLASS, MEDIA_LOADER_CLASS, MEDIA_BRIDGE_CLASS, MEDIA_SPLITTER_CLASS, OUTPUT_CLASS, EASY_SAMPLER_CLASS, SELFLIFT_STRATEGY_CLASS, SEGMENT_RENDER_CLASS, SEGMENT_SAMPLE_SETUP_CLASS, SEGMENT_STEP_CLASS, SEGMENT_COLLECT_CLASS, SEGMENT_REFINE_CLASS, SEGMENT_DECODE_CLASS, RENDER_CLASS, RENDER_PASS1_CLASS, RENDER_PASS2_CLASS, FINAL_UPSCALE_CLASS, FINAL_UPSCALE_PACKED_CLASS].includes(h3ClassName(nodeData.name))) return;
+    if (!nodeData || ![NODE_CLASS, CONTEXT_SEGMENTS_CLASS, SELECTED_VIDEO_CONTEXT_CLASS, LOADER_CLASS, ADAPTER_CLASS, MEDIA_LOADER_CLASS, MEDIA_BRIDGE_CLASS, MEDIA_SPLITTER_CLASS, OUTPUT_CLASS, EASY_SAMPLER_CLASS, SELFLIFT_STRATEGY_CLASS, SEGMENT_RENDER_CLASS, SEGMENT_SAMPLE_SETUP_CLASS, SEGMENT_STEP_CLASS, SEGMENT_COLLECT_CLASS, SEGMENT_REFINE_CLASS, SEGMENT_DECODE_CLASS, RENDER_CLASS, RENDER_PASS1_CLASS, RENDER_PASS2_CLASS, FINAL_UPSCALE_CLASS, FINAL_UPSCALE_PACKED_CLASS, FINAL_SEQUENCE_UPSCALE_CLASS].includes(h3ClassName(nodeData.name))) return;
     nodeData.display_name = h3ClassName(nodeData.name) === LOADER_CLASS
         ? TEXT.loaderTitle
         : h3ClassName(nodeData.name) === ADAPTER_CLASS
@@ -1992,6 +2015,8 @@ function localizeNodeDefinition(nodeData) {
             ? TEXT.renderPass1Title
             : h3ClassName(nodeData.name) === RENDER_PASS2_CLASS
             ? TEXT.renderPass2Title
+            : h3ClassName(nodeData.name) === FINAL_SEQUENCE_UPSCALE_CLASS
+            ? TEXT.finalSequenceUpscaleTitle
             : h3ClassName(nodeData.name) === FINAL_UPSCALE_PACKED_CLASS
             ? TEXT.finalUpscalePackedTitle
             : h3ClassName(nodeData.name) === FINAL_UPSCALE_CLASS
@@ -3741,14 +3766,15 @@ function patchGraphToPrompt() {
                 const drawTarget = sequenceDrawTargetNodes.get(String(node.id));
                 if (drawTarget) {
                     sequencePromptNode.inputs.sequence_scope = drawTarget.scope;
-                    if (Number(drawTarget.index) > 1) {
+                    if (String(drawTarget.previousNodeId || "").trim()) {
                         // 单段抽卡必须切断上一段依赖，否则 ComfyUI 会把整条前半链
                         // 作为本次输出节点的依赖重新执行。后端会从本次进程内的段落
                         // 缓存恢复上一段，只采样当前目标段。
                         sequencePromptNode.inputs.previous_segment = "__aicg3d_cached_previous__";
                         sequencePromptNode.inputs.draw_previous_from_cache = true;
                         sequencePromptNode.inputs.draw_previous_chain_key = String(drawTarget.chainKey || "");
-                        sequencePromptNode.inputs.draw_previous_index = Math.max(1, Number(drawTarget.index) - 1);
+                        sequencePromptNode.inputs.draw_previous_index = Math.max(1, Number(drawTarget.previousIndex) || 1);
+                        sequencePromptNode.inputs.draw_previous_node_id = String(drawTarget.previousNodeId || "");
                     }
                     sequencePromptNode.inputs.draw_previous_scope = String(drawTarget.scope || "");
                 }
@@ -3760,10 +3786,18 @@ function patchGraphToPrompt() {
                     sequencePromptNode.inputs.final_segment = "__aicg3d_cache_only__";
                     sequencePromptNode.inputs.cache_only = true;
                     sequencePromptNode.inputs.cache_segment_count = Number(sequenceCacheOnlyCounts.get(String(node.id)) || 0);
+                    sequencePromptNode.inputs.cache_segment_indices = JSON.stringify(
+                        sequenceCacheOnlyIndices.get(String(node.id)) || [],
+                    );
+                    sequencePromptNode.inputs.cache_segment_nodes = JSON.stringify(
+                        sequenceCacheOnlySegmentIds.get(String(node.id)) || [],
+                    );
                     sequencePromptNode.inputs.cache_chain_key = String(sequenceCacheOnlyChainKeys.get(String(node.id)) || "");
                 } else {
                     sequencePromptNode.inputs.cache_only = false;
                     delete sequencePromptNode.inputs.cache_segment_count;
+                    delete sequencePromptNode.inputs.cache_segment_indices;
+                    delete sequencePromptNode.inputs.cache_segment_nodes;
                     delete sequencePromptNode.inputs.cache_chain_key;
                 }
             }
@@ -5648,6 +5682,7 @@ function applyNativeEditorTheme(element) {
 
 function syncEditorThemes(force = false) {
     const modern = isVueNodesMode();
+    repairCanvasContainerLayout();
     if (!force && lastVueNodesMode === modern) return;
     lastVueNodesMode = modern;
     for (const node of app.graph?._nodes || []) {
@@ -5657,6 +5692,42 @@ function syncEditorThemes(force = false) {
         configurePromptOptimizerEntryWidget(node);
     }
     app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function repairCanvasContainerLayout() {
+    const canvas = document.getElementById("graph-canvas-container")
+        || document.querySelector(".graph-canvas-container");
+    if (!canvas?.style) return false;
+    const { style } = canvas;
+    // Older builds could walk out of a Vue DOM widget and lock the whole graph
+    // host to a widget row height. Only heal that exact signature; leave any
+    // viewport sizing owned by ComfyUI itself untouched.
+    const badFlex = /^0 0 \d+(?:\.\d+)?px$/.test(String(style.flex || "").trim());
+    if (style.alignSelf !== "start" || style.overflow !== "visible" || !badFlex) return false;
+    for (const property of ["height", "min-height", "max-height", "flex", "align-self", "overflow"]) {
+        style.removeProperty(property);
+    }
+    app.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+const DOM_WIDGET_LAYOUT_BOUNDARIES = [
+    "#graph-canvas-container",
+    ".graph-canvas-container",
+    ".comfyui-body",
+    "#vue-app",
+    "main",
+    "body",
+    "html",
+].join(",");
+
+function forEachDOMWidgetHost(row, callback, { maxDepth = 3 } = {}) {
+    let host = row?.parentElement || null;
+    for (let depth = 0; host && depth < maxDepth; depth += 1, host = host.parentElement) {
+        if (!(host instanceof HTMLElement) || host.matches(DOM_WIDGET_LAYOUT_BOUNDARIES)) break;
+        callback(host, depth);
+        if (host.classList?.contains("lg-node-widget")) break;
+    }
 }
 
 function installNativeThemeWatcher() {
@@ -5749,11 +5820,12 @@ function refreshVueNodeWidgets(node) {
             const last = node.widgets[node.widgets.length - 1];
             node.widgets.pop();
             node.widgets.push(last);
-            return;
         }
-        const widgets = [...node.widgets];
-        node.widgets = [];
-        node.widgets = widgets;
+        // LiteGraph owns the widget instances and slot bindings in classic
+        // canvas mode. Replacing the array detaches DOM widgets, so a dirty
+        // redraw is the only refresh that is safe there.
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
     } catch { /* Some frontends expose widgets as a read-only field. */ }
 }
 
@@ -6526,9 +6598,9 @@ function syncAdvancedRenderSecondPassWidgets(node, { adjustHeight = true } = {})
 
 function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
     if (!isFinalUpscaleNode(node)) return false;
-    const packed = isFinalUpscalePackedNode(node);
+    const compact = isFinalUpscalePackedNode(node) || isFinalSequenceUpscaleNode(node);
     const secondPass = asBoolean(getWidgetValue(node, "second_pass", true));
-    const advanced = !packed || asBoolean(getWidgetValue(node, "show_advanced_settings", false));
+    const advanced = !compact || asBoolean(getWidgetValue(node, "show_advanced_settings", false));
     const upscaleMode = String(getWidgetValue(node, "upscale_mode", "按倍数放大") || "");
     const repairEngine = String(getWidgetValue(node, "repair_engine", "关闭（仅 H3 二采）") || "");
     const tiled = String(getWidgetValue(node, "tiled_sampling", "关") || "").trim() === "开";
@@ -6544,8 +6616,8 @@ function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
     const windowSettings = secondPass || repairActive;
     const advancedWindowSettings = advanced && windowSettings;
     const changed = [
-        setConditionalWidgetVisible(node, getWidget(node, "show_advanced_settings"), packed, { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "refiner_lora"), packed && secondPass, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "show_advanced_settings"), compact, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "refiner_lora"), compact && secondPass, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "latent_upscale_model"), secondPass && advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "upscale_mode"), secondPass, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "upscale_scale"), scaleByFactor, { adjustHeight }),
@@ -6595,16 +6667,138 @@ function syncFinalUpscaleWidgets(node, { adjustHeight = true } = {}) {
     return changed;
 }
 
+function finalSequenceManualDrawEnabled(node) {
+    return node?.properties?.[FINAL_SEQUENCE_MANUAL_DRAW_PROP] === true;
+}
+
+function refreshFinalSequenceComposeControls(node) {
+    const controls = node?.__h3FinalSequenceComposeControls;
+    if (!controls) return;
+    const manual = finalSequenceManualDrawEnabled(node);
+    controls.fullAuto.setAttribute("aria-pressed", manual ? "false" : "true");
+    controls.manual.setAttribute("aria-pressed", manual ? "true" : "false");
+    controls.confirm.hidden = !manual;
+    controls.confirm.disabled = sequenceCombineInFlight;
+    controls.confirm.textContent = sequenceCombineInFlight
+        ? (ZH_BROWSER ? "合成中" : "Composing")
+        : TEXT.finalSequenceConfirmCompose;
+    controls.row.classList.toggle("is-manual", manual);
+}
+
+function installFinalSequenceComposeControls(node) {
+    if (!isFinalSequenceUpscaleNode(node) || node.__h3FinalSequenceComposeControls) return false;
+    if (typeof node.addDOMWidget !== "function" || typeof document === "undefined" || !document.head) {
+        return false;
+    }
+
+    let style = document.getElementById("h3-final-sequence-compose-styles");
+    if (!style) {
+        style = document.createElement("style");
+        style.id = "h3-final-sequence-compose-styles";
+        style.textContent = `
+          .h3-final-sequence-compose{display:grid;grid-template-columns:minmax(0,1fr) minmax(104px,auto);align-items:center;gap:8px;width:100%;height:30px;min-height:30px;max-height:30px;box-sizing:border-box;padding:2px 6px;border:1px solid #354255;border-radius:6px;background:#1d2531;color:#e7eef8;}
+          .h3-final-sequence-mode{display:inline-grid;grid-template-columns:auto auto;gap:3px;min-width:0;justify-self:start;}
+          .h3-final-sequence-mode button{height:24px;padding:0 10px;border:1px solid #46566d;border-radius:5px;background:#273244;color:#c8d4e5;font-size:11px;line-height:1;white-space:nowrap;cursor:pointer;}
+          .h3-final-sequence-mode button[aria-pressed="true"]{border-color:#4f8cff;background:#284a7c;color:#f2f7ff;font-weight:600;}
+          .h3-final-sequence-compose-confirm{height:24px;min-width:96px;padding:0 9px;border:1px solid #4f8cff;border-radius:6px;background:#284a7c;color:#f2f7ff;font-size:11px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;}
+          .h3-final-sequence-compose-confirm[hidden]{display:none!important;}
+          .h3-final-sequence-compose-confirm:disabled{opacity:.55;cursor:default;}
+        `;
+        document.head.append(style);
+    }
+
+    const row = document.createElement("div");
+    row.className = "h3-final-sequence-compose";
+    row.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+    const modeGroup = document.createElement("div");
+    modeGroup.className = "h3-final-sequence-mode";
+    modeGroup.setAttribute("role", "group");
+    const fullAuto = document.createElement("button");
+    fullAuto.type = "button";
+    fullAuto.textContent = TEXT.finalSequenceFullAuto;
+    fullAuto.title = ZH_BROWSER
+        ? "运行一次即可生成全部段落并自动完成最终合成。"
+        : "One run generates every segment and composes the final film automatically.";
+    const manual = document.createElement("button");
+    manual.type = "button";
+    manual.textContent = TEXT.finalSequenceManualDraw;
+    manual.title = ZH_BROWSER
+        ? "本次只生成段落；抽卡满意后点“确认合成”。"
+        : "Generate segments first, then click Compose now after redraws are final.";
+    modeGroup.append(fullAuto, manual);
+
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "h3-final-sequence-compose-confirm";
+    confirm.title = ZH_BROWSER
+        ? "只拼接当前缓存中的段落，不重新生成已经完成的视频。"
+        : "Compose the cached segments without regenerating finished video.";
+
+    row.append(modeGroup, confirm);
+    const domWidget = node.addDOMWidget(
+        "h3_final_sequence_compose_mode",
+        "h3_final_sequence_compose_mode",
+        row,
+        {
+            serialize: false,
+            margin: 0,
+            getMinHeight: () => 30,
+            getMaxHeight: () => 30,
+            getHeight: () => 30,
+        },
+    );
+    if (!domWidget) return false;
+    domWidget.serialize = false;
+    setWidgetOption(domWidget, "serialize", false);
+    node.__h3FinalSequenceComposeControls = { row, fullAuto, manual, confirm, widget: domWidget };
+
+    const setManualMode = (enabled) => {
+        node.properties ||= {};
+        node.properties[FINAL_SEQUENCE_MANUAL_DRAW_PROP] = Boolean(enabled);
+        refreshFinalSequenceComposeControls(node);
+        node.graph?.change?.();
+        node.setDirtyCanvas?.(true, true);
+    };
+    fullAuto.addEventListener("click", () => setManualMode(false));
+    manual.addEventListener("click", () => setManualMode(true));
+    confirm.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void composeSequenceCachedFinal(node);
+    });
+
+    const currentIndex = node.widgets?.indexOf(domWidget) ?? -1;
+    if (currentIndex >= 0) {
+        node.widgets.splice(currentIndex, 1);
+        node.widgets.splice(0, 0, domWidget);
+        if (Array.isArray(node._widgets)) {
+            const rawIndex = node._widgets.indexOf(domWidget);
+            if (rawIndex >= 0) {
+                node._widgets.splice(rawIndex, 1);
+                node._widgets.splice(0, 0, domWidget);
+            }
+        }
+        node._widgetSlotsDirty = true;
+    }
+    refreshFinalSequenceComposeControls(node);
+    return true;
+}
+
 function installFinalUpscaleNode(nodeType, nodeData) {
     const className = h3ClassName(nodeData?.name);
     const packed = className === FINAL_UPSCALE_PACKED_CLASS;
-    if (className !== FINAL_UPSCALE_CLASS && !packed) return;
+    const combined = className === FINAL_SEQUENCE_UPSCALE_CLASS;
+    if (className !== FINAL_UPSCALE_CLASS && !packed && !combined) return;
     if (nodeType.prototype.__h3FinalUpscaleNodeInstalled) return;
     nodeType.prototype.__h3FinalUpscaleNodeInstalled = true;
     if (packed) nodeType.prototype.__h3FinalUpscalePackedNodeInstalled = true;
+    if (combined) nodeType.prototype.__h3FinalSequenceUpscaleNodeInstalled = true;
     const setup = (node, adjustHeight = true) => {
         if (!node) return;
         const localized = localizeFinalUpscaleWidgets(node);
+        if (combined) installFinalSequenceComposeControls(node);
+        if (combined) refreshFinalSequenceComposeControls(node);
         for (const name of ["second_pass", "show_advanced_settings", "upscale_mode", "repair_engine", "tiled_sampling", "sample_preview", "relay_vsr_enabled"]) {
             const widget = getWidget(node, name);
             if (!widget || widget.__h3FinalUpscaleSyncBound) continue;
@@ -6623,7 +6817,7 @@ function installFinalUpscaleNode(nodeType, nodeData) {
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3FinalUpscale() {
         const result = originalCreated?.apply(this, arguments);
         setup(this, false);
-        if (packed) {
+        if (packed || combined) {
             // Python exposes every control as a linkable slot contract. ComfyUI
             // keeps widget-backed slots invisible, but its first size estimate still
             // counts them. Size this leaf once after folding, so a newly inserted
@@ -6641,28 +6835,6 @@ function installFinalUpscaleNode(nodeType, nodeData) {
         setup(this, false);
         return result;
     };
-}
-
-function syncSequenceSecondPassWidgets(node, { adjustHeight = true } = {}) {
-    const enabled = asBoolean(getWidgetValue(node, "second_pass", false));
-    const names = [
-        "second_pass_model",
-        "second_pass_scale",
-        "second_pass_sampler_name",
-        "second_pass_scheduler",
-        "second_pass_steps",
-        "second_pass_denoise",
-    ];
-    const changed = names
-        .map((name) => setConditionalWidgetVisible(node, getWidget(node, name), enabled, { adjustHeight }))
-        .some(Boolean);
-    if (changed) {
-        refreshVueNodeWidgets(node);
-        node._widgetSlotsDirty = true;
-        node.setDirtyCanvas?.(true, true);
-        app.graph?.setDirtyCanvas?.(true, true);
-    }
-    return changed;
 }
 
 function syncSelfLiftWidgets(node, { adjustHeight = true } = {}) {
@@ -9776,13 +9948,8 @@ const SEQUENCE_GLOBAL_WIDGET_LABELS = {
     vram_tier: TEXT.vramTier,
     exposure_lock: "跨段曝光锁定",
     keep_full: "保完整（工作台）",
-    second_pass: TEXT.sequenceSecondPassLabel,
-    second_pass_model: "二采 Latent 放大器",
-    second_pass_scale: "二采放大倍数",
-    second_pass_sampler_name: "二采采样器",
-    second_pass_scheduler: "二采调度器",
-    second_pass_steps: "二采步数",
-    second_pass_denoise: "二采降噪",
+    segment_output_directory: "分段视频保存路径",
+    segment_cleanup_policy: "合成后清理分段",
     // 提示词优化的模型设置只在「全局设置」上留一个入口：段落提示词框里的 ✦ 用的就是这份设置。
     prompt_optimizer_settings: `${TEXT.promptOptimizerSettings} · ${PROMPT_OPTIMIZER_UI_BUILD}`,
 };
@@ -10333,6 +10500,15 @@ function scheduleSequenceWidgetGrid(node) {
     else setTimeout(run, 0);
 }
 
+/* 「本段视频」卡片的状态文案：采样中 / 采样预览中 / 解码中 / 本段视频。
+   只换同一块角标的文字，卡片尺寸、位置、控件都不动。 */
+const SEQUENCE_STAGE_TEXT = {
+    video: ZH_BROWSER ? "\u672c\u6bb5\u89c6\u9891" : "Segment video",
+    sampling: ZH_BROWSER ? "\u91c7\u6837\u4e2d" : "Sampling",
+    samplingPreview: ZH_BROWSER ? "\u91c7\u6837\u9884\u89c8\u4e2d" : "Sampling preview",
+    decoding: ZH_BROWSER ? "\u89e3\u7801\u4e2d" : "Decoding",
+};
+
 function sequenceStagePreviewCard(label) {
     const card = document.createElement("div");
     card.className = "h3-sequence-stage-card";
@@ -10353,7 +10529,7 @@ function sequenceStagePreviewCard(label) {
     placeholder.className = "h3-sequence-stage-placeholder";
     placeholder.textContent = `等待${label}...`;
     card.append(title, image, video, placeholder);
-    return { card, image, video, placeholder };
+    return { card, title, image, video, placeholder };
 }
 
 function installSequenceStagePreviewWidget(node) {
@@ -10377,7 +10553,7 @@ function installSequenceStagePreviewWidget(node) {
     }
     const panel = document.createElement("div");
     panel.className = "h3-sequence-stage-previews";
-    const final = sequenceStagePreviewCard("本段视频");
+    const final = sequenceStagePreviewCard(SEQUENCE_STAGE_TEXT.video);
     panel.append(final.card);
     const widget = node.addDOMWidget("h3_sequence_stage_previews", "h3_sequence_stage_previews", panel, {
         serialize: false,
@@ -10421,7 +10597,10 @@ function installSequenceStagePreviewWidget(node) {
 const SEQUENCE_VIDEO_PREVIEW_EVENT = "aicg3d_sequence_video_preview";
 const SEQUENCE_SAMPLING_IMAGE_PREFIX = "data" + ":" + "image" + "/" + "jpeg" + ";base64,";
 const SEQUENCE_SAMPLING_PREVIEW_EVENT = "aicg3d_sequence_sampling_preview";
+const SEQUENCE_CLEANUP_PROMPT_EVENT = "aicg3d_sequence_cleanup_prompt";
+const pendingSequenceCleanupPrompts = [];
 let sequenceVideoPreviewListenerReady = false;
+let sequenceCleanupPromptTimer = null;
 
 function sequenceStagePreviewUrl(video) {
     const params = new URLSearchParams({
@@ -10430,6 +10609,70 @@ function sequenceStagePreviewUrl(video) {
         type: String(video?.type || "temp"),
     });
     return `/view?${params.toString()}`;
+}
+
+function setSequenceStageTitle(node, text) {
+    const target = node?.__h3SequenceStageFinal;
+    const next = String(text || "");
+    if (!target?.title || !next || target.title.textContent === next) return false;
+    target.title.textContent = next;
+    return true;
+}
+
+async function showNextSequenceCleanupPrompt() {
+    const cleanup = pendingSequenceCleanupPrompts.shift();
+    if (!cleanup) return false;
+    const token = String(cleanup.token || "").trim();
+    if (!token) return showNextSequenceCleanupPrompt();
+    const count = Math.max(0, Number(cleanup.count || 0));
+    const folders = Array.isArray(cleanup.directories)
+        ? cleanup.directories.filter(Boolean).join("\n")
+        : String(cleanup.directories || "");
+    const message = [
+        `最终视频已经合成成功。是否删除本次保存的 ${count} 个分段视频？`,
+        folders ? `保存位置：\n${folders}` : "",
+        "只会删除本插件为这一条段落链创建的文件，不会清空整个文件夹。",
+    ].filter(Boolean).join("\n\n");
+    if (!window.confirm(message)) {
+        toast("分段视频已保留", "ok");
+        return true;
+    }
+    try {
+        const response = await api.fetchApi(
+            "/aicg3d/h3easy/sequence/cleanup-segments",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token }),
+            },
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+            throw new Error(payload?.error || `HTTP ${response.status}`);
+        }
+        toast(
+            payload?.failed
+                ? `已删除 ${payload.deleted || 0} 个分段，${payload.failed} 个删除失败`
+                : `已删除 ${payload?.deleted ?? count} 个分段视频`,
+            payload?.failed ? "warn" : "ok",
+        );
+    } catch (error) {
+        console.error("[AICG3D] 分段视频清理失败", error);
+        toast(`分段视频清理失败：${String(error?.message || error)}`, "error");
+    }
+    return true;
+}
+
+function scheduleNextSequenceCleanupPrompt(delay = 1200) {
+    if (sequenceCleanupPromptTimer) clearTimeout(sequenceCleanupPromptTimer);
+    sequenceCleanupPromptTimer = setTimeout(() => {
+        sequenceCleanupPromptTimer = null;
+        if (app.processingQueue) {
+            scheduleNextSequenceCleanupPrompt(500);
+            return;
+        }
+        void showNextSequenceCleanupPrompt();
+    }, Math.max(250, Number(delay) || 0));
 }
 
 function setSequenceStagePreview(node, kind, video) {
@@ -10442,13 +10685,14 @@ function setSequenceStagePreview(node, kind, video) {
     target.video.hidden = false;
     target.image.hidden = true;
     target.placeholder.hidden = true;
+    setSequenceStageTitle(node, SEQUENCE_STAGE_TEXT.video);
     target.video.load?.();
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
     return true;
 }
 
-function setSequenceSamplingPreview(node, image) {
+function setSequenceSamplingPreview(node, image, step, total) {
     const target = node?.__h3SequenceStageFinal;
     const encoded = String(image || "");
     if (!target?.image || !encoded) return false;
@@ -10459,22 +10703,15 @@ function setSequenceSamplingPreview(node, image) {
         : SEQUENCE_SAMPLING_IMAGE_PREFIX + encoded;
     target.image.hidden = false;
     target.placeholder.hidden = true;
+    const done = Number(step);
+    const all = Number(total);
+    setSequenceStageTitle(
+        node,
+        Number.isFinite(done) && done > 0 && Number.isFinite(all) && all > 0
+            ? `${SEQUENCE_STAGE_TEXT.samplingPreview} ${done}/${all}`
+            : SEQUENCE_STAGE_TEXT.samplingPreview,
+    );
     return true;
-}
-
-function resetSequenceStagePreviews() {
-    for (const node of app.graph?._nodes || []) {
-        if (!isSequenceSegmentNode(node)) continue;
-        const target = node.__h3SequenceStageFinal;
-        if (!target?.video) continue;
-        target.video.pause?.();
-        target.video.removeAttribute?.("src");
-        target.video.load?.();
-        target.video.hidden = true;
-        target.image?.removeAttribute?.("src");
-        if (target.image) target.image.hidden = true;
-        target.placeholder.hidden = false;
-    }
 }
 
 function installSequenceStageVideoPreviewListener() {
@@ -10490,9 +10727,15 @@ function installSequenceStageVideoPreviewListener() {
         const detail = event?.detail;
         const node = renderProgressNodeFor(detail?.node_id);
         if (!node || !isSequenceSegmentNode(node)) return;
-        setSequenceSamplingPreview(node, detail?.image);
+        setSequenceSamplingPreview(node, detail?.image, detail?.step, detail?.total);
     });
-    api.addEventListener("execution_start", resetSequenceStagePreviews);
+    api.addEventListener(SEQUENCE_CLEANUP_PROMPT_EVENT, (event) => {
+        const cleanup = event?.detail || {};
+        if (!String(cleanup.token || "").trim()) return;
+        if (pendingSequenceCleanupPrompts.some((item) => item.token === cleanup.token)) return;
+        pendingSequenceCleanupPrompts.push(cleanup);
+        scheduleNextSequenceCleanupPrompt();
+    });
 }
 
 function installSequenceActionRow(node) {
@@ -10546,14 +10789,13 @@ function installSequenceActionRow(node) {
         domWidget.options.getMinHeight = () => 32;
         domWidget.computeLayoutSize = () => ({ minHeight: 32, maxHeight: 32, minWidth: 0 });
         try { delete domWidget.computeSize; } catch { domWidget.computeSize = undefined; }
-        let host = row.parentElement;
-        for (let depth = 0; host && depth < 3; depth += 1, host = host.parentElement) {
+        forEachDOMWidgetHost(row, (host) => {
             host.style.height = "32px";
             host.style.minHeight = "32px";
             host.style.maxHeight = "32px";
             host.style.padding = "0";
             host.style.margin = "0";
-        }
+        });
         const widgetGrid = sequenceWidgetGrid(node);
         if (widgetGrid) {
             widgetGrid.classList.add("h3-sequence-widget-grid");
@@ -10748,15 +10990,14 @@ function lockSequenceCanvasSizeRow(node) {
     widget.computeLayoutSize = () => ({ minHeight: height, maxHeight: height, minWidth: 0 });
     // Vue nodes distribute extra node height across growable DOM widgets. Keep
     // this read-only row fixed so scrolling or zoom cannot turn it into a blank block.
-    let host = row.parentElement;
-    for (let depth = 0; host && depth < 3; depth += 1, host = host.parentElement) {
+    forEachDOMWidgetHost(row, (host) => {
         host.style.height = `${height}px`;
         host.style.minHeight = `${height}px`;
         host.style.maxHeight = `${height}px`;
         host.style.flex = `0 0 ${height}px`;
         host.style.alignSelf = "start";
         host.style.overflow = "visible";
-    }
+    });
     // Vue nodes also mark the DOM widget's grid track as auto. Replace only
     // this widget's track so the following parameter rows move up immediately.
     const widgetRow = row.closest?.(".lg-node-widget")?.parentElement || null;
@@ -10820,17 +11061,6 @@ function installSequenceGlobalNode(nodeType, nodeData) {
         localizeNodeInstance(node);
         localizeSequenceWidgets(node, SEQUENCE_GLOBAL_WIDGET_LABELS);
         configurePromptOptimizerEntryWidget(node);
-        const secondPassWidget = getWidget(node, "second_pass");
-        if (secondPassWidget && !secondPassWidget.__h3SequenceSecondPassBound) {
-            secondPassWidget.__h3SequenceSecondPassBound = true;
-            const originalCallback = secondPassWidget.callback;
-            secondPassWidget.callback = (value) => {
-                originalCallback?.call(secondPassWidget, value);
-                syncSequenceSecondPassWidgets(node);
-                node.setDirtyCanvas?.(true, true);
-            };
-        }
-        syncSequenceSecondPassWidgets(node);
         for (const input of node.inputs || []) {
             if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
             if (input.name === "sampler") setLocalizedSlotLabel(input, TEXT.externalSampler);
@@ -12611,6 +12841,35 @@ function mediaLoaderRender(node) {
     mediaLoaderResize(node);
 }
 
+function applyClassicStandaloneMediaHostLayout(panel, domWidget, nodeWidth, nodeHeight) {
+    const host = panel?.parentElement;
+    if (!host?.classList?.contains("dom-widget")) return;
+    const margin = Number(domWidget?.margin);
+    const horizontalMargin = Number.isFinite(margin) ? Math.max(0, margin * 2) : 20;
+    const hostWidth = Math.max(1, Math.floor((Number(nodeWidth) || 320) - horizontalMargin));
+    const hostHeight = Math.max(1, Math.floor(Number(nodeHeight) || 0));
+    // Classic LiteGraph positions this host in screen space and applies the
+    // canvas scale with a CSS transform. Its inline width/height stay in node
+    // coordinates. The frontend can overwrite inline width/height after our
+    // resize callback, so keep the authoritative values in a class rule that
+    // its regular layout writes cannot replace.
+    host.classList.add("h3-classic-media-host");
+    host.style.setProperty("--h3-media-host-width", `${hostWidth}px`);
+    host.style.setProperty("--h3-media-host-height", `${hostHeight}px`);
+    host.dataset.h3MediaHostWidth = String(hostWidth);
+    host.dataset.h3MediaHostHeight = String(hostHeight);
+}
+
+function clearClassicStandaloneMediaHostLayout(panel) {
+    const host = panel?.parentElement;
+    if (!host?.classList?.contains("dom-widget")) return;
+    host.classList.remove("h3-classic-media-host");
+    host.style.removeProperty("--h3-media-host-width");
+    host.style.removeProperty("--h3-media-host-height");
+    delete host.dataset.h3MediaHostWidth;
+    delete host.dataset.h3MediaHostHeight;
+}
+
 function mediaLoaderResize(node) {
     const panel = node?.__h3MediaLoaderPanel;
     const domWidget = node?.__h3MediaLoaderWidget;
@@ -12618,28 +12877,90 @@ function mediaLoaderResize(node) {
     if (node.__h3MediaLoaderResizeScheduled || node.__h3MediaLoaderResizing) return;
     node.__h3MediaLoaderResizeScheduled = true;
     const measureNow = () => {
-        // Measure the natural content while the panel is not filling a previously
-        // stretched DOM slot. The measured value is only the minimum, never a cap.
+        const groups = panel.querySelector(".h3-media-loader-groups");
+        const previousGroupsStyle = groups ? {
+            height: groups.style.height,
+            minHeight: groups.style.minHeight,
+            maxHeight: groups.style.maxHeight,
+            flex: groups.style.flex,
+            overflow: groups.style.overflow,
+        } : null;
+
+        // Both the panel and its scroll container can inherit the DOM widget's
+        // old slot height. Release them together before measuring, otherwise a
+        // flex:1 group reports the stretched slot instead of its real content.
         panel.style.height = "auto";
         panel.style.minHeight = "0px";
         panel.style.maxHeight = "none";
         panel.style.flex = "0 0 auto";
-        const contentHeight = Math.max(1, Math.ceil(panel.scrollHeight || panel.getBoundingClientRect?.().height || 0));
+        if (groups) {
+            groups.style.height = "auto";
+            groups.style.minHeight = "0px";
+            groups.style.maxHeight = "none";
+            groups.style.flex = "0 0 auto";
+            groups.style.overflow = "visible";
+        }
+        const panelRect = panel.getBoundingClientRect?.();
+        const contentHeight = Math.max(
+            1,
+            Math.ceil(Math.max(panel.scrollHeight || 0, panelRect?.height || 0)),
+        );
         const widgetHeight = Math.max(1, contentHeight + 8);
         node.__h3MediaLoaderMinWidgetHeight = widgetHeight;
         const inlinePanel = node.__h3InlineMediaPanelWidget === domWidget;
-        const layoutHeight = inlinePanel ? SEQUENCE_RESOURCE_PANEL_HEIGHT : widgetHeight;
+        const vueLayout = !panel.parentElement?.classList?.contains("dom-widget");
+        if (inlinePanel || vueLayout) clearClassicStandaloneMediaHostLayout(panel);
+        let layoutHeight = inlinePanel ? SEQUENCE_RESOURCE_PANEL_HEIGHT : widgetHeight;
 
-        // Restore the fill layout after measuring. LiteGraph gives a DOM widget
-        // its extra height through computedHeight when the user resizes the node.
-        panel.style.height = inlinePanel ? `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : "100%";
-        panel.style.minHeight = inlinePanel ? `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : `${contentHeight}px`;
-        panel.style.maxHeight = inlinePanel ? `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : "100%";
-        panel.style.flex = inlinePanel ? `0 0 ${SEQUENCE_RESOURCE_PANEL_HEIGHT}px` : "1 1 auto";
+        // The inline library is part of the segment node and keeps its fixed
+        // 320px stage. The standalone loader must use its real content height,
+        // otherwise the classic canvas expands the flex group into empty space.
+        if (inlinePanel) {
+            panel.style.height = `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
+            panel.style.minHeight = `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
+            panel.style.maxHeight = `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
+            panel.style.flex = `0 0 ${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
+            if (groups && previousGroupsStyle) {
+                groups.style.height = previousGroupsStyle.height;
+                groups.style.minHeight = previousGroupsStyle.minHeight;
+                groups.style.maxHeight = previousGroupsStyle.maxHeight;
+                groups.style.flex = previousGroupsStyle.flex || "1 1 auto";
+                groups.style.overflow = previousGroupsStyle.overflow || "auto";
+            }
+        } else if (vueLayout) {
+            // Nodes 2.0 allocates the host grid row from the node height. Keep
+            // the original fill contract there; a fixed max would leave a gap
+            // below the panel inside the Vue host.
+            panel.style.height = "100%";
+            panel.style.minHeight = `${contentHeight}px`;
+            panel.style.maxHeight = "100%";
+            panel.style.flex = "1 1 auto";
+            if (groups) {
+                groups.style.height = previousGroupsStyle?.height || "";
+                groups.style.minHeight = previousGroupsStyle?.minHeight || "0px";
+                groups.style.maxHeight = previousGroupsStyle?.maxHeight || "";
+                groups.style.flex = previousGroupsStyle?.flex || "1 1 auto";
+                groups.style.overflow = previousGroupsStyle?.overflow || "auto";
+            }
+        } else {
+            // Classic canvas allocates the remaining node height to this DOM
+            // widget. Keep the measured content as the minimum, then fill the
+            // slot so resizing the node also resizes its internal library.
+            panel.style.height = "100%";
+            panel.style.minHeight = `${contentHeight}px`;
+            panel.style.maxHeight = "100%";
+            panel.style.flex = "1 1 auto";
+            if (groups) {
+                groups.style.height = "100%";
+                groups.style.minHeight = "0px";
+                groups.style.maxHeight = "none";
+                groups.style.flex = "1 1 auto";
+                groups.style.overflow = "auto";
+            }
+        }
         if (inlinePanel && isVueNodesMode()) {
             node.__h3InlineMediaHosts ||= [];
-            let host = panel.parentElement;
-            for (let depth = 0; host && depth < 5; depth += 1, host = host.parentElement) {
+            forEachDOMWidgetHost(panel, (host) => {
                 if (!host.__h3SequenceResourceHostOriginal) {
                     host.__h3SequenceResourceHostOriginal = {
                         height: host.style.height,
@@ -12656,16 +12977,12 @@ function mediaLoaderResize(node) {
                 host.style.maxHeight = `${SEQUENCE_RESOURCE_PANEL_HEIGHT}px`;
                 host.style.overflow = "hidden";
                 if (getComputedStyle(host).display.includes("grid")) host.style.gridTemplateRows = "100%";
-                if (host.classList?.contains("lg-node-widget")) break;
-            }
+            }, { maxDepth: 5 });
         }
         domWidget.options ||= {};
         const getWidgetHeight = () => inlinePanel
             ? SEQUENCE_RESOURCE_PANEL_HEIGHT
             : Math.max(1, Number(node.__h3MediaLoaderMinWidgetHeight) || widgetHeight);
-        // No fixed computeSize or maxHeight here. This is the same growable DOM
-        // widget contract used by the batch text-card node: extra node height is
-        // allocated to the panel instead of becoming an empty node background.
         try {
             delete domWidget.computeSize;
         } catch {
@@ -12674,7 +12991,11 @@ function mediaLoaderResize(node) {
         domWidget.computedHeight = layoutHeight;
         domWidget.computeLayoutSize = () => {
             const height = getWidgetHeight();
-            return { minHeight: height, maxHeight: inlinePanel ? height : undefined, minWidth: 0 };
+            return {
+                minHeight: height,
+                maxHeight: inlinePanel ? height : undefined,
+                minWidth: 0,
+            };
         };
         domWidget.options.getMinHeight = getWidgetHeight;
         if (inlinePanel) {
@@ -12685,6 +13006,18 @@ function mediaLoaderResize(node) {
             delete domWidget.options.getHeight;
         }
         const currentWidth = Number(node.size?.[0]) || 300;
+        const classicStandalone = !inlinePanel && !vueLayout;
+        // The classic standalone library needs enough width for its title and
+        // 清空/上传 controls. Keep the original 320px node width as its floor;
+        // width resizing above that remains unrestricted.
+        if (classicStandalone && currentWidth + 1 < 320 && typeof node.setSize === "function") {
+            const currentHeight = Number(node.size?.[1]) || 0;
+            node.setSize([320, currentHeight]);
+            if (Array.isArray(node.size)) {
+                node.size[0] = 320;
+                node.size[1] = currentHeight;
+            }
+        }
         // Compute the fixed node chrome independently. Only grow a too-small
         // node to its content minimum; never shrink a user-resized node.
         const wasHidden = domWidget.hidden;
@@ -12715,8 +13048,13 @@ function mediaLoaderResize(node) {
         }
         if (Array.isArray(fixedSize) && typeof node.setSize === "function") {
             const width = Math.max(currentWidth, 320);
-            const minimumHeight = Math.max(1, Math.ceil((fixedSize[1] || 0) + layoutHeight + 4));
             const currentHeight = Number(node.size?.[1]) || 0;
+            if (!inlinePanel && !vueLayout) {
+                const availableWidgetHeight = currentHeight - (fixedSize[1] || 0) - 4;
+                layoutHeight = Math.max(widgetHeight, Math.floor(availableWidgetHeight));
+                domWidget.computedHeight = layoutHeight;
+            }
+            const minimumHeight = Math.max(1, Math.ceil((fixedSize[1] || 0) + layoutHeight + 4));
             if (inlinePanel) {
                 if (currentHeight + 1 < minimumHeight) setNodeSizeExact(node, [width, minimumHeight]);
             } else if (currentHeight + 1 < minimumHeight) {
@@ -12734,6 +13072,14 @@ function mediaLoaderResize(node) {
                     grid.classList.add("h3-sequence-resource-open");
                 }
             }
+        }
+        if (!inlinePanel && !vueLayout) {
+            applyClassicStandaloneMediaHostLayout(
+                panel,
+                domWidget,
+                Math.max(Number(node.size?.[0]) || currentWidth, 320),
+                layoutHeight,
+            );
         }
         node._widgetSlotsDirty = true;
         node.setDirtyCanvas?.(true, true);
@@ -12762,6 +13108,7 @@ function installMediaLoaderStyles() {
     }
     style.textContent = `
       .h3-media-loader-panel { position:relative; display:flex; flex-direction:column; gap:8px; width:100%; height:100%; min-height:0; max-height:100%; flex:1 1 auto; align-self:stretch; box-sizing:border-box; padding:8px; border:1px solid #111; border-radius:6px; background:#222; color:var(--h3-native-widget-text,#ddd); font-size:12px; overflow:hidden; transition:border-color .14s ease, box-shadow .14s ease; }
+      .dom-widget.h3-classic-media-host { width:var(--h3-media-host-width) !important; min-width:var(--h3-media-host-width) !important; height:var(--h3-media-host-height) !important; min-height:var(--h3-media-host-height) !important; max-height:none !important; box-sizing:border-box !important; }
       .h3-media-loader-panel.is-file-drop-target { border-color:#718ca6; box-shadow:inset 0 0 0 1px rgba(113,140,166,.34); }
       .h3-media-loader-panel.has-missing { border-color:#a45151; box-shadow:inset 0 0 0 1px rgba(164,81,81,.3); }
       .h3-media-loader-panel.is-file-drop-target::after { content:attr(data-drop-label); position:absolute; inset:8px; z-index:20; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:1px dashed rgba(146,177,207,.62); border-radius:5px; background:rgba(25,28,32,.9); color:#d7e2ec; font-size:12px; font-weight:600; letter-spacing:.01em; pointer-events:none; }
@@ -12928,6 +13275,10 @@ function installMediaLoaderNode(nodeType, nodeData) {
         setWidgetOption(domWidget, "serialize", false);
         domWidget.__h3MediaLoaderType = domWidget.type;
         node.__h3MediaLoaderWidget = domWidget;
+        setWidgetOption(domWidget, "afterResize", () => {
+            if (node.__h3MediaLoaderResizeScheduled || node.__h3MediaLoaderResizing) return;
+            mediaLoaderResize(node);
+        });
         mediaLoaderRender(node);
         mediaLoaderResize(node);
         repairNodeLayout(node);
@@ -12956,6 +13307,22 @@ function installMediaLoaderNode(nodeType, nodeData) {
         // otherwise pin the socket to whatever name it had when it was saved.
         localizeNodeInstance(this);
         mediaLoaderRender(this);
+        return result;
+    };
+    const originalResize = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function onResizeH3MediaLoader() {
+        const result = originalResize?.apply(this, arguments);
+        if (this.__h3MediaLoaderPanel && this.__h3MediaLoaderWidget) {
+            // Classic canvas DOM widgets are not reliably resized by their
+            // wrapper. Refresh immediately during the drag, then once more
+            // after the frontend commits its final node layout.
+            mediaLoaderResize(this);
+            const refresh = () => {
+                if (!this.__h3MediaLoaderResizing) mediaLoaderResize(this);
+            };
+            if (typeof requestAnimationFrame === "function") requestAnimationFrame(refresh);
+            setTimeout(refresh, 80);
+        }
         return result;
     };
 
@@ -13406,6 +13773,15 @@ function installRenderProgressListener() {
             totalElapsed: elapsed,
         };
         const node = renderProgressNodeFor(key);
+        if (node && isSequenceSegmentNode(node)) {
+            // 段落卡片角标跟着阶段走：采样 -> 采样中，解码 -> 解码中；
+            // 段视频一出来（aicg3d_sequence_video_preview）再回到「本段视频」。
+            if (state.stage === "sample" || state.stage === "sample2") {
+                setSequenceStageTitle(node, SEQUENCE_STAGE_TEXT.sampling);
+            } else if (state.stage === "decode" && !done) {
+                setSequenceStageTitle(node, SEQUENCE_STAGE_TEXT.decoding);
+            }
+        }
         if (done && (!state.ok || state.overall < 1)) {
             // 报错收尾：直接收起进度条，不留残留。
             RENDER_PROGRESS_STATE.delete(key);
@@ -13676,7 +14052,7 @@ function installRenderNode(nodeType, nodeData) {
             node.graph?.change?.();
             node.setDirtyCanvas?.(true, true);
             try {
-                const accepted = await app.queuePrompt(0, 1, { queueNodeIds: [node.id] });
+                const accepted = await app.queuePrompt(0, 1, { queueNodeIds: [String(node.id)] });
                 if (accepted === false) toast("二采任务未进入队列", "warn");
                 else toast("仅重跑二采：复用上一次一采缓存", "ok");
             } catch (error) {
@@ -14661,6 +15037,56 @@ function sequenceChainRoot(node) {
     return current || node;
 }
 
+function sequenceNodeExcludedFromExecution(node) {
+    const mode = Number(node?.mode);
+    const never = Number(globalThis.LiteGraph?.NEVER ?? 2);
+    const bypass = Number(globalThis.LiteGraph?.BYPASS ?? 4);
+    return mode === never || mode === bypass;
+}
+
+function sequenceEffectiveChain(tail) {
+    const nodes = [];
+    const seen = new Set();
+    let current = tail;
+    while (current && isSequenceSegmentNode(current) && !seen.has(current)) {
+        seen.add(current);
+        if (!sequenceNodeExcludedFromExecution(current)) nodes.push(current);
+        current = previousSequenceSegment(current);
+    }
+    nodes.reverse();
+    return {
+        nodes,
+        indices: nodes.map((node) => sequenceSegmentOrdinal(node)),
+        count: nodes.length,
+        tail: nodes[nodes.length - 1] || null,
+    };
+}
+
+function sequenceNodeIdList(node) {
+    const ids = [];
+    const seen = new Set();
+    const queue = [node];
+    const graph = node?.graph || app.graph;
+    while (queue.length) {
+        const current = queue.shift();
+        if (!current) continue;
+        const id = String(current.id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+        for (const output of current.outputs || []) {
+            for (const linkId of output?.links || []) {
+                const link = getNativeGraphLink(graph, linkId);
+                if (!link) continue;
+                const targetId = link.target_id ?? link.targetId ?? link.to_id ?? link.toId;
+                const target = targetId != null ? graph?.getNodeById?.(Number(targetId)) : null;
+                if (target) queue.push(target);
+            }
+        }
+    }
+    return ids;
+}
+
 function sequenceCombineChainKey(combine) {
     const graph = combine?.graph || app.graph;
     const input = (combine?.inputs || []).find((slot) => String(slot?.name || "") === "final_segment");
@@ -14675,14 +15101,95 @@ function sequenceCombineTargetIds(graph = app.graph) {
     for (const combine of sequenceCombineNodes(graph)) {
         const input = (combine.inputs || []).find((slot) => String(slot?.name || "") === "final_segment");
         if (input?.link == null) continue;
-        const chainKey = sequenceCombineChainKey(combine);
-        if (!chainKey) continue;
         const sourceId = nativeLinkOriginId(graph, input);
         const source = sourceId != null ? graph?.getNodeById?.(Number(sourceId)) : null;
-        const segmentCount = source ? sequenceSegmentOrdinal(source) : 0;
-        targets.push({ node: combine, chainKey, segmentCount });
+        const effective = sequenceEffectiveChain(source);
+        if (!effective.count) continue;
+        const chainKey = String(effective.nodes[0]?.id ?? "");
+        if (!chainKey) continue;
+        targets.push({
+            node: combine,
+            sourceNode: effective.tail,
+            chainKey,
+            segmentCount: effective.count,
+            segmentIndices: effective.indices,
+            segmentNodeIds: effective.nodes.map((item) => String(item.id)),
+        });
     }
     return targets;
+}
+
+function applySequenceCacheOnlyTargets(targets) {
+    const cacheOnlyIds = [];
+    sequenceCacheOnlyNodes.clear();
+    sequenceCacheOnlyChainKeys.clear();
+    sequenceCacheOnlyCounts.clear();
+    sequenceCacheOnlyIndices.clear();
+    sequenceCacheOnlySegmentIds.clear();
+    for (const item of targets) {
+        const id = String(item.node.id);
+        cacheOnlyIds.push(id);
+        sequenceCacheOnlyNodes.add(id);
+        sequenceCacheOnlyChainKeys.set(id, item.chainKey);
+        sequenceCacheOnlyCounts.set(id, item.segmentCount);
+        sequenceCacheOnlyIndices.set(id, item.segmentIndices);
+        sequenceCacheOnlySegmentIds.set(id, item.segmentNodeIds);
+    }
+    return cacheOnlyIds;
+}
+
+function clearSequenceCacheOnlyTargets(ids = []) {
+    for (const id of ids) {
+        sequenceCacheOnlyNodes.delete(String(id));
+        sequenceCacheOnlyChainKeys.delete(String(id));
+        sequenceCacheOnlyCounts.delete(String(id));
+        sequenceCacheOnlyIndices.delete(String(id));
+        sequenceCacheOnlySegmentIds.delete(String(id));
+    }
+}
+
+async function composeSequenceCachedFinal(node) {
+    if (!isFinalSequenceUpscaleNode(node) || !finalSequenceManualDrawEnabled(node)) return false;
+    if (typeof app.queuePrompt !== "function") return false;
+    if (app.processingQueue || sequenceCombineInFlight) {
+        toast("当前还有任务在运行，等完成后再确认合成", "warn");
+        return false;
+    }
+    const graph = node.graph || app.graph;
+    const targets = sequenceCombineTargetIds(graph).filter((item) => item.node === node);
+    if (!targets.length) {
+        toast("没有找到可合成的完整段落链，请先连接最后一段", "error");
+        return false;
+    }
+
+    const cacheOnlyIds = applySequenceCacheOnlyTargets(targets);
+    const queueNodeIds = normalizePartialExecutionTargetIds([
+        ...cacheOnlyIds,
+        ...cacheOnlyIds.flatMap((id) => sequenceNodeIdList(graph.getNodeById?.(Number(id)))),
+    ]);
+    sequenceCombineInFlight = true;
+    sequenceCombinePromptId = null;
+    refreshFinalSequenceComposeControls(node);
+    try {
+        const queued = await app.queuePrompt(0, 1, { queueNodeIds });
+        if (queued === false) {
+            sequenceCombineInFlight = false;
+            sequenceCombinePromptId = null;
+            refreshFinalSequenceComposeControls(node);
+            toast("最终合成未进入队列", "warn");
+            return false;
+        }
+        toast("已提交最终合成：只使用当前段落缓存", "ok");
+        return true;
+    } catch (error) {
+        sequenceCombineInFlight = false;
+        sequenceCombinePromptId = null;
+        console.error("[AICG3D] 确认合成失败", error);
+        toast(String(error?.message || error || "最终合成提交失败"), "error");
+        return false;
+    } finally {
+        queueMicrotask(() => clearSequenceCacheOnlyTargets(cacheOnlyIds));
+    }
 }
 
 function sequenceRandomSeed() {
@@ -14728,14 +15235,19 @@ async function queueSequenceDrawOnce(node, session) {
     refreshSequenceDrawButtons(node);
     let accepted = false;
     const graph = node.graph || app.graph;
-    const root = sequenceChainRoot(node);
+    const effective = sequenceEffectiveChain(node);
+    const activeIndex = effective.nodes.indexOf(node);
+    const previousNode = activeIndex > 0 ? effective.nodes[activeIndex - 1] : null;
+    const root = effective.nodes[0] || sequenceChainRoot(node);
     sequenceDrawTargetNodes.set(String(node.id), {
         scope: sequenceGraphScope(graph),
         chainKey: String(root?.id || ""),
         index: sequenceSegmentOrdinal(node),
+        previousIndex: previousNode ? sequenceSegmentOrdinal(previousNode) : 0,
+        previousNodeId: previousNode ? String(previousNode.id) : "",
     });
     try {
-        accepted = await app.queuePrompt(0, 1, { queueNodeIds: [node.id] });
+        accepted = await app.queuePrompt(0, 1, { queueNodeIds: [String(node.id)] });
     } catch (error) {
         console.error("[AICG3D] 单段抽卡提交失败", error);
         finishSequenceDrawSession(node, `第 ${sequenceSegmentOrdinal(node)} 段抽卡提交失败`);
@@ -14810,25 +15322,28 @@ function installSequenceDrawEvents() {
             session.running = false;
             session.queued = false;
             session.promptId = null;
-            sequenceStitchPending = true;
-            sequenceStitchGraph = node.graph || app.graph;
             finishSequenceDrawSession(
                 node,
                 session.stopRequested
-                    ? "已停止抽卡，点击右上角运行只做最终合成"
-                    : `第 ${sequenceSegmentOrdinal(node)} 段抽卡完成，再次点击“抽卡时段”可继续抽卡`,
+                    ? "已停止抽卡；满意后点“确认合成”"
+                    : `第 ${sequenceSegmentOrdinal(node)} 段抽卡完成，满意后点“确认合成”`,
             );
         }
         if (sequenceCombineInFlight && (!sequenceCombinePromptId || !promptId || sequenceCombinePromptId === promptId)) {
             sequenceCombineInFlight = false;
             sequenceCombinePromptId = null;
-            sequenceStitchPending = false;
-            sequenceStitchGraph = null;
+            for (const node of app.graph?._nodes || []) refreshFinalSequenceComposeControls(node);
             toast("最终拼接完成，其他段落没有重新生成", "ok");
         }
+        scheduleNextSequenceCleanupPrompt();
     });
     const fail = (event, interrupted) => {
         const promptId = String(event?.detail?.prompt_id || "");
+        pendingSequenceCleanupPrompts.length = 0;
+        if (sequenceCleanupPromptTimer) {
+            clearTimeout(sequenceCleanupPromptTimer);
+            sequenceCleanupPromptTimer = null;
+        }
         for (const node of [...(app.graph?._nodes || [])]) {
             const session = node?.__h3DrawSession;
             if (!session?.running && !session?.queued) continue;
@@ -14838,11 +15353,17 @@ function installSequenceDrawEvents() {
         if (sequenceCombineInFlight) {
             sequenceCombineInFlight = false;
             sequenceCombinePromptId = null;
+            for (const node of app.graph?._nodes || []) refreshFinalSequenceComposeControls(node);
             toast(interrupted ? "最终合成已中断" : "最终合成失败，保留抽卡缓存，可直接重试", interrupted ? "warn" : "error");
         }
     };
     api.addEventListener("execution_error", (event) => fail(event, false));
     api.addEventListener("execution_interrupted", (event) => fail(event, true));
+}
+
+function normalizePartialExecutionTargetIds(values) {
+    if (!Array.isArray(values)) return [];
+    return [...new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))];
 }
 
 function installSequenceQueueHook() {
@@ -14853,51 +15374,32 @@ function installSequenceQueueHook() {
         let options = args[2];
         if (Array.isArray(options)) options = { queueNodeIds: options };
         else options = options && typeof options === "object" ? { ...options } : {};
-        const explicitTargets = options.queueNodeIds || options.partialExecutionTargets;
-        const graph = app.graph;
-        let cacheOnlyIds = [];
-        if (!(Array.isArray(explicitTargets) && explicitTargets.length) && sequenceStitchPending && sequenceStitchGraph === graph) {
-            const targets = sequenceCombineTargetIds(graph);
-            if (targets.length) {
-                cacheOnlyIds = targets.map((item) => String(item.node.id));
-                sequenceCacheOnlyNodes.clear();
-                sequenceCacheOnlyChainKeys.clear();
-                sequenceCacheOnlyCounts.clear();
-                for (const item of targets) {
-                    sequenceCacheOnlyNodes.add(String(item.node.id));
-                    sequenceCacheOnlyChainKeys.set(String(item.node.id), item.chainKey);
-                    sequenceCacheOnlyCounts.set(String(item.node.id), item.segmentCount);
+
+        const requestedTargets = options.queueNodeIds ?? options.partialExecutionTargets;
+        let explicitTargets = normalizePartialExecutionTargetIds(requestedTargets);
+        if (Array.isArray(requestedTargets)) {
+            if (explicitTargets.length) options.queueNodeIds = explicitTargets;
+            else delete options.queueNodeIds;
+            delete options.partialExecutionTargets;
+            args[2] = options;
+        }
+
+        if (!explicitTargets.length) {
+            const targets = sequenceCombineTargetIds(app.graph);
+            const manualTargets = targets.filter((item) => finalSequenceManualDrawEnabled(item.node));
+            if (manualTargets.length) {
+                const generationTargets = normalizePartialExecutionTargetIds(
+                    manualTargets.map((item) => item.sourceNode?.id),
+                );
+                if (generationTargets.length) {
+                    options.queueNodeIds = generationTargets;
+                    args[2] = options;
+                    explicitTargets = generationTargets;
+                    toast("手动抽卡模式：正在生成全部段落，不会自动合成；抽卡满意后点“确认合成”", "ok");
                 }
-                options.queueNodeIds = cacheOnlyIds;
-                args[2] = options;
-                sequenceCombineInFlight = true;
-                sequenceCombinePromptId = null;
-                toast("抽卡已完成，本次运行只合成缓存视频，其他段落保持不变", "ok");
             }
         }
-        try {
-            const queued = await originalQueuePrompt.apply(this, args);
-            if (cacheOnlyIds.length && queued === false) {
-                sequenceCombineInFlight = false;
-                sequenceCombinePromptId = null;
-            }
-            return queued;
-        } catch (error) {
-            if (sequenceCombineInFlight) {
-                sequenceCombineInFlight = false;
-                sequenceCombinePromptId = null;
-            }
-            throw error;
-        } finally {
-            if (cacheOnlyIds.length) {
-                queueMicrotask(() => {
-                    for (const id of cacheOnlyIds) sequenceCacheOnlyNodes.delete(id);
-                    for (const id of cacheOnlyIds) {
-                        sequenceCacheOnlyChainKeys.delete(id);
-                        sequenceCacheOnlyCounts.delete(id);
-                    }
-                });
-            }
-        }
+
+        return originalQueuePrompt.apply(this, args);
     };
 }

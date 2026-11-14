@@ -61,7 +61,7 @@ def _require_dependencies() -> None:
         raise RuntimeError(
             "Spark-TTS 缺少运行依赖："
             + "、".join(missing)
-            + "。请重启 ComfyUI 自动安装，或执行 python -m pip install "
+            + "。请在当前 ComfyUI 的 Python 环境执行 python.exe -m pip install "
             + " ".join(missing)
         )
 

@@ -1702,6 +1702,8 @@ async def optimize_prompt(request):
     request_id = ""
     try:
         payload = await request.json()
+        if not isinstance(payload, dict):
+            return web.json_response({"error": "请求内容必须是 JSON 对象"}, status=400)
         request_id = str(payload.get("request_id") or "")
         cancel_event = threading.Event()
         payload["_cancel_event"] = cancel_event
@@ -1757,7 +1759,12 @@ async def optimize_prompt(request):
 
 
 async def cancel_prompt_optimization(request):
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        return web.json_response({"error": "请求内容不是有效 JSON"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "请求内容必须是 JSON 对象"}, status=400)
     request_id = str(payload.get("request_id") or "")
     task = _ACTIVE_REQUESTS.pop(request_id, None)
     cancel_event = _ACTIVE_CANCEL_EVENTS.pop(request_id, None)

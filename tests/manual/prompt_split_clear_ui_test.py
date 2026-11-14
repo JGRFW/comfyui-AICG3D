@@ -30,8 +30,10 @@ def test_clear_button_and_global_scope_exist() -> None:
     assert 'writeWidget(node, "global_text", "")' in ui
     assert "段落连线和生成参数保持不变" in ui
     assert 'const GLOBAL_PROMPT_TOGGLE_LABEL = "显示全局提示词";' in ui
+    assert 'const GLOBAL_PROMPT_VISIBLE_WIDGET = "global_prompt_visible";' in ui
     assert "function setGlobalPromptExpanded(node, expanded" in ui
-    assert 'setGlobalPromptExpanded(node, false);' in ui
+    assert "function restoreLegacyPromptSplitValues(node, info)" in ui
+    assert "node.addWidget(\"toggle\", GLOBAL_PROMPT_TOGGLE_LABEL" not in ui
     assert "__aicg3dAutoFillTimer" not in ui
 
 
@@ -64,10 +66,12 @@ def test_global_prompt_is_optional_and_not_duplicated() -> None:
     assert compose("全局", "全局设定下的第1段剧情") == "全局\n\n全局设定下的第1段剧情"
 
 
-def test_global_output_is_appended_without_breaking_widget_order() -> None:
+def test_global_output_is_appended_and_toggle_is_first_widget() -> None:
     module = load_prompt_module()
     required = module.AICG3DPromptSegmentSplit.INPUT_TYPES()["required"]
-    assert list(required)[-1] == "global_text"
+    assert list(required)[:3] == ["global_prompt_visible", "global_text", "text"]
+    assert required["global_prompt_visible"][0] == "BOOLEAN"
+    assert required["global_prompt_visible"][1]["default"] is False
     assert required["global_text"][0] == "STRING"
     assert required["global_text"][1]["multiline"] is True
 
@@ -84,11 +88,12 @@ def test_global_output_is_appended_without_breaking_widget_order() -> None:
         max_segments=64,
         seed_start=0,
         global_text="统一古风画风，角色参考 @图片1。",
+        global_prompt_visible=False,
     )
     assert output == ("统一古风画风，角色参考 @图片1。\n\n女孩抬头看向门口。",)
 
 
-def test_repository_13_workflows_include_global_text_without_shifting_seed() -> None:
+def test_repository_13_workflows_include_top_toggle_without_shifting_values() -> None:
     import json
 
     workflow_paths = (
@@ -102,9 +107,11 @@ def test_repository_13_workflows_include_global_text_without_shifting_seed() -> 
         assert len(nodes) == 1, path
         values = nodes[0]["widgets_values"]
         named = nodes[0]["widgets_values_named"]
-        assert len(values) == 11, path
-        assert values[-2] == 0, path
-        assert values[-1] == "", path
+        assert len(values) == 12, path
+        assert values[0] is False, path
+        assert values[1] == "", path
+        assert values[-1] == 0, path
+        assert named.get("global_prompt_visible") is False, path
         assert named.get("seed_start") == 0, path
         assert named.get("global_text") == "", path
 
@@ -115,8 +122,8 @@ def main() -> None:
         test_silent_autofill_does_not_show_empty_errors,
         test_fill_button_uses_only_node_text,
         test_global_prompt_is_optional_and_not_duplicated,
-        test_global_output_is_appended_without_breaking_widget_order,
-        test_repository_13_workflows_include_global_text_without_shifting_seed,
+        test_global_output_is_appended_and_toggle_is_first_widget,
+        test_repository_13_workflows_include_top_toggle_without_shifting_values,
     )
     for test in tests:
         test()

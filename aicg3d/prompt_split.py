@@ -372,6 +372,25 @@ class AICG3DPromptSegmentSplit:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "global_prompt_visible": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "默认折叠；开启后显示全局提示词输入框，关闭时保留已填写内容。",
+                    },
+                ),
+                "global_text": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "dynamicPrompts": False,
+                        "default": "",
+                        "tooltip": (
+                            "全片共用提示词：统一画风、角色身份、摄影要求、负面约束等。"
+                            "一键填入时会拼接到每一段提示词前面；可写 @图片1、@视频1、@音频1 绑定各段素材。"
+                        ),
+                    },
+                ),
                 "text": (
                     "STRING",
                     {
@@ -442,19 +461,6 @@ class AICG3DPromptSegmentSplit:
                         ),
                     },
                 ),
-                # 新控件必须放在最后，旧工作流按位置保存的值才不会错位。
-                "global_text": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "dynamicPrompts": False,
-                        "default": "",
-                        "tooltip": (
-                            "全片共用提示词：统一画风、角色身份、摄影要求、负面约束等。"
-                            "一键填入时会拼接到每一段提示词前面；可写 @图片1、@视频1、@音频1 绑定各段素材。"
-                        ),
-                    },
-                ),
             },
         }
 
@@ -471,8 +477,15 @@ class AICG3DPromptSegmentSplit:
         max_segments=MAX_SEGMENTS,
         seed_start=0,
         global_text="",
+        global_prompt_visible=False,
     ):
-        del auto_fill, randomize_seed, seed_start, seconds_mode  # 只给界面按钮用，走线时不影响
+        del (
+            auto_fill,
+            randomize_seed,
+            seed_start,
+            seconds_mode,
+            global_prompt_visible,
+        )  # 只给界面按钮用，走线时不影响
 
         try:
             prompts, seconds = parse_prompt_text(

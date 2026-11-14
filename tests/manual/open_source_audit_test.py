@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import ast
 import json
 import sys
 import os
+from collections import Counter
 from pathlib import Path
 import tempfile
 
@@ -142,6 +145,7 @@ def test_sequence_draw_uses_cached_previous_contract() -> None:
         "draw_previous_from_cache",
         "draw_previous_scope",
         "draw_previous_chain_key",
+        "draw_previous_node_id",
         "draw_previous_index",
     ):
         assert name in optional, name
@@ -149,7 +153,11 @@ def test_sequence_draw_uses_cached_previous_contract() -> None:
     ui = (PLUGIN_ROOT / "web" / "minimax_h3_easy_ui_v4.js").read_text(encoding="utf-8")
     assert "const sequenceDrawTargetNodes = new Map()" in ui
     assert 'sequencePromptNode.inputs.previous_segment = "__aicg3d_cached_previous__"' in ui
-    assert "queueNodeIds: [node.id]" in ui
+    assert "queueNodeIds: [String(node.id)]" in ui
+    assert "function sequenceEffectiveChain(tail)" in ui
+    assert "cache_segment_nodes" in ui
+    assert "...cacheOnlyIds.flatMap((id) => sequenceNodeIdList" in ui
+    assert "scheduleNextSequenceCleanupPrompt" in ui
 
 
 def test_no_private_module_injection() -> None:
@@ -168,6 +176,173 @@ def test_jpeg_payload_is_a_valid_data_url() -> None:
     assert payload.split(",", 1)[1]
 
 
+def test_project_version_and_display_names_are_release_safe() -> None:
+    import re
+
+    import aicg3d.routes as routes
+    from aicg3d.registry import build
+
+    pyproject = (PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project_table = pyproject.split("[project]", 1)[-1]
+    match = re.search(r'(?m)^\s*version\s*=\s*["\']([^"\']+)["\']', project_table)
+    assert match is not None
+    assert routes.VERSION == match.group(1)
+
+    mapping, display = build()
+    assert set(mapping) == set(display)
+    duplicates = [name for name, count in Counter(display.values()).items() if count > 1]
+    assert not duplicates, duplicates
+
+
+def test_optional_runtime_dependencies_are_not_top_level_hard_imports() -> None:
+    def top_level_imports(path: Path) -> set[str]:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names: set[str] = set()
+        for statement in tree.body:
+            if isinstance(statement, ast.Import):
+                names.update(alias.name.split(".", 1)[0] for alias in statement.names)
+            elif isinstance(statement, ast.ImportFrom) and statement.module:
+                names.add(statement.module.split(".", 1)[0])
+        return names
+
+    nodes_imports = top_level_imports(PLUGIN_ROOT / "aicg3d_h3easy" / "nodes.py")
+    motion_imports = top_level_imports(PLUGIN_ROOT / "aicg3d_h3easy" / "character_motion.py")
+    assert "requests" not in nodes_imports
+    assert "psutil" not in nodes_imports
+    assert "psutil" not in motion_imports
+
+
+def test_sequence_helper_bodies_and_cleanup_boundaries() -> None:
+    import aicg3d_h3easy.nodes as nodes_mod
+
+    source = (PLUGIN_ROOT / "aicg3d_h3easy" / "nodes.py").read_text(encoding="utf-8")
+    assert source.count("def _sequence_fit_frame(") == 1
+
+    original_temp = nodes_mod.folder_paths.get_temp_directory
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "comfy-temp"
+            outside_root = Path(temp_dir) / "outside"
+            temp_root.mkdir()
+            outside_root.mkdir()
+            safe = temp_root / "minimax_h3_segments_safe"
+            wrong_prefix = temp_root / "unrelated_directory"
+            nested = temp_root / "nested" / "minimax_h3_segments_nested"
+            outside = outside_root / "minimax_h3_segments_outside"
+            for directory in (safe, wrong_prefix, nested, outside):
+                directory.mkdir(parents=True)
+
+            nodes_mod.folder_paths.get_temp_directory = lambda: str(temp_root)
+            nodes_mod._segment_cleanup_temp_dir(str(safe))
+            nodes_mod._segment_cleanup_temp_dir(str(wrong_prefix))
+            nodes_mod._segment_cleanup_temp_dir(str(nested))
+            nodes_mod._segment_cleanup_temp_dir(str(outside))
+
+            assert not safe.exists()
+            assert wrong_prefix.exists()
+            assert nested.exists()
+            assert outside.exists()
+
+            removable = temp_root / "AICG3D_segment_001.mp4"
+            wrong_suffix = temp_root / "AICG3D_segment_002.txt"
+            arbitrary = temp_root / "important.mp4"
+            removable.write_bytes(b"segment")
+            wrong_suffix.write_bytes(b"not a segment")
+            arbitrary.write_bytes(b"keep")
+            deleted, failed = nodes_mod._sequence_delete_files(
+                [str(removable), str(wrong_suffix), str(arbitrary)]
+            )
+            assert (deleted, failed) == (1, 0)
+            assert not removable.exists()
+            assert wrong_suffix.exists()
+            assert arbitrary.exists()
+    finally:
+        nodes_mod.folder_paths.get_temp_directory = original_temp
+
+
+def test_route_and_frontend_patches_are_idempotent() -> None:
+    from types import SimpleNamespace
+
+    from server import PromptServer
+
+    import aicg3d.routes as routes
+    import aicg3d_h3easy.nodes as nodes_mod
+    from aicg3d_h3goohai import prompt_optimizer as goohai_optimizer
+
+    class FakeRoutes:
+        def __init__(self) -> None:
+            self.items: list[tuple[str, str]] = []
+            self.handlers: dict[tuple[str, str], object] = {}
+
+        def get(self, path: str):
+            def register(handler):
+                self.items.append(("GET", path))
+                self.handlers[("GET", path)] = handler
+                return handler
+
+            return register
+
+        def post(self, path: str):
+            def register(handler):
+                self.items.append(("POST", path))
+                self.handlers[("POST", path)] = handler
+                return handler
+
+            return register
+
+    had_instance = hasattr(PromptServer, "instance")
+    original_instance = getattr(PromptServer, "instance", None)
+    original_routes_registered = routes._REGISTERED
+    original_optimizer_registered = getattr(nodes_mod._register_prompt_optimizer_route, "_registered", False)
+    original_goohai_registered = goohai_optimizer._ROUTES_REGISTERED
+    fake_routes = FakeRoutes()
+    try:
+        PromptServer.instance = SimpleNamespace(routes=fake_routes)
+        routes._REGISTERED = False
+        nodes_mod._register_prompt_optimizer_route._registered = False
+        goohai_optimizer._ROUTES_REGISTERED = False
+
+        assert routes.register_routes() is True
+        core_route_count = len(fake_routes.items)
+        assert core_route_count > 0
+        assert routes.register_routes() is True
+        assert len(fake_routes.items) == core_route_count
+
+        assert nodes_mod._register_prompt_optimizer_route() is True
+        optimizer_route_count = len(fake_routes.items)
+        assert optimizer_route_count > core_route_count
+        assert nodes_mod._register_prompt_optimizer_route() is True
+        assert len(fake_routes.items) == optimizer_route_count
+
+        class MalformedJsonRequest:
+            async def json(self):
+                raise ValueError("invalid JSON")
+
+        for path in (
+            "/aicg3d/h3easy/prompt-optimize",
+            "/aicg3d/h3easy/sequence/cleanup-segments",
+        ):
+            response = asyncio.run(fake_routes.handlers[("POST", path)](MalformedJsonRequest()))
+            assert response.status == 400
+            assert "有效 JSON" in json.loads(response.body.decode("utf-8"))["error"]
+    finally:
+        if had_instance:
+            PromptServer.instance = original_instance
+        else:
+            delattr(PromptServer, "instance")
+        routes._REGISTERED = original_routes_registered
+        nodes_mod._register_prompt_optimizer_route._registered = original_optimizer_registered
+        goohai_optimizer._ROUTES_REGISTERED = original_goohai_registered
+
+    ui = (PLUGIN_ROOT / "web" / "minimax_h3_easy_ui_v4.js").read_text(encoding="utf-8")
+    integration = (PLUGIN_ROOT / "web" / "minimax_h3_integration.js").read_text(encoding="utf-8")
+    bridge = (PLUGIN_ROOT / "web" / "aicg3d_voice_bridge_v1.js").read_text(encoding="utf-8")
+    assert "if (sequenceQueueHookInstalled || typeof app.queuePrompt" in ui
+    assert "if (renderFullRunQueueHookInstalled || typeof app.queuePrompt" in ui
+    assert "if (autoOptimizerQueueInstalled || typeof app.queuePrompt" in integration
+    assert "if (globalThis[PATCH_FLAG] || typeof app.graphToPrompt" in bridge
+
+
 def main() -> None:
     tests = (
         test_node_categories_and_integration_registration,
@@ -180,6 +355,10 @@ def main() -> None:
         test_media_picker_and_nodes2_mode_guards,
         test_sequence_draw_uses_cached_previous_contract,
         test_jpeg_payload_is_a_valid_data_url,
+        test_project_version_and_display_names_are_release_safe,
+        test_optional_runtime_dependencies_are_not_top_level_hard_imports,
+        test_sequence_helper_bodies_and_cleanup_boundaries,
+        test_route_and_frontend_patches_are_idempotent,
     )
     for test in tests:
         test()

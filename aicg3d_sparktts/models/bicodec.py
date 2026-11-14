@@ -17,7 +17,6 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 from typing import Dict, Any
-from omegaconf import DictConfig
 from safetensors.torch import load_file
 
 from aicg3d_sparktts.utils.file import load_config

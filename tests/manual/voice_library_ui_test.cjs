@@ -271,8 +271,12 @@ async function main() {
         minimum: Math.max(230, report.minimum.nodeSize[1] - 110),
     };
     for (const [name, expectedHeight] of Object.entries(expectedHeights)) {
-        if (Math.abs(Number(report[name].widgetComputedHeight) - expectedHeight) > 1) {
-            throw new Error(`${name}: voice widget height is ${report[name].widgetComputedHeight}, expected ${expectedHeight}`);
+        // Classic Nodes owns widget.computedHeight internally and may reserve
+        // a fixed slot/header allowance. The visible DOM host and panel are the
+        // user-facing layout, so verify those dimensions instead of requiring
+        // Classic and Vue Nodes to expose the same internal bookkeeping value.
+        if (Math.abs(Number(report[name].panelRect?.height) - expectedHeight) > 1) {
+            throw new Error(`${name}: voice panel height is ${report[name].panelRect?.height}, expected ${expectedHeight}`);
         }
     }
     console.log("PASS Character Voice Library resize and enable switch");

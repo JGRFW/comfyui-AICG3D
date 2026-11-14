@@ -71,8 +71,15 @@ except Exception:
         return conditioning
 
 
-import requests
-import psutil
+try:
+    import requests
+except ImportError:  # Optional: only prompt optimization API calls need requests.
+    requests = None
+
+try:
+    import psutil
+except ImportError:  # Optional: memory-aware sizing falls back to conservative defaults.
+    psutil = None
 
 try:
     from PIL import Image, ImageOps
@@ -253,12 +260,24 @@ SEGMENT_CONTEXT_FRAME_GRID = SEGMENT_CONTEXT_GUIDE_FRAME_GRID
 SEGMENT_FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
 #: Director Motion Context baseline: 22 video frames carry 40 audio ticks (~24 frames @ 24fps).
 SEGMENT_MOTION_CONTEXT_AUDIO_FRAMES = 24
-# The validated H3 Motion Context latent-taper recipe.  These values are
-# intentionally internal: context noise is applied only when a segment has a
-# visual reference, so ordinary text-only continuation remains untouched.
-SEGMENT_CONTEXT_NOISE_ALPHA = 0.45
-SEGMENT_CONTEXT_NOISE_ALPHA_END = 0.10
+# Motion Context latent-taper recipe, kept internal: context noise only ever
+# runs when a segment has a visual reference, so text-only continuation is
+# untouched.  Both alphas default to 0.0 — read the note below before raising.
+SEGMENT_CONTEXT_NOISE_ALPHA = 0.0            # was 0.45
+SEGMENT_CONTEXT_NOISE_ALPHA_END = 0.0        # was 0.10
 SEGMENT_CONTEXT_NOISE_RAMP_STEPS = 2
+# Motion Context 的尾巴是 AddGuide 的**干净条件帧**（t=0），采样阶段不会被
+# 去噪回来：掺进去的噪声洗不掉，只能被模型原样复现。0.45 相当于把锚点重建成
+# 一张“半噪声图”，段 2 起整段观感自然和段 1 不是一套 —— 这是无 LoRA 也照样
+# 偏色的原因，所以默认关闭。
+#
+# H3 的 VAE 在 encode 时做 (mean - latents_mean) / latents_std 归一化
+# （comfy/ldm/minimax/vae.py:982），decode 再还原。所以采样空间里一个 token
+# 的通道均值代表它相对“数据集平均画面”的亮度/色偏：整块乘 (1 - alpha)
+# 不是“调暗”，而是把平均色拉向数据集均值（观感是变灰、变平、去饱和）。
+# PRESERVE_DC 打开时先扣掉每通道空间均值再掺噪声、最后加回，把这条通路堵住；
+# 将来想把 alpha 调回去（例如 0.10）做轻度纹理刷新时，请保持它为 True。
+SEGMENT_CONTEXT_NOISE_PRESERVE_DC = True
 # Keep a short, phase-aligned visual handoff at the outgoing edge. One H3
 # temporal token can cover four frames, which is too little for the first
 # generated body token to infer motion reliably from every scene.
@@ -1153,6 +1172,8 @@ def _normalize_ollama_unload_url(api_url: str) -> str:
 
 
 def _unload_ollama_model(api_url: str, model: str, timeout_seconds: float) -> None:
+    if requests is None:
+        return
     try:
         response = requests.post(
             _normalize_ollama_unload_url(api_url),
@@ -1281,6 +1302,11 @@ def _optimizer_http_json(
     unload_ollama_after_optimize: bool = True,
     max_output_tokens: int = PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS,
 ) -> str:
+    if requests is None:
+        raise RuntimeError(
+            "提示词优化缺少 requests 依赖。请在当前 ComfyUI 的 Python 环境执行："
+            "python.exe -m pip install requests"
+        )
     url = _normalize_optimizer_url(api_url, api_format, model)
     api_key = str(api_key or "").strip()
     media_parts = list(media_parts or [])
@@ -2702,7 +2728,18 @@ def _register_prompt_optimizer_route() -> bool:
     async def _prompt_optimizer_settings_post(request):
         try:
             payload = await request.json()
-            incoming = dict(payload) if isinstance(payload, dict) else {}
+        except (TypeError, ValueError):
+            return web.json_response(
+                {"ok": False, "error": "请求内容不是有效 JSON"},
+                status=400,
+            )
+        if not isinstance(payload, dict):
+            return web.json_response(
+                {"ok": False, "error": "请求内容必须是 JSON 对象"},
+                status=400,
+            )
+        try:
+            incoming = dict(payload)
             current = _read_prompt_optimizer_config()
             if incoming.pop("keep_api_key", False) and not str(incoming.get("api_key") or "").strip():
                 incoming["api_key"] = current.get("api_key", "")
@@ -2734,6 +2771,17 @@ def _register_prompt_optimizer_route() -> bool:
     async def _prompt_optimize(request):
         try:
             payload = await request.json()
+        except (TypeError, ValueError):
+            return web.json_response(
+                {"ok": False, "error": "请求内容不是有效 JSON"},
+                status=400,
+            )
+        if not isinstance(payload, dict):
+            return web.json_response(
+                {"ok": False, "error": "请求内容必须是 JSON 对象"},
+                status=400,
+            )
+        try:
             prompt = str(payload.get("prompt") or "")
             settings = _read_prompt_optimizer_config()
             api_key = str(settings.get("api_key") or "")
@@ -2868,6 +2916,37 @@ def _register_prompt_optimizer_route() -> bool:
                     retry=retry_segment_format,
                 )
             return web.json_response({"ok": True, "prompt": result})
+        except Exception as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+    @routes.post("/aicg3d/h3easy/sequence/cleanup-segments")
+    async def _sequence_cleanup_segments(request):
+        try:
+            payload = await request.json()
+        except (TypeError, ValueError):
+            return web.json_response(
+                {"ok": False, "error": "请求内容不是有效 JSON"},
+                status=400,
+            )
+        if not isinstance(payload, dict):
+            return web.json_response(
+                {"ok": False, "error": "请求内容必须是 JSON 对象"},
+                status=400,
+            )
+        try:
+            token = str((payload or {}).get("token") or "").strip()
+            paths = _sequence_take_cleanup_token(token)
+            if paths is None:
+                return web.json_response(
+                    {"ok": False, "error": "清理请求已失效，或分段视频已经被处理"},
+                    status=404,
+                )
+            deleted, failed = _sequence_delete_files(paths)
+            return web.json_response({
+                "ok": not failed,
+                "deleted": deleted,
+                "failed": failed,
+            })
         except Exception as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
@@ -5577,16 +5656,22 @@ def _segment_apply_context_noise(
     context_frames: int,
     seed: int,
 ) -> torch.Tensor:
-    """Apply the validated latent context-noise taper to a video tail.
+    """Apply the latent context-noise taper to a video tail, if it is enabled.
 
     The previous segment remains the source of the Motion Context keyframes,
-    but its final context tokens receive a deterministic Gaussian perturbation.
-    The perturbation is intentionally limited to the video latent tail; audio
-    is stored separately and never enters this helper.
+    but its final context tokens can optionally receive a deterministic
+    Gaussian perturbation.  The perturbation is intentionally limited to the
+    video latent tail; audio is stored separately and never enters this helper.
 
-    The taper is the H3 Context Noise recipe: ``0.45`` for the older context
-    steps, linearly released to ``0.10`` across the final two steps.  If a
-    latent is too short or is not phase-aligned for Motion Context, the
+    The taper follows the H3 Context Noise recipe: ``SEGMENT_CONTEXT_NOISE_ALPHA``
+    for the older context steps, linearly released to
+    ``SEGMENT_CONTEXT_NOISE_ALPHA_END`` across the final ``..._RAMP_STEPS``
+    steps.  Both default to ``0.0`` because these tokens are *clean* AddGuide
+    condition frames: the sampler never denoises them, so injected noise is
+    reproduced instead of repaired.  Raise them deliberately (0.10 is a
+    sensible light refresh) and keep ``SEGMENT_CONTEXT_NOISE_PRESERVE_DC`` on.
+
+    If a latent is too short or is not phase-aligned for Motion Context, the
     original latent is returned so this feature cannot introduce a new
     workflow validation failure.
     """
@@ -5633,8 +5718,35 @@ def _segment_apply_context_noise(
             device="cpu",
             dtype=torch.float32,
         ).mul_(latent_scale).to(device=target.device, dtype=target.dtype)
-        result[:, :, tail_start + index] = target * (1.0 - amount) + noise * amount
+        if SEGMENT_CONTEXT_NOISE_PRESERVE_DC:
+            # 保直流：每通道先减空间均值、混完再加回，锚点的平均色/亮度
+            # 不会被拉向数据集均值（alpha <= 0 时整段直接跳过，不改变任何值）。
+            dc = target.mean(dim=(-2, -1), keepdim=True)
+            mixed = (target - dc) * (1.0 - amount) + noise * amount + dc
+        else:
+            mixed = target * (1.0 - amount) + noise * amount
+        result[:, :, tail_start + index] = mixed
     return result
+
+
+def _segment_prepare_motion_context_guide(
+    latent: torch.Tensor | None,
+    context_frames: int,
+    seed: int,
+    items: list[_MediaInput] | tuple[_MediaInput, ...] | None,
+) -> torch.Tensor | None:
+    """Prepare a visual handoff without carrying LoRA texture forward forever.
+
+    Reference-conditioned continuation benefits from the previous segment's
+    motion, but an untouched tail also feeds its accumulated skin, highlight,
+    and contrast treatment into every following segment.  Apply the existing
+    validated Context Noise taper only when the current segment has an image
+    or video reference.  Text-only and audio-only continuation remains
+    deterministic and unchanged.
+    """
+    if latent is None or not _segment_has_visual_reference(items):
+        return latent
+    return _segment_apply_context_noise(latent, context_frames, seed)
 
 
 def _segment_prefix_latent(latent: torch.Tensor, token_count: int) -> torch.Tensor:
@@ -6062,8 +6174,19 @@ class _H3PCMWriter:
 
 
 def _segment_cleanup_temp_dir(path: str | None) -> None:
-    if path and os.path.isdir(path):
-        shutil.rmtree(path, ignore_errors=True)
+    if not path:
+        return
+    try:
+        candidate = os.path.realpath(os.path.abspath(path))
+        temp_root = os.path.realpath(folder_paths.get_temp_directory())
+        if candidate == temp_root or os.path.dirname(candidate) != temp_root:
+            return
+        if not os.path.basename(candidate).startswith(("minimax_h3_segments_", "aicg3d_final_hd_")):
+            return
+    except (OSError, ValueError):
+        return
+    if os.path.isdir(candidate):
+        shutil.rmtree(candidate, ignore_errors=True)
 
 
 def split_prompt_segments(text: str) -> list[str]:
@@ -9664,7 +9787,6 @@ class MiniMaxH3EasyRenderPass1(MiniMaxH3EasyRenderAdvanced):
         from aicg3d_h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             STAGE_SAMPLE,
-            STAGE_SAMPLE_SECOND,
             RenderPreviewEncoder,
             RenderProgressReporter,
         )
@@ -12861,15 +12983,9 @@ class MiniMaxH3EasySegmentDecode:
         exposure_mode = str(
             segments.plan.get("exposure_lock") if isinstance(segments.plan, Mapping) else ""
         )
-        second_pass_enabled = bool(
-            segments.plan.get("second_pass", False)
-        ) if isinstance(segments.plan, Mapping) else False
-        # In second-pass mode the next segment starts from the refined tail that
-        # was actually shown. Replacing frame zero with an extrapolated bridge
-        # would create the one-frame ghost this matcher is meant to prevent.
         seam_matcher = _SequenceSeamMatcher(
             exposure_mode == SEQUENCE_EXPOSURE_LOCK_ON,
-            allow_motion_bridge=not second_pass_enabled,
+            allow_motion_bridge=True,
         )
 
         def start_video(frame: torch.Tensor):
@@ -13456,6 +13572,191 @@ SEQUENCE_SEAM_BRIDGE_MIN_WEIGHT = 0.10
 SEQUENCE_SEAM_BRIDGE_MAX_WEIGHT = 0.45
 
 SEQUENCE_DEFAULT_FILENAME_PREFIX = "video/MiniMax_H3_Sequence"
+SEQUENCE_SEGMENT_DEFAULT_DIRECTORY = "AICG3D_H3_segments"
+SEQUENCE_SEGMENT_CLEANUP_PROMPT = "合成后提示删除"
+SEQUENCE_SEGMENT_CLEANUP_AUTO = "合成后自动删除"
+SEQUENCE_SEGMENT_CLEANUP_KEEP = "保留分段视频"
+SEQUENCE_SEGMENT_CLEANUP_CHOICES = (
+    SEQUENCE_SEGMENT_CLEANUP_PROMPT,
+    SEQUENCE_SEGMENT_CLEANUP_AUTO,
+    SEQUENCE_SEGMENT_CLEANUP_KEEP,
+)
+_SEQUENCE_SEGMENT_FILE_PREFIX = "AICG3D_segment_"
+_SEQUENCE_SEGMENT_FILE_SUFFIX = ".mp4"
+
+
+def _sequence_segment_output_directory(raw_directory: Any = "") -> str:
+    """Resolve a user path without restricting it to ComfyUI's output tree."""
+    raw = str(raw_directory or "").strip()
+    output_root = os.path.abspath(folder_paths.get_output_directory())
+    if not raw:
+        resolved = os.path.join(output_root, SEQUENCE_SEGMENT_DEFAULT_DIRECTORY)
+    else:
+        resolved = os.path.expandvars(os.path.expanduser(raw))
+        if not os.path.isabs(resolved):
+            resolved = os.path.join(output_root, resolved)
+    return os.path.realpath(os.path.abspath(resolved))
+
+
+def _ensure_sequence_segment_output_directory(raw_directory: Any = "") -> str:
+    directory = _sequence_segment_output_directory(raw_directory)
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f"无法创建分段视频保存目录「{directory}」：{exc}") from exc
+    if not os.path.isdir(directory):
+        raise ValueError(f"分段视频保存路径不是文件夹：{directory}")
+    return directory
+
+
+_SEQUENCE_SEGMENT_FILES_LOCK = threading.RLock()
+_SEQUENCE_SEGMENT_FILES: dict[tuple[str, str], OrderedDict[int, str]] = {}
+_SEQUENCE_CLEANUP_TOKENS: OrderedDict[str, list[str]] = OrderedDict()
+_SEQUENCE_CLEANUP_TOKEN_LIMIT = 32
+
+
+def _sequence_track_segment_file(
+    scope: str,
+    chain_key: str,
+    index: int,
+    path: str,
+) -> str | None:
+    """Remember this run's exact file and remove an older redraw of the same slot."""
+    key = (str(scope or "workflow:unknown"), str(chain_key or "chain:unknown"))
+    normalized = os.path.realpath(os.path.abspath(str(path)))
+    replaced = None
+    with _SEQUENCE_SEGMENT_FILES_LOCK:
+        files = _SEQUENCE_SEGMENT_FILES.setdefault(key, OrderedDict())
+        replaced = files.get(int(index))
+        files[int(index)] = normalized
+    if replaced and os.path.abspath(replaced) != os.path.abspath(normalized):
+        _sequence_delete_files([replaced])
+    return replaced
+
+
+def _sequence_tracked_segment_files(
+    scope: str,
+    chain_key: str,
+    limit: int = 0,
+    segment_indices: list[int] | tuple[int, ...] | None = None,
+) -> list[str]:
+    key = (str(scope or "workflow:unknown"), str(chain_key or "chain:unknown"))
+    with _SEQUENCE_SEGMENT_FILES_LOCK:
+        files = list(_SEQUENCE_SEGMENT_FILES.get(key, {}).items())
+    requested = {
+        int(index)
+        for index in (segment_indices or ())
+        if str(index).strip()
+    }
+    return [
+        path for index, path in sorted(files, key=lambda item: item[0])
+        if (
+            int(index) in requested
+            if requested
+            else int(limit or 0) <= 0 or int(index) <= int(limit)
+        )
+    ]
+
+
+def _sequence_delete_files(paths: list[str]) -> tuple[int, int]:
+    """Delete only exact segment files previously recorded by this plugin."""
+    deleted = 0
+    failed = 0
+    for path in paths:
+        if not path:
+            continue
+        try:
+            original = os.path.abspath(str(path))
+            normalized = os.path.realpath(os.path.abspath(str(path)))
+        except (OSError, ValueError):
+            continue
+        filename = os.path.basename(normalized)
+        if (
+            os.path.islink(original)
+            or not filename.startswith(_SEQUENCE_SEGMENT_FILE_PREFIX)
+            or not filename.lower().endswith(_SEQUENCE_SEGMENT_FILE_SUFFIX)
+            or not os.path.isfile(normalized)
+        ):
+            continue
+        try:
+            os.remove(normalized)
+            deleted += 1
+        except OSError as exc:
+            failed += 1
+            print(f"[MiniMax H3 Aicg] 分段视频删除失败（{normalized}）：{exc}")
+    return deleted, failed
+
+
+def _sequence_register_cleanup_token(paths: list[str]) -> str:
+    token = base64.urlsafe_b64encode(os.urandom(24)).decode("ascii").rstrip("=")
+    normalized = []
+    for path in paths:
+        if not path:
+            continue
+        candidate = os.path.realpath(os.path.abspath(str(path)))
+        filename = os.path.basename(candidate)
+        if (
+            filename.startswith(_SEQUENCE_SEGMENT_FILE_PREFIX)
+            and filename.lower().endswith(_SEQUENCE_SEGMENT_FILE_SUFFIX)
+        ):
+            normalized.append(candidate)
+    with _SEQUENCE_SEGMENT_FILES_LOCK:
+        _SEQUENCE_CLEANUP_TOKENS[token] = normalized
+        _SEQUENCE_CLEANUP_TOKENS.move_to_end(token)
+        while len(_SEQUENCE_CLEANUP_TOKENS) > _SEQUENCE_CLEANUP_TOKEN_LIMIT:
+            _SEQUENCE_CLEANUP_TOKENS.popitem(last=False)
+    return token
+
+
+def _sequence_take_cleanup_token(token: str) -> list[str] | None:
+    if not token:
+        return None
+    with _SEQUENCE_SEGMENT_FILES_LOCK:
+        return _SEQUENCE_CLEANUP_TOKENS.pop(str(token), None)
+
+
+def _sequence_finalize_segment_files(
+    scope: str,
+    chain_key: str,
+    policy: str,
+    segment_count: int = 0,
+    segment_indices: list[int] | tuple[int, ...] | None = None,
+) -> dict[str, Any]:
+    """Apply the selected cleanup policy after a successful final composition."""
+    files = _sequence_tracked_segment_files(
+        scope,
+        chain_key,
+        segment_count,
+        segment_indices,
+    )
+    directories = sorted({os.path.dirname(path) for path in files})
+    cleanup_policy = str(policy or SEQUENCE_SEGMENT_CLEANUP_PROMPT)
+    if cleanup_policy == SEQUENCE_SEGMENT_CLEANUP_AUTO:
+        deleted, failed = _sequence_delete_files(files)
+        print(
+            f"[MiniMax H3 Aicg] 分段视频自动清理：已删除 {deleted} 个"
+            f"{'，失败 ' + str(failed) + ' 个' if failed else ''}。"
+        )
+        return {
+            "policy": cleanup_policy,
+            "count": len(files),
+            "deleted": deleted,
+            "failed": failed,
+            "directories": directories,
+        }
+    if cleanup_policy == SEQUENCE_SEGMENT_CLEANUP_PROMPT and files:
+        token = _sequence_register_cleanup_token(files)
+        return {
+            "policy": cleanup_policy,
+            "count": len(files),
+            "directories": directories,
+            "token": token,
+        }
+    return {
+        "policy": cleanup_policy,
+        "count": len(files),
+        "directories": directories,
+    }
 
 
 def _sequence_handoff_context_frames(frames: Any) -> int:
@@ -13605,20 +13906,6 @@ def _sequence_stabilize_tail_exposure(frames: torch.Tensor) -> tuple[torch.Tenso
         ).clamp_(0.0, 1.0).to(dtype=frames.dtype)
         corrected = max(corrected, abs(float(delta)))
     return frames, float(corrected)
-
-
-    """Resize one HWC guide frame without depending on the main H3 helpers."""
-    if frame.dim() == 4:
-        frame = frame[0]
-    if tuple(frame.shape[:2]) == (int(height), int(width)):
-        return frame
-    resized = torch.nn.functional.interpolate(
-        frame.permute(2, 0, 1).unsqueeze(0).float(),
-        size=(int(height), int(width)),
-        mode="bilinear",
-        align_corners=False,
-    )[0]
-    return resized.permute(1, 2, 0).to(dtype=frame.dtype)
 
 
 def _sequence_box_blur(frames: torch.Tensor, kernel: int) -> torch.Tensor:
@@ -14313,14 +14600,9 @@ class MiniMaxH3SequenceConfig:
     #: 可选的外部采样器 / sigma 调度；连接后优先于 sampler_name / scheduler / steps。
     sampler: Any = None
     sigmas: Any = None
-    #: 每段一采完成后的 V2 高清二采；跨段衔接仍继承一采原生尾帧。
-    second_pass: bool = False
-    second_pass_model: str = "none"
-    second_pass_scale: float = 1.5
-    second_pass_steps: int = 4
-    second_pass_denoise: float = 0.35
-    second_pass_sampler_name: str = "euler"
-    second_pass_scheduler: str = "beta"
+    #: 每段完成后的独立 MP4 保存目录；最终拼接仍使用内存里的采样结果。
+    segment_output_directory: str = ""
+    segment_cleanup_policy: str = SEQUENCE_SEGMENT_CLEANUP_PROMPT
 
 
 @dataclass(frozen=True)
@@ -14343,8 +14625,93 @@ class MiniMaxH3SequenceSegment:
     cache_scope: str = ""
     chain_key: str = ""
     node_id: str = ""
-    #: Optional first-pass sample retained only while the first-pass VIDEO output is requested.
-    first_pass_sample: MiniMaxH3SegmentSample | None = None
+
+
+def _sequence_normalize_int_list(value: Any, *, label: str) -> list[int]:
+    """Parse a hidden frontend list while rejecting duplicate or unordered slots."""
+    if value is None or value == "":
+        return []
+    parsed: Any = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = [part.strip() for part in text.split(",") if part.strip()]
+    if not isinstance(parsed, (list, tuple)):
+        parsed = [parsed]
+    result: list[int] = []
+    for item in parsed:
+        if isinstance(item, bool):
+            raise ValueError(f"{label} 含有无效布尔值")
+        try:
+            number = int(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{label} 含有无效数字：{item!r}") from exc
+        if number <= 0:
+            raise ValueError(f"{label} 只能使用大于 0 的段落序号")
+        result.append(number)
+    if len(set(result)) != len(result):
+        raise ValueError(f"{label} 不能包含重复段落：{result}")
+    if result != sorted(result):
+        raise ValueError(f"{label} 必须按段落顺序排列：{result}")
+    return result
+
+
+def _sequence_normalize_node_ids(value: Any) -> list[str]:
+    if value is None or value == "":
+        return []
+    parsed: Any = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = [part.strip() for part in text.split(",") if part.strip()]
+    if not isinstance(parsed, (list, tuple)):
+        parsed = [parsed]
+    result: list[str] = []
+    for item in parsed:
+        node_id = str(item or "").strip()
+        if not node_id:
+            raise ValueError("抽卡缓存段落节点列表中包含空值")
+        result.append(node_id)
+    if len(set(result)) != len(result):
+        raise ValueError(f"抽卡缓存段落节点列表不能重复：{result}")
+    return result
+
+
+def _sequence_validate_chain_indices(
+    chain: list[MiniMaxH3SequenceSegment],
+    *,
+    expected_indices: list[int] | tuple[int, ...] | None = None,
+    label: str = "「视频段落」链",
+) -> list[int]:
+    actual = [int(item.index) for item in chain]
+    if any(index <= 0 for index in actual):
+        raise ValueError(f"{label}包含无效段落序号：{actual}")
+    if len(set(actual)) != len(actual):
+        raise ValueError(f"{label}包含重复段落序号：{actual}")
+    if actual != sorted(actual):
+        raise ValueError(f"{label}顺序错误，应按段落序号递增：{actual}")
+    expected = list(expected_indices or ())
+    if expected and actual != expected:
+        missing = [index for index in expected if index not in actual]
+        unexpected = [index for index in actual if index not in expected]
+        details = []
+        if missing:
+            details.append(f"缺少 {missing}")
+        if unexpected:
+            details.append(f"多出 {unexpected}")
+        raise ValueError(
+            f"{label}与当前有效段落不一致：期望 {expected}，实际 {actual}"
+            f"{'；' + '，'.join(details) if details else ''}"
+        )
+    return actual
 
 
 def _sequence_collect_chain(final_segment: Any) -> list[MiniMaxH3SequenceSegment]:
@@ -14364,11 +14731,7 @@ def _sequence_collect_chain(final_segment: Any) -> list[MiniMaxH3SequenceSegment
         chain.append(cursor)
         cursor = cursor.previous
     chain.reverse()
-    for expected, item in enumerate(chain, start=1):
-        if int(item.index) != expected:
-            raise ValueError(
-                f"「视频段落」链不连续：第 {expected} 段收到的是第 {item.index} 段"
-            )
+    _sequence_validate_chain_indices(chain)
     return chain
 
 
@@ -14428,27 +14791,103 @@ def _sequence_cache_read(scope: str, chain_key: str, index: int) -> MiniMaxH3Seq
         return _SEQUENCE_LIVE_CACHE.get((str(scope), str(chain_key), int(index)))
 
 
-def _sequence_cache_read_chain(
-    scope: str, chain_key: str, expected_count: int = 0,
-) -> list[MiniMaxH3SequenceSegment]:
-    """读取一条已完整生成的段落链；expected_count 可屏蔽断链前的旧尾段。"""
+def _sequence_cache_read_by_node(
+    scope: str,
+    chain_key: str,
+    node_id: str,
+) -> MiniMaxH3SequenceSegment | None:
+    requested = str(node_id or "").strip()
+    if not requested:
+        return None
     with _SEQUENCE_LIVE_CACHE_LOCK:
+        matches = [
+            value
+            for key, value in _SEQUENCE_LIVE_CACHE.items()
+            if key[0] == str(scope)
+            and key[1] == str(chain_key)
+            and str(getattr(value, "node_id", "") or "").strip() == requested
+        ]
+    return matches[-1] if matches else None
+
+
+def _sequence_cache_read_chain(
+    scope: str,
+    chain_key: str,
+    expected_count: int = 0,
+    segment_indices: Any = None,
+    segment_node_ids: Any = None,
+) -> list[MiniMaxH3SequenceSegment]:
+    """读取当前有效段落；节点 ID 优先于序号，兼容绕过中间段后的缓存。"""
+    requested_indices = _sequence_normalize_int_list(
+        segment_indices,
+        label="抽卡缓存段落序号",
+    )
+    requested_nodes = _sequence_normalize_node_ids(segment_node_ids)
+    with _SEQUENCE_LIVE_CACHE_LOCK:
+        scoped = [
+            (key[2], value)
+            for key, value in _SEQUENCE_LIVE_CACHE.items()
+            if key[0] == str(scope) and key[1] == str(chain_key)
+        ]
+    if requested_nodes:
+        by_node: dict[str, MiniMaxH3SequenceSegment] = {}
+        for _index, value in scoped:
+            node_id = str(getattr(value, "node_id", "") or "").strip()
+            if node_id:
+                by_node[node_id] = value
+        missing_nodes = [node_id for node_id in requested_nodes if node_id not in by_node]
+        if missing_nodes:
+            raise ValueError(
+                "抽卡缓存缺少这些有效段落节点："
+                f"{'、'.join(missing_nodes)}。请先完整运行一次当前有效段落链。"
+            )
+        chain = [by_node[node_id] for node_id in requested_nodes]
+    elif requested_indices:
+        by_index = {int(index): value for index, value in scoped}
+        missing_indices = [
+            index for index in requested_indices if index not in by_index
+        ]
+        if missing_indices:
+            raise ValueError(
+                "抽卡缓存缺少这些段落："
+                f"{'、'.join(str(index) for index in missing_indices)}。"
+                "请先完整运行一次当前有效段落链。"
+            )
+        chain = [by_index[index] for index in requested_indices]
+    else:
         entries = sorted(
             (
-                (key[2], value)
-                for key, value in _SEQUENCE_LIVE_CACHE.items()
-                if key[0] == str(scope) and key[1] == str(chain_key)
-                and (int(expected_count or 0) <= 0 or key[2] <= int(expected_count))
+                (index, value)
+                for index, value in scoped
+                if int(expected_count or 0) <= 0 or index <= int(expected_count)
             ),
             key=lambda item: item[0],
         )
-    if not entries:
+        chain = [value for _index, value in entries]
+    if not chain:
         raise ValueError("没有找到这条段落链的抽卡缓存，请先完整运行一次，或直接连接最后一段的 segment")
-    chain = [value for _index, value in entries]
-    expected = list(range(1, len(chain) + 1))
-    actual = [int(item.index) for item in chain]
-    if actual != expected:
-        raise ValueError(f"抽卡缓存段落不连续：期望 {expected}，实际 {actual}")
+    if requested_nodes:
+        # Bypassing a leading paragraph renumbers the effective runtime chain
+        # (for example UI slots 2,3,4 execute as runtime slots 1,2,3). Node IDs
+        # are the stable identity; UI slot numbers are only a legacy fallback.
+        _sequence_validate_chain_indices(chain, label="抽卡缓存段落链")
+    elif requested_indices:
+        _sequence_validate_chain_indices(
+            chain,
+            expected_indices=requested_indices,
+            label="抽卡缓存段落链",
+        )
+    else:
+        expected = list(range(1, len(chain) + 1))
+        _sequence_validate_chain_indices(
+            chain,
+            expected_indices=expected,
+            label="抽卡缓存段落链",
+        )
+    if int(expected_count or 0) > 0 and len(chain) != int(expected_count):
+        raise ValueError(
+            f"抽卡缓存只找到 {len(chain)} 段，当前工作流需要 {int(expected_count)} 段完整结果"
+        )
     return chain
 
 
@@ -14486,10 +14925,6 @@ class MiniMaxH3EasySequenceGlobal:
 
     @classmethod
     def INPUT_TYPES(cls):
-        second_pass_models = MiniMaxH3EasyRenderPass2._upscale_model_choices()
-        second_pass_default_model = _resolve_h3_secondary_upscaler(None)
-        if second_pass_default_model not in second_pass_models:
-            second_pass_default_model = second_pass_models[0]
         return {
             "required": {
                 "h3_bundle": ("MINIMAX_H3_BUNDLE",),
@@ -14651,67 +15086,27 @@ class MiniMaxH3EasySequenceGlobal:
                         ),
                     },
                 ),
-                # 末尾追加，旧工作流的全局设置控件位置不变。
-                "second_pass": (
-                    "BOOLEAN",
+                "segment_output_directory": (
+                    "STRING",
                     {
-                        "default": False,
+                        "default": "",
+                        "multiline": False,
                         "tooltip": (
-                            "开启后每一段先完整一采，再用 V2 Latent 放大器提升到 1.5 倍，"
-                            "保持音频 latent 不变并执行 4 步、0.35 降噪的第二次采样。"
-                            "二采只提升本段最终画面，跨段衔接始终使用一采原生尾帧，避免高清尾帧反复缩放产生接缝模糊。"
+                            "每一段完成后，把可查看的独立 MP4 保存到这里。留空 = "
+                            "ComfyUI/output/AICG3D_H3_segments；可填绝对路径，例如 "
+                            "D:\\AICG3D\\分段缓存。最终合成仍使用内存中的高质量段落，不会拿这些预览文件重拼。"
                         ),
                     },
                 ),
-                "second_pass_model": (
-                    second_pass_models,
+                "segment_cleanup_policy": (
+                    list(SEQUENCE_SEGMENT_CLEANUP_CHOICES),
                     {
-                        "default": second_pass_default_model,
-                        "tooltip": "二采使用的 H3 Latent 放大器；优先 V2，关闭二采时不会加载。",
-                    },
-                ),
-                "second_pass_scale": (
-                    "FLOAT",
-                    {
-                        "default": 1.5,
-                        "min": 1.0,
-                        "max": 4.0,
-                        "step": 0.05,
-                        "tooltip": "二采放大倍数；1.5 表示宽高各放大 1.5 倍。",
-                    },
-                ),
-                "second_pass_sampler_name": (
-                    comfy.samplers.SAMPLER_NAMES,
-                    {
-                        "default": "euler",
-                        "tooltip": "二采独立采样器；不影响一采采样器。",
-                    },
-                ),
-                "second_pass_scheduler": (
-                    comfy.samplers.SCHEDULER_NAMES,
-                    {
-                        "default": "beta",
-                        "tooltip": "二采独立调度器；不影响一采调度器。",
-                    },
-                ),
-                "second_pass_steps": (
-                    "INT",
-                    {
-                        "default": 4,
-                        "min": 1,
-                        "max": 20,
-                        "step": 1,
-                        "tooltip": "二采扩散步数；建议 4～6 步。",
-                    },
-                ),
-                "second_pass_denoise": (
-                    "FLOAT",
-                    {
-                        "default": 0.35,
-                        "min": 0.05,
-                        "max": 0.60,
-                        "step": 0.01,
-                        "tooltip": "二采重绘强度；建议 0.20～0.35，越低越保留一采画面。",
+                        "default": SEQUENCE_SEGMENT_CLEANUP_PROMPT,
+                        "tooltip": (
+                            "最终视频成功合成后如何处理本次生成的分段 MP4："
+                            "提示删除 = 弹窗询问；自动删除 = 成功合成后直接删；"
+                            "保留分段视频 = 不删除。只会删除插件记录的本条段落链文件，不会清空整个目录。"
+                        ),
                     },
                 ),
             },
@@ -14746,9 +15141,8 @@ class MiniMaxH3EasySequenceGlobal:
             "audio_mode", "vram_tier",
             "exposure_lock",
             "keep_full",
-            "second_pass", "second_pass_model", "second_pass_scale",
-            "second_pass_sampler_name", "second_pass_scheduler",
-            "second_pass_steps", "second_pass_denoise",
+            "segment_output_directory",
+            "segment_cleanup_policy",
             "sampler", "sigmas",
         )
         return "|".join(str(kwargs.get(key, "")) for key in keys)
@@ -14775,13 +15169,8 @@ class MiniMaxH3EasySequenceGlobal:
         vram_tier=VRAM_TIER_AUTO,
         exposure_lock=SEQUENCE_EXPOSURE_LOCK_ON,
         keep_full=True,
-        second_pass=False,
-        second_pass_model="none",
-        second_pass_scale=1.5,
-        second_pass_sampler_name="euler",
-        second_pass_scheduler="beta",
-        second_pass_steps=4,
-        second_pass_denoise=0.35,
+        segment_output_directory="",
+        segment_cleanup_policy=SEQUENCE_SEGMENT_CLEANUP_PROMPT,
         model=None,
         sampler=None,
         sigmas=None,
@@ -14807,12 +15196,14 @@ class MiniMaxH3EasySequenceGlobal:
             SEQUENCE_HANDOFF_MIN_FRAMES,
             min(SEQUENCE_HANDOFF_MAX_FRAMES, int(handoff_frames or SEQUENCE_HANDOFF_DEFAULT_FRAMES)),
         )
-        secondary_model = _resolve_h3_secondary_upscaler(second_pass_model)
-        if bool(second_pass) and _is_none_model(secondary_model):
-            raise ValueError(
-                "已开启二采高清放大，但没有找到 H3 Latent 放大器。请把 V2 模型放到 "
-                "ComfyUI/models/latent_upscale_models 后再运行。"
-            )
+        resolved_segment_directory = _ensure_sequence_segment_output_directory(
+            segment_output_directory
+        )
+        resolved_cleanup_policy = (
+            str(segment_cleanup_policy or SEQUENCE_SEGMENT_CLEANUP_PROMPT)
+            if str(segment_cleanup_policy or "").strip() in SEQUENCE_SEGMENT_CLEANUP_CHOICES
+            else SEQUENCE_SEGMENT_CLEANUP_PROMPT
+        )
         config = MiniMaxH3SequenceConfig(
             bundle=h3_bundle,
             resolution=str(resolution),
@@ -14839,16 +15230,11 @@ class MiniMaxH3EasySequenceGlobal:
                 else SEQUENCE_EXPOSURE_LOCK_ON
             ),
             keep_full=bool(keep_full),
-            second_pass=bool(second_pass),
-            second_pass_model=secondary_model,
-            second_pass_scale=max(1.0, min(4.0, float(second_pass_scale or 1.5))),
-            second_pass_steps=max(1, min(20, int(second_pass_steps or 4))),
-            second_pass_denoise=max(0.05, min(0.60, float(second_pass_denoise or 0.35))),
-            second_pass_sampler_name=str(second_pass_sampler_name or "euler"),
-            second_pass_scheduler=str(second_pass_scheduler or "beta"),
             model=model,
             sampler=sampler,
             sigmas=sigmas,
+            segment_output_directory=resolved_segment_directory,
+            segment_cleanup_policy=resolved_cleanup_policy,
         )
         print(
             f"[MiniMax H3 Aicg] 顺序生成全局设置：{config.width}x{config.height}"
@@ -14858,10 +15244,8 @@ class MiniMaxH3EasySequenceGlobal:
             f"显存档位「{vram_profile.label}」（{vram_profile.summary()}）。"
             f"接缝处理「{config.exposure_lock}」；"
             f"保完整「{'开' if config.keep_full else '关'}」；"
-            f"二采高清「{'开' if config.second_pass else '关'}」"
-            f"（{config.second_pass_model} / {config.second_pass_scale:g}x / "
-            f"{config.second_pass_sampler_name}+{config.second_pass_scheduler} / "
-            f"{config.second_pass_steps}步 / {config.second_pass_denoise:.2f}）；"
+            f"分段保存「{config.segment_output_directory}」；"
+            f"分段清理「{config.segment_cleanup_policy}」；"
             f"外部采样器「{'已连接' if config.sampler is not None else '未连接'}」；"
             f"外部 Sigmas「{'已连接' if config.sigmas is not None else '未连接'}」。"
         )
@@ -14911,7 +15295,7 @@ class MiniMaxH3EasySequenceSegment:
         "全局设置顺着 previous_segment 继承；每段可以用节点内嵌资源库选择独立素材，"
         "没有独立素材时沿用上一段，也可以继续外接资源库 Bundle。"
         "需要固定本段画面或声音时，可连接 guide_image / guide_audio 并设置 guide_frame_idx。"
-        "一采与二采完成后会直接在节点内分阶段显示视频预览，不提供独立视频输出口。"
+        "本段采样与解码完成后会直接在节点内显示视频预览，不提供独立视频输出口。"
     )
 
     @classmethod
@@ -14954,6 +15338,7 @@ class MiniMaxH3EasySequenceSegment:
         optional["draw_previous_from_cache"] = ("BOOLEAN", {"default": False, "hidden": True})
         optional["draw_previous_scope"] = ("STRING", {"default": "", "hidden": True})
         optional["draw_previous_chain_key"] = ("STRING", {"default": "", "hidden": True})
+        optional["draw_previous_node_id"] = ("STRING", {"default": "", "hidden": True})
         optional["draw_previous_index"] = (
             "INT",
             {"default": 0, "min": 0, "max": 100000, "hidden": True},
@@ -15041,8 +15426,7 @@ class MiniMaxH3EasySequenceSegment:
         return state
 
     @staticmethod
-    def _temporary_video_preview(video: Any, prefix: str) -> dict[str, Any]:
-        width, height = video.get_dimensions()
+    def _temporary_video_preview_from_file(source: str, prefix: str, width: int, height: int) -> dict[str, Any]:
         folder, name, counter, subfolder, _ = folder_paths.get_save_image_path(
             str(prefix or "AICG3D_video_preview"),
             folder_paths.get_temp_directory(),
@@ -15051,13 +15435,57 @@ class MiniMaxH3EasySequenceSegment:
         )
         os.makedirs(folder, exist_ok=True)
         filename = f"{name}_{counter:05}_.mp4"
-        video.save_to(
-            os.path.join(folder, filename),
-            format=Types.VideoContainer.MP4,
-            codec="auto",
-            preset="ultrafast",
-        )
+        target = os.path.join(folder, filename)
+        shutil.copyfile(source, target)
         return {"filename": filename, "subfolder": subfolder, "type": "temp"}
+
+    @classmethod
+    def _save_segment_video(
+        cls,
+        video: Any,
+        config: MiniMaxH3SequenceConfig,
+        index: int,
+        cache_scope: str,
+        chain_key: str,
+    ) -> tuple[dict[str, Any], str]:
+        """Encode once into the selected folder, then copy a lightweight /view preview."""
+        width, height = video.get_dimensions()
+        directory = _ensure_sequence_segment_output_directory(
+            getattr(config, "segment_output_directory", "")
+        )
+        digest = hashlib.sha1(
+            f"{cache_scope}|{chain_key}|{index}|{time.time_ns()}".encode("utf-8")
+        ).hexdigest()[:10]
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        filename = (
+            f"{_SEQUENCE_SEGMENT_FILE_PREFIX}{int(index):04d}_{stamp}_{digest}"
+            f"{_SEQUENCE_SEGMENT_FILE_SUFFIX}"
+        )
+        persistent_path = os.path.join(directory, filename)
+        try:
+            video.save_to(
+                persistent_path,
+                format=Types.VideoContainer.MP4,
+                codec="auto",
+                preset="ultrafast",
+            )
+            _sequence_track_segment_file(cache_scope, chain_key, index, persistent_path)
+            preview = cls._temporary_video_preview_from_file(
+                persistent_path,
+                f"AICG3D_segment_{index:03d}_final",
+                int(width),
+                int(height),
+            )
+        except Exception:
+            try:
+                if os.path.isfile(persistent_path):
+                    os.remove(persistent_path)
+            except OSError:
+                pass
+            raise
+        preview["persistent_path"] = persistent_path
+        preview["segment_directory"] = directory
+        return preview, persistent_path
 
     @classmethod
     def _deliver_sample_video(
@@ -15113,140 +15541,6 @@ class MiniMaxH3EasySequenceSegment:
         )
 
     @classmethod
-    def _deliver_first_pass_video(cls, config: MiniMaxH3SequenceConfig, result: "MiniMaxH3SequenceSegment"):
-        if not isinstance(result.first_pass_sample, MiniMaxH3SegmentSample):
-            raise RuntimeError(f"视频段落 {result.index} 没有可输出的一采画面")
-        return cls._deliver_sample_video(
-            config,
-            result.first_pass_sample,
-            int(result.index),
-            int(result.timeline_start),
-            result.source_audio,
-            "一采视频输出解码",
-        )
-
-    @classmethod
-    def _apply_sequence_second_pass(
-        cls,
-        sampled: Any,
-        conditioning: Any,
-        config: MiniMaxH3SequenceConfig,
-        model: Any,
-        seed: Any,
-        on_step: Any = None,
-        on_preview: Any = None,
-        boundary_frames: int = 0,
-        previous_second_pass_tail: torch.Tensor | None = None,
-    ):
-        """Refine this segment and return its native Pass 1 continuity tail."""
-        continuity_video, _audio = _segment_latent_streams(sampled)
-        if not config.second_pass:
-            return sampled, continuity_video
-
-        # Pass 2 is only the final picture for this segment. Keep segment
-        # continuity on the untouched Pass 1 latent grid so later segments
-        # never inherit a high-res -> low-res spatial round trip.
-        first_pass_continuity_video = continuity_video
-
-        from aicg3d_h3easy.aicg3d_sampler import AICG3DSamplerAdvanced
-
-        device = "cuda" if getattr(model.load_device, "type", "cpu") == "cuda" else "cpu"
-        # Keep the whole segment together for the learned 3D upscaler. Its
-        # temporal path contains six 5-token convolutions; splitting the hidden
-        # handoff from the visible body pads the first visible token and creates
-        # the soft opening frame seen after every join. The hidden head is
-        # replaced below with the exact previous Pass 2 tail instead.
-        upscaled_video, upscaled_audio = MiniMaxH3EasyRenderPass2._upscale_video_latent(
-            sampled,
-            config.second_pass_model,
-            config.second_pass_scale,
-            device,
-            "fp16",
-            True,
-            model,
-        )
-        boundary_tokens = (
-            int(h3.temporal_shape(max(0, int(boundary_frames)))[1])
-            if int(boundary_frames) > 0 else 0
-        )
-        lock_previous_head = False
-        if 0 < boundary_tokens < int(upscaled_video.shape[2]):
-            if isinstance(previous_second_pass_tail, torch.Tensor):
-                tail = previous_second_pass_tail.to(
-                    device=upscaled_video.device, dtype=upscaled_video.dtype,
-                )
-                if int(tail.shape[2]) >= boundary_tokens:
-                    tail = tail[:, :, -boundary_tokens:]
-                if (
-                    int(tail.shape[2]) == boundary_tokens
-                    and tuple(tail.shape[-2:]) == tuple(upscaled_video.shape[-2:])
-                ):
-                    upscaled_video = torch.cat(
-                        (tail.contiguous(), upscaled_video[:, :, boundary_tokens:]),
-                        dim=2,
-                    ).contiguous()
-                    lock_previous_head = True
-                    print(
-                        "[MiniMax H3 Aicg] 二采接缝保护：已接回上一段真实二采尾帧，"
-                        f"隐藏头 {boundary_frames} 帧 / {boundary_tokens} 个 latent token，二采不再改写接缝。"
-                    )
-                else:
-                    print(
-                        "[MiniMax H3 Aicg] 二采接缝保护已跳过：上一段二采尾帧与当前画布不一致，"
-                        f"尾帧 {tuple(tail.shape)}，当前 {tuple(upscaled_video.shape)}。"
-                    )
-        second_conditioning = _resize_keyframe_conditioning(
-            conditioning,
-            int(upscaled_video.shape[-2]),
-            int(upscaled_video.shape[-1]),
-        )
-        # The inherited handoff is hidden by delivery trimming, but it still
-        # participates in H3 temporal attention. Keep the exact previous Pass 2
-        # tail and mask it from refinement so sampling cannot introduce a new
-        # noise trajectory at the join. The visible body remains fully sampled.
-        video_mask = torch.ones(
-            (upscaled_video.shape[0], 1, upscaled_video.shape[2],
-             upscaled_video.shape[3], upscaled_video.shape[4]),
-            device=upscaled_video.device,
-            dtype=upscaled_video.dtype,
-        )
-        if lock_previous_head:
-            # The handoff head is already the exact high-resolution tail from
-            # the preceding segment. Freezing it prevents Pass 2 from applying a
-            # fresh noise trajectory to the join and keeps its pixels bit-identical.
-            video_mask[:, :, :boundary_tokens] = 0.0
-        audio_mask = torch.zeros(
-            (upscaled_audio.shape[0], 1, upscaled_audio.shape[2], upscaled_audio.shape[3]),
-            device=upscaled_audio.device,
-            dtype=upscaled_audio.dtype,
-        )
-        second_input = _segment_pack_av(
-            upscaled_video, upscaled_audio, video_mask, audio_mask,
-        )
-        (refined,) = AICG3DSamplerAdvanced().sample(
-            model,
-            second_conditioning,
-            second_input,
-            int(seed) & 0xFFFFFFFFFFFFFFFF,
-            config.second_pass_sampler_name,
-            config.second_pass_scheduler,
-            config.second_pass_steps,
-            config.second_pass_denoise,
-            sampler=config.sampler,
-            sigmas=None,
-            on_step=on_step,
-            on_preview=on_preview,
-        )
-        refined = _restore_audio_latent(refined, upscaled_audio)
-        refined_video, _refined_audio = _segment_latent_streams(refined)
-        if int(refined_video.shape[2]) != int(continuity_video.shape[2]):
-            raise RuntimeError("Pass 2 changed the segment temporal latent length")
-        # Pass 2 remains the delivered high-resolution output, but Motion Context
-        # must continue from Pass 1. Shrinking the refined tail back to the Pass 1
-        # canvas softens the next segment's handoff and first visible token.
-        return refined, first_pass_continuity_video
-
-    @classmethod
     def sample_segment(
         cls,
         sequence_config=None,
@@ -15262,6 +15556,7 @@ class MiniMaxH3EasySequenceSegment:
         draw_previous_from_cache=False,
         draw_previous_scope="",
         draw_previous_chain_key="",
+        draw_previous_node_id="",
         draw_previous_index=0,
         extra_pnginfo=None,
         unique_id=None,
@@ -15279,17 +15574,29 @@ class MiniMaxH3EasySequenceSegment:
                 raise ValueError("单段抽卡的上一段缓存标记不正确，请重新点击当前段落的“抽卡时段”")
             previous_index = int(draw_previous_index or 0)
             previous_chain_key = str(draw_previous_chain_key or "").strip()
-            if previous_index <= 0 or not previous_chain_key:
+            previous_node_id = str(draw_previous_node_id or "").strip()
+            if (previous_index <= 0 and not previous_node_id) or not previous_chain_key:
                 raise ValueError("单段抽卡缺少上一段缓存索引，请重新点击当前段落的“抽卡时段”")
             previous_scope = _sequence_runtime_scope(
                 extra_pnginfo, draw_previous_scope or sequence_scope
             )
-            previous_segment = _sequence_cache_read(
-                previous_scope, previous_chain_key, previous_index
+            previous_segment = (
+                _sequence_cache_read_by_node(
+                    previous_scope,
+                    previous_chain_key,
+                    previous_node_id,
+                )
+                if previous_node_id
+                else _sequence_cache_read(
+                    previous_scope,
+                    previous_chain_key,
+                    previous_index,
+                )
             )
             if previous_segment is None:
                 raise ValueError(
-                    f"找不到第 {previous_index} 段的可用缓存。请先完整运行一次整条段落链，"
+                    f"找不到上一有效段落（节点 {previous_node_id or previous_index}）的可用缓存。"
+                    "请先完整运行一次整条段落链，"
                     "再进行单段抽卡；重启 ComfyUI 后也需要重新完整运行一次。"
                 )
         if previous_segment is not None and not isinstance(previous_segment, MiniMaxH3SequenceSegment):
@@ -15419,14 +15726,6 @@ class MiniMaxH3EasySequenceSegment:
         state = cls._previous_state(config, previous_segment, index)
         motion_tail_latent = state["motion_tail_latent"]
         tail_frames = state["tail_frames"]
-        previous_second_pass_tail = None
-        if config.second_pass and previous_segment is not None:
-            previous_sample = previous_segment.sample
-            previous_video = previous_sample.video_latent
-            if isinstance(previous_video, torch.Tensor) and previous_video.ndim == 5:
-                previous_second_pass_tail = _segment_motion_context_tail_from_latent(
-                    previous_video, context_length,
-                )
         # 数字人模式的音频由驱动音轨整段锁定，不再叠加「上一段尾音」的上下文条件。
         audio_context_reference = None if digital_human else state["audio_reference"]
         # RGB Guide carries the visual tail; keep the matching audio tail too.
@@ -15434,7 +15733,12 @@ class MiniMaxH3EasySequenceSegment:
 
         guides: list[dict[str, Any]] = []
         if motion_tail_latent is not None and continuity_mode == CONTEXT_CONTINUITY_LATENT:
-            guide_latent = motion_tail_latent
+            guide_latent = _segment_prepare_motion_context_guide(
+                motion_tail_latent,
+                context_length,
+                int(seed),
+                items,
+            )
             guides, _covered = _segment_context_keyframes_from_latent(guide_latent, context_length)
         elif tail_frames is not None and continuity_mode == CONTEXT_CONTINUITY_GUIDE:
             guides, _covered = _segment_context_keyframes(
@@ -15496,7 +15800,6 @@ class MiniMaxH3EasySequenceSegment:
         from aicg3d_h3easy.render_progress import (
             SAMPLE_PREVIEW_ENABLED,
             STAGE_SAMPLE,
-            STAGE_SAMPLE_SECOND,
             RenderPreviewEncoder,
             RenderProgressReporter,
         )
@@ -15518,18 +15821,39 @@ class MiniMaxH3EasySequenceSegment:
                 max(int(config.preview_interval or 1), int(vram.preview_interval_min))
             )
 
+            # 段落 2 起画布前面那截是"衔接头"（上一段尾帧钉进来的），采样中几乎
+            # 不变；预览只在"正片"区间内推进，否则前几步又落在钉住区看着不动。
+            head_ratio = 0.0
+            try:
+                canvas_frames = int(head_frames) + int(delivery_frames)
+                if canvas_frames > 0 and int(head_frames) > 0:
+                    head_ratio = min(0.9, max(0.0, float(head_frames) / float(canvas_frames)))
+            except Exception:
+                head_ratio = 0.0
+
             def preview_callback(x0, step=None, total=None, *_info):
                 if not should_push(step, total):
                     return None
-                reporter.sequence_sampling_preview(preview.decode(x0), step, total)
+                # 按采样步推进预览在视频时间轴上的位置：第 1 步落在正片开头附近，
+                # 最后一步落在尾帧。这样「本段视频」卡片上的图每步都换，而不是
+                # 反复解第 0 个 latent 时刻（段落 2 起那一帧是接续锚点，几乎不变）。
+                progress = 0.0
+                try:
+                    total_steps = int(total or 0)
+                    if total_steps > 0:
+                        ratio = max(0.0, min(1.0, int(step or 0) / float(total_steps)))
+                        progress = head_ratio + (1.0 - head_ratio) * ratio
+                except Exception:
+                    progress = head_ratio
+                image = preview.decode(x0, position=progress)
+                if image is None:
+                    # 该时刻解不出来就退回原生行为（第 0 帧），别让卡片空着。
+                    image = preview.decode(x0)
+                reporter.sequence_sampling_preview(image, step, total)
                 return None
             on_preview = preview_callback
 
         want_segment_video = True
-        want_first_pass_video = True
-        first_pass_sample = None
-        first_pass_video = None
-        first_pass_preview_sent = False
         done = False
         try:
             sampling_steps = max(1, int(config.steps))
@@ -15541,8 +15865,6 @@ class MiniMaxH3EasySequenceSegment:
                     f"「{'已连接' if config.sampler is not None else '未连接'}」和外部 Sigma"
                     f"「{'已连接' if config.sigmas is not None else '未连接'}」，实际 {sampling_steps} 步。"
                 )
-            second_steps = int(config.second_pass_steps or 4) if config.second_pass else 0
-            total_steps = sampling_steps + second_steps
             reporter.begin_stage(STAGE_SAMPLE, 0.0, PASS1_SAMPLE_END, sampling_steps)
             (sampled,) = AICG3DSamplerAdvanced().sample(
                 model,
@@ -15560,66 +15882,8 @@ class MiniMaxH3EasySequenceSegment:
                 ),
                 on_preview=on_preview,
             )
-            if want_first_pass_video and config.second_pass:
-                first_video, first_audio = _segment_latent_streams(sampled)
-                try:
-                    first_pass_sample = MiniMaxH3SegmentSample(
-                        video_latent=first_video.detach().to("cpu").contiguous(),
-                        audio_latent=first_audio.detach().to("cpu").contiguous(),
-                        head_frames=head_frames,
-                        delivery_frames=delivery_frames,
-                        output_frames=delivery_frames,
-                        prompt=prompt_text,
-                        media=tuple(items),
-                        source_media=tuple(available_items),
-                        active_voice_ids=active_voice_ids,
-                        motion_context_tail_latent=None,
-                    )
-                finally:
-                    del first_video, first_audio
-            if want_first_pass_video and config.second_pass:
-                reporter.begin_decode()
-                first_pass_video = cls._deliver_sample_video(
-                    config,
-                    first_pass_sample,
-                    int(index),
-                    int(timeline_start),
-                    source_audio,
-                    "一采视频输出解码",
-                )
-                preview = cls._temporary_video_preview(
-                    first_pass_video, f"AICG3D_segment_{index:03d}_first_pass"
-                )
-                reporter.sequence_video_ready("first_pass", preview)
-                preview_path = os.path.join(
-                    folder_paths.get_temp_directory(),
-                    str(preview.get("subfolder") or ""),
-                    str(preview.get("filename") or ""),
-                )
-                first_pass_video = InputImpl.VideoFromFile(preview_path)
-                first_pass_preview_sent = True
-                print(f"[MiniMax H3 Aicg] 视频段落 {index}：一采视频已推送预览。")
-            if config.second_pass and second_steps > 0:
-                reporter.begin_stage(STAGE_SAMPLE_SECOND, PASS1_SAMPLE_END, 1.0, second_steps)
-            sampled, continuity_video_stream = cls._apply_sequence_second_pass(
-                sampled,
-                conditioning,
-                config,
-                model,
-                seed,
-                on_step=lambda done, _total: reporter.update_stage(
-                    min(int(done or 0), second_steps), second_steps
-                ),
-                on_preview=on_preview,
-                boundary_frames=head_frames,
-                previous_second_pass_tail=previous_second_pass_tail,
-            )
-            if config.second_pass:
-                print(
-                    f"[MiniMax H3 Aicg] 视频段落 {index}：V2 二采 {config.second_pass_scale:g}x，"
-                    f"{config.second_pass_steps} 步 / denoise {config.second_pass_denoise:.2f}，音频原样保留"
-                )
             video_stream, audio_stream = _segment_latent_streams(sampled)
+            continuity_video_stream = video_stream
             motion_context_tail_latent = None
             if continuity_mode == CONTEXT_CONTINUITY_LATENT:
                 # 下一段要用的尾帧 latent 先切好（CPU，几 MB），段落之间就不用再来回搬运画面。
@@ -15638,8 +15902,6 @@ class MiniMaxH3EasySequenceSegment:
                 active_voice_ids=active_voice_ids,
                 motion_context_tail_latent=motion_context_tail_latent,
             )
-            if want_first_pass_video and first_pass_sample is None:
-                first_pass_sample = sample
             del sampled, video_stream, audio_stream
             print(
                 f"[MiniMax H3 Aicg] 视频段落 {index} 完成：{float(seconds):g}s -> {delivery_frames} 帧"
@@ -15661,29 +15923,17 @@ class MiniMaxH3EasySequenceSegment:
                 cache_scope=cache_scope,
                 chain_key=chain_key,
                 node_id=node_id,
-                first_pass_sample=first_pass_sample,
             )
-            if want_first_pass_video and first_pass_video is None:
-                reporter.begin_decode()
-                first_pass_video = cls._deliver_first_pass_video(config, result)
-                if not first_pass_preview_sent:
-                    preview = cls._temporary_video_preview(
-                        first_pass_video, f"AICG3D_segment_{index:03d}_first_pass"
-                    )
-                    reporter.sequence_video_ready("first_pass", preview)
-                    preview_path = os.path.join(
-                        folder_paths.get_temp_directory(),
-                        str(preview.get("subfolder") or ""),
-                        str(preview.get("filename") or ""),
-                    )
-                    first_pass_video = InputImpl.VideoFromFile(preview_path)
-                print(f"[MiniMax H3 Aicg] 视频段落 {index}：已输出一采视频。")
             video = None
             if want_segment_video:
                 reporter.begin_decode()
                 video = cls._deliver_video(config, result)
-                preview = cls._temporary_video_preview(
-                    video, f"AICG3D_segment_{index:03d}_final"
+                preview, persistent_path = cls._save_segment_video(
+                    video,
+                    config,
+                    int(index),
+                    cache_scope,
+                    chain_key,
                 )
                 reporter.sequence_video_ready("final", preview)
                 preview_path = os.path.join(
@@ -15692,9 +15942,10 @@ class MiniMaxH3EasySequenceSegment:
                     str(preview.get("filename") or ""),
                 )
                 video = InputImpl.VideoFromFile(preview_path)
-                print(f"[MiniMax H3 Aicg] 视频段落 {index}：已输出本段视频。")
-            if result.first_pass_sample is not None:
-                result = replace(result, first_pass_sample=None)
+                print(
+                    f"[MiniMax H3 Aicg] 视频段落 {index}：已输出本段视频，"
+                    f"分段文件保存在 {persistent_path}"
+                )
             _sequence_cache_store(result)
             done = True
             return (result,)
@@ -15741,6 +15992,8 @@ class MiniMaxH3EasySequenceCombine:
                 "cache_only": ("BOOLEAN", {"default": False, "hidden": True}),
                 "cache_scope": ("STRING", {"default": "", "hidden": True}),
                 "cache_segment_count": ("INT", {"default": 0, "min": 0, "max": 100000, "hidden": True}),
+                "cache_segment_indices": ("STRING", {"default": "", "hidden": True}),
+                "cache_segment_nodes": ("STRING", {"default": "", "hidden": True}),
                 "cache_chain_key": ("STRING", {"default": "", "hidden": True}),
             },
             "hidden": {
@@ -15757,6 +16010,8 @@ class MiniMaxH3EasySequenceCombine:
         cache_scope="",
         cache_chain_key="",
         cache_segment_count=0,
+        cache_segment_indices="",
+        cache_segment_nodes="",
         extra_pnginfo=None,
         **kwargs,
     ):
@@ -15774,7 +16029,10 @@ class MiniMaxH3EasySequenceCombine:
         if not chain_key:
             return f"{scope}:no-chain:{1 if use_cache_only else 0}"
         revision = _sequence_cache_revision(scope, chain_key)
-        return f"{scope}:{chain_key}:{revision}:{1 if use_cache_only else 0}:{int(cache_segment_count or 0)}"
+        return (
+            f"{scope}:{chain_key}:{revision}:{1 if use_cache_only else 0}:"
+            f"{int(cache_segment_count or 0)}:{cache_segment_indices}:{cache_segment_nodes}"
+        )
 
     @classmethod
     def _save_video(cls, video: Any, filename_prefix: str) -> tuple[str, str]:
@@ -15809,7 +16067,10 @@ class MiniMaxH3EasySequenceCombine:
         cache_scope="",
         cache_chain_key="",
         cache_segment_count=0,
+        cache_segment_indices="",
+        cache_segment_nodes="",
         extra_pnginfo=None,
+        _defer_segment_cleanup=False,
         **kwargs,
     ):
         use_cache_only = cache_only is True or str(cache_only).strip().lower() in {"1", "true", "yes", "on"}
@@ -15819,7 +16080,13 @@ class MiniMaxH3EasySequenceCombine:
             if not chain_key:
                 raise ValueError("抽卡缓存合成缺少段落链标识，请从连接好的最终合成节点重新运行")
             expected_count = int(cache_segment_count or 0)
-            chain = _sequence_cache_read_chain(scope, chain_key, expected_count)
+            chain = _sequence_cache_read_chain(
+                scope,
+                chain_key,
+                expected_count,
+                cache_segment_indices,
+                cache_segment_nodes,
+            )
             if expected_count > 0 and len(chain) != expected_count:
                 raise ValueError(
                     f"抽卡缓存只找到 {len(chain)} 段，当前工作流需要 {expected_count} 段完整结果；"
@@ -15888,7 +16155,6 @@ class MiniMaxH3EasySequenceCombine:
             "continuity_mode": str(config.continuity_mode),
             "audio_mode": str(config.audio_mode or CONTEXT_AUDIO_GENERATED),
             "exposure_lock": str(config.exposure_lock or SEQUENCE_EXPOSURE_LOCK_ON),
-            "second_pass": bool(config.second_pass),
             "source_audio": source_audio,
             "shots": shots,
             # 显存档位跟着计划传进解码器：合成前要不要先卸主干由它决定。
@@ -15924,6 +16190,23 @@ class MiniMaxH3EasySequenceCombine:
             )
         except Exception as exc:
             print(f"[MiniMax H3 Aicg] 顺序合成结果保存失败（已忽略，视频仍在本条线上）：{exc}")
+
+        cleanup = {}
+        if saved_file and not _defer_segment_cleanup:
+            cleanup = _sequence_finalize_segment_files(
+                scope,
+                chain_key,
+                str(
+                    getattr(config, "segment_cleanup_policy", "")
+                    or SEQUENCE_SEGMENT_CLEANUP_PROMPT
+                ),
+                len(samples),
+                [int(item.index) for item in chain],
+            )
+            if cleanup.get("token"):
+                from aicg3d_h3easy.render_progress import RenderProgressReporter
+
+                RenderProgressReporter().sequence_cleanup_prompt(cleanup)
 
         ui = {}
         if saved_file:

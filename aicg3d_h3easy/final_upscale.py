@@ -1076,5 +1076,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "MiniMaxH3EasyFinalHighResUpscale": "AICG3D H3 成片高清二采放大",
+    "MiniMaxH3EasyFinalHighResUpscale": "AICG3D H3 成片高清二采放大（旧版兼容）",
 }

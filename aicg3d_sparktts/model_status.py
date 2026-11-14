@@ -186,7 +186,7 @@ def spark_model_status(models_root: Path | None = None) -> dict[str, Any]:
         message = (
             "Spark-TTS 模型已就绪，但缺少运行依赖："
             + "、".join(runtime_missing)
-            + "。请重启 ComfyUI 自动安装，或执行 python -m pip install "
+            + "。请在当前 ComfyUI 的 Python 环境执行 python.exe -m pip install "
             + " ".join(runtime_missing)
         )
     else:

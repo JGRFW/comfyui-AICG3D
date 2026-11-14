@@ -22,11 +22,10 @@ Description:
 
 import os
 import json
-import json
 import csv
 
 from tqdm import tqdm
-from typing import List, Dict, Any, Set, Union
+from typing import List, Dict, Any
 from pathlib import Path
 from omegaconf import OmegaConf, DictConfig
 

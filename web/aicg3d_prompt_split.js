@@ -14,6 +14,26 @@ import { app } from "../../scripts/app.js";
 const NODE_CLASS = "AICG3D_H3PromptSegmentSplit";
 const LEGACY_NODE_CLASS = "AICG3DPromptSegmentSplit";
 const GLOBAL_PROMPT_TOGGLE_LABEL = "显示全局提示词";
+const GLOBAL_PROMPT_VISIBLE_WIDGET = "global_prompt_visible";
+/* 旧工作流没有这个开关；加载时按旧顺序还原，避免新控件把全部参数顶错一位。 */
+const LEGACY_PROMPT_SPLIT_WIDGET_ORDER = [
+    "text",
+    "mode",
+    "custom_regex",
+    "keep_header",
+    "seconds_mode",
+    "default_seconds",
+    "auto_fill",
+    "randomize_seed",
+    "max_segments",
+    "seed_start",
+    "global_text",
+];
+const PROMPT_SPLIT_WIDGET_ORDER = [
+    GLOBAL_PROMPT_VISIBLE_WIDGET,
+    "global_text",
+    ...LEGACY_PROMPT_SPLIT_WIDGET_ORDER.filter((name) => name !== "global_text"),
+];
 /* 一次最多解析并填入多少段。段落节点够多就能一直往后加，这里只留个安全上限。 */
 const MAX_SEGMENTS = 64;
 const BUTTON_PREFIX = "一键填入全部视频段落";
@@ -790,34 +810,71 @@ function isPromptSplitNode(node) {
     return type === NODE_CLASS || type === LEGACY_NODE_CLASS;
 }
 
+function isPromptSplitNodeData(nodeData) {
+    const type = String(nodeData?.name || "");
+    return type === NODE_CLASS || type === LEGACY_NODE_CLASS;
+}
+
+function restoreLegacyPromptSplitValues(node, info) {
+    const values = info?.widgets_values;
+    if (!Array.isArray(values) || !values.length) return false;
+    // 新顺序第一项固定是布尔开关；旧顺序第一项一定是分段文本。
+    if (typeof values[0] === "boolean") {
+        setGlobalPromptExpanded(node, Boolean(values[0]), { adjustHeight: false });
+        return false;
+    }
+
+    const restored = {};
+    LEGACY_PROMPT_SPLIT_WIDGET_ORDER.forEach((name, index) => {
+        if (index < values.length) restored[name] = values[index];
+    });
+    const named = info?.widgets_values_named;
+    if (named && typeof named === "object" && !Array.isArray(named)) {
+        for (const name of PROMPT_SPLIT_WIDGET_ORDER) {
+            if (Object.prototype.hasOwnProperty.call(named, name)) restored[name] = named[name];
+        }
+    }
+    restored[GLOBAL_PROMPT_VISIBLE_WIDGET] = Boolean(restored[GLOBAL_PROMPT_VISIBLE_WIDGET]);
+    restored.global_text = String(restored.global_text ?? "");
+
+    PROMPT_SPLIT_WIDGET_ORDER.forEach((name) => {
+        const widget = findWidget(node, name);
+        if (!widget || !Object.prototype.hasOwnProperty.call(restored, name)) return;
+        widget.value = restored[name];
+        if (widget._state) widget._state.value = restored[name];
+    });
+
+    info.widgets_values = PROMPT_SPLIT_WIDGET_ORDER.map((name) => restored[name]);
+    info.widgets_values_named = {
+        ...(info?.widgets_values_named && typeof info.widgets_values_named === "object"
+            ? info.widgets_values_named
+            : {}),
+        ...restored,
+    };
+    setGlobalPromptExpanded(node, false, { adjustHeight: false });
+    return true;
+}
+
 function install(node) {
     if (node.__aicg3dPromptSplitInstalled) return;
     node.__aicg3dPromptSplitInstalled = true;
 
-    const globalTextWidget = findWidget(node, "global_text");
-    if (globalTextWidget) {
-        const globalToggle = node.addWidget("toggle", GLOBAL_PROMPT_TOGGLE_LABEL, false, (value) => {
+    const globalToggle = findWidget(node, GLOBAL_PROMPT_VISIBLE_WIDGET);
+    if (globalToggle) {
+        const originalCallback = globalToggle.callback;
+        globalToggle.callback = function onGlobalPromptVisibilityChanged(value, ...args) {
+            const result = typeof originalCallback === "function"
+                ? originalCallback.call(this, value, ...args)
+                : undefined;
             setGlobalPromptExpanded(node, Boolean(value));
-        });
-        if (globalToggle) {
-            globalToggle.serialize = false;
-            globalToggle.value = false;
-            globalToggle.options ||= {};
-            globalToggle.options.serialize = false;
-            globalToggle.tooltip = "默认折叠；开启后显示全局提示词输入框，关闭时保留已填写内容。";
-            globalToggle.__aicg3dGlobalPromptToggle = true;
-            node.__aicg3dGlobalPromptToggle = globalToggle;
-            const lists = [node.widgets];
-            if (Array.isArray(node._widgets) && node._widgets !== node.widgets) lists.push(node._widgets);
-            for (const list of lists) {
-                const toggleIndex = list.indexOf(globalToggle);
-                const textIndex = list.indexOf(globalTextWidget);
-                if (toggleIndex < 0 || textIndex < 0) continue;
-                list.splice(toggleIndex, 1);
-                list.splice(list.indexOf(globalTextWidget), 0, globalToggle);
-            }
-            setGlobalPromptExpanded(node, false);
-        }
+            node.setDirtyCanvas?.(true, true);
+            return result;
+        };
+        globalToggle.label = GLOBAL_PROMPT_TOGGLE_LABEL;
+        globalToggle.tooltip = "默认折叠；开启后显示全局提示词输入框，关闭时保留已填写内容。";
+        globalToggle.__aicg3dGlobalPromptToggle = true;
+        node.__aicg3dGlobalPromptToggle = globalToggle;
+        setGlobalPromptExpanded(node, Boolean(globalToggle.value), { adjustHeight: false });
     }
 
     const button = node.addWidget("button", BUTTON_PREFIX, null, () => {
@@ -845,6 +902,7 @@ function install(node) {
     }
 
     const labels = {
+        [GLOBAL_PROMPT_VISIBLE_WIDGET]: GLOBAL_PROMPT_TOGGLE_LABEL,
         global_text: "全局提示词（自动拼接到每段）",
         mode: "解析方式",
         custom_regex: "自定义正则",
@@ -891,6 +949,16 @@ function install(node) {
 
 app.registerExtension({
     name: "AICG3D.PromptSegmentSplit",
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        if (!isPromptSplitNodeData(nodeData)) return;
+
+        const originalConfigure = nodeType?.prototype?.onConfigure;
+        nodeType.prototype.onConfigure = function onConfigurePromptSplit(info) {
+            const result = originalConfigure?.apply(this, arguments);
+            restoreLegacyPromptSplitValues(this, info);
+            return result;
+        };
+    },
     nodeCreated(node) {
         if (!isPromptSplitNode(node)) return;
         install(node);

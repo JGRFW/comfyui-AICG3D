@@ -1,8 +1,8 @@
 {
   "id": "e9d0e5e3-d173-4a09-a5e0-a6d974d9e9b9",
   "revision": 1,
-  "last_node_id": 196,
-  "last_link_id": 361,
+  "last_node_id": 195,
+  "last_link_id": 357,
   "nodes": [
     {
       "id": 8,
@@ -87,73 +87,149 @@
     },
     {
       "id": 60,
-      "type": "AICG3D_H3FinalSequenceCombine",
+      "type": "AICG3D_H3FinalSequenceUpscale",
       "pos": [
         1240,
         -80
       ],
       "size": [
         670,
-        600
+        420
       ],
       "flags": {},
       "order": 21,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "final_segment",
+          "localized_name": "最后一段",
           "name": "final_segment",
           "type": "MINIMAX_H3_SEQUENCE_SEGMENT",
           "link": 353
-        },
-        {
-          "localized_name": "filename_prefix",
-          "name": "filename_prefix",
-          "type": "STRING",
-          "widget": {
-            "name": "filename_prefix"
-          },
-          "link": null
         }
       ],
       "outputs": [
         {
-          "localized_name": "video",
+          "localized_name": "视频",
           "name": "video",
           "type": "VIDEO",
           "links": null
         },
         {
-          "localized_name": "saved_file",
+          "localized_name": "保存路径",
           "name": "saved_file",
           "type": "STRING",
           "links": null
         },
         {
-          "localized_name": "seam_report",
+          "localized_name": "接缝报告",
           "name": "seam_report",
           "type": "STRING",
           "links": null
         },
         {
-          "localized_name": "成片数据",
-          "name": "final_sequence",
-          "type": "MINIMAX_H3_FINAL_SEQUENCE",
-          "links": [
-            361
-          ]
+          "localized_name": "高清处理报告",
+          "name": "upscale_report",
+          "type": "STRING",
+          "links": null
         }
       ],
       "properties": {
-        "Node name for S&R": "AICG3D_H3FinalSequenceCombine"
+        "Node name for S&R": "AICG3D_H3FinalSequenceUpscale",
+        "cnr_id": "aicg3d-h3-suite"
       },
       "widgets_values": [
-        "video/MiniMax_H3_Sequence"
+        "video/MiniMax_H3_Final_HD",
+        true,
+        "none",
+        false,
+        "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
+        "按倍数放大",
+        1.5,
+        1920,
+        1088,
+        "cuda",
+        "fp16",
+        "er_sde",
+        "beta",
+        4,
+        0.3,
+        888888,
+        "fixed",
+        "关",
+        512,
+        512,
+        128,
+        32,
+        "关闭（仅 H3 二采）",
+        "自动选择",
+        1,
+        5,
+        2,
+        "lab",
+        "ULTRA",
+        "cuda",
+        0,
+        "cpu",
+        true,
+        true,
+        362,
+        24,
+        "关",
+        1,
+        "卸载模型",
+        false,
+        "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
+        "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
+        0.5,
+        true
       ],
       "widgets_values_named": {
-        "filename_prefix": "video/MiniMax_H3_Sequence"
+        "filename_prefix": "video/MiniMax_H3_Final_HD",
+        "second_pass": true,
+        "latent_upscale_model": "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
+        "upscale_mode": "按倍数放大",
+        "upscale_scale": 1.5,
+        "target_width": 1920,
+        "target_height": 1088,
+        "upscale_device": "cuda",
+        "upscale_precision": "fp16",
+        "sampler_name": "er_sde",
+        "scheduler": "beta",
+        "steps": 4,
+        "second_pass_denoise": 0.3,
+        "second_pass_seed": 888888,
+        "control_after_generate": "fixed",
+        "tiled_sampling": "关",
+        "tile_width": 512,
+        "tile_height": 512,
+        "tile_overlap": 128,
+        "tile_fade": 32,
+        "repair_engine": "关闭（仅 H3 二采）",
+        "repair_model": "自动选择",
+        "repair_scale": 1,
+        "repair_batch_size": 5,
+        "repair_temporal_overlap": 2,
+        "repair_color_correction": "lab",
+        "repair_quality": "ULTRA",
+        "repair_device": "cuda",
+        "repair_blocks_to_swap": 0,
+        "repair_offload_device": "cpu",
+        "repair_vae_tiling": true,
+        "lock_source_exposure": true,
+        "max_window_frames": 362,
+        "window_overlap_frames": 24,
+        "sample_preview": "关",
+        "preview_interval": 1,
+        "cleanup_after_run": "卸载模型",
+        "refiner_lora": "none",
+        "show_advanced_settings": false,
+        "relay_vsr_enabled": false,
+        "relay_vsr_model": "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
+        "relay_vsr_vae": "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
+        "relay_vsr_detail": 0.5,
+        "relay_lock_source_exposure": true
       },
-      "title": "最终合成 · 单线成片"
+      "title": "最终合成 · 高清成片"
     },
     {
       "id": 68,
@@ -423,7 +499,9 @@
         "生成音频",
         "自动（按显卡）",
         "跨段曝光锁定",
-        true
+        true,
+        "",
+        "合成后提示删除"
       ],
       "widgets_values_named": {
         "resolution": "416P",
@@ -443,7 +521,9 @@
         "audio_mode": "生成音频",
         "vram_tier": "自动（按显卡）",
         "exposure_lock": "跨段曝光锁定",
-        "keep_full": true
+        "keep_full": true,
+        "segment_output_directory": "",
+        "segment_cleanup_policy": "合成后提示删除"
       },
       "title": "AICG3D H3 智能短剧台"
     },
@@ -1537,6 +1617,8 @@
         "Node name for S&R": "AICG3D_H3PromptSegmentSplit"
       },
       "widgets_values": [
+        false,
+        "",
         "【第1段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。开场高空俯视大远景，<Picture 1>女子与<Picture 2>男子面对面站立于平台之上。镜头做连续平滑推进下降运动，先缓缓落至女子面部特写，锁定女子面部五官清晰锐利，随后镜头平滑小幅横移切换至男子面部特写，男子面部保持清晰对焦。主光来自斜上方，均匀打亮两人面部轮廓，明暗层次柔和稳定，环境薄雾缓慢流动。\n0.0～1.8秒：高空俯视视角俯瞰完整涂山场景，平台上的一男一女两个小人清晰可见，山间薄雾缓缓飘动。\n1.8～3.4秒：镜头持续向下向前推进，画面逐步收缩聚焦，平稳落在女子面部特写，女子头部正对男子，眉眼带着疑惑神态，发丝随微风轻微晃动。\n3.4～5.0秒：镜头顺滑小幅横向平移，对焦平稳过渡到男子面部特写，两人身体站位保持不变，画面停留在男子面部清晰的稳定状态。\n\noverall_soundscape: 山间持续轻柔风声，远处隐约传来仙灵环境回响，布料被微风轻轻拂动摩擦声。\n\nnon_diegetic_music: N/A\n\n【第2段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。近景镜头，<Picture 1>女子正对<Picture 2>男子，二人站在平台原地不动，服装样貌与上一段完全一致，两人面部持续清晰对焦。镜头为固定凝视机位不做位移。主光依旧斜上方照射，面部光影、色温和曝光与上一段完全保持统一。\n0.0～0.7秒：女子眉头微微蹙起，嘴唇微张，身体小幅前倾，眼神充满疑惑望向对面男子，肩膀轻微起伏完成吸气。\n0.7～3.5秒：女子 (S1) says: <d>[Chinese]大师兄，柳如烟到底是谁？</d>\n3.5～5.0秒：女子闭上嘴巴，头部姿态不变，依旧带着疑惑看向男子，等待对方作答，维持稳定的面部姿态。\n\noverall_soundscape: 山间轻柔风声持续，衣物布料轻微摩擦，女子细微呼吸声。\n\nnon_diegetic_music: N/A\n\n【第3段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。双人近景，<Picture 2>男子面对<Picture 1>女子，两人站位不变，面部全程清晰对焦，镜头保持固定凝视机位。主光斜上方，光影色调曝光延续前序段落。\n0.0～0.6秒：男子眉毛向上扬起，露出略带诧异的神情，肩膀微抬吸气。\n0.6～2.4秒：男子 (S2) says: <d>[Chinese]连如烟大帝你都不知道，看样子你都不看红果的吗？</d>\n2.4～3.2秒：男子闭合嘴唇，目光注视女子，身体保持不动。\n3.2～5.0秒：女子头部微微歪向一侧，脸上疑惑感加重，嘴唇轻启准备回话，画面停留在女子即将开口的稳定姿态。\n\noverall_soundscape: 山间轻柔风声持续，衣料轻微晃动，两人平缓呼吸声。\n\nnon_diegetic_music: N/A\n\n【第4段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。中景镜头，<Picture 1>女子和<Picture 2>男子保持初始对峙站位，人物面部全程清晰，镜头固定凝视，跟随人物运动做极小幅度平稳跟随，维持画面主体构图。主光斜上方，光影色温曝光不变，人物动作遵循重力动量传递逻辑，肢体表现浮夸夸张。\n0.0～0.8秒：女子眼神困惑，眉头紧锁，身体轻微向前倾。\n0.8～2.0秒：女子 (S1) says: <d>[Chinese]是贵州六盘水的那个红果吗？</d>\n2.0～2.6秒：女子闭嘴，男子神色瞬间转为恼怒，眉头紧皱，身体重心压向右腿，左腿屈膝蓄力。\n2.6～3.6秒：男子 (S2) says: <d>[Chinese]连红果你都不知道，该打！</d>\n3.6～5.0秒：男子左腿迅猛向前蹬出，脚掌撞击女子小腹，受冲击力女子身体向后大幅弯折，身体顺着受力方向向后腾空飞出去，衣摆、长发顺着飞行动向向后扬起，遵循物理惯性，画面定格在女子向后飞出的动态瞬间。\n\noverall_soundscape: 山间风声持续，男子发力的闷响，肢体碰撞撞击声，衣物大幅度抖动摩擦声。\n\nnon_diegetic_music: N/A",
         "自动识别",
         "",
@@ -1546,8 +1628,7 @@
         true,
         true,
         4,
-        0,
-        ""
+        0
       ],
       "widgets_values_named": {
         "text": "【第1段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。开场高空俯视大远景，<Picture 1>女子与<Picture 2>男子面对面站立于平台之上。镜头做连续平滑推进下降运动，先缓缓落至女子面部特写，锁定女子面部五官清晰锐利，随后镜头平滑小幅横移切换至男子面部特写，男子面部保持清晰对焦。主光来自斜上方，均匀打亮两人面部轮廓，明暗层次柔和稳定，环境薄雾缓慢流动。\n0.0～1.8秒：高空俯视视角俯瞰完整涂山场景，平台上的一男一女两个小人清晰可见，山间薄雾缓缓飘动。\n1.8～3.4秒：镜头持续向下向前推进，画面逐步收缩聚焦，平稳落在女子面部特写，女子头部正对男子，眉眼带着疑惑神态，发丝随微风轻微晃动。\n3.4～5.0秒：镜头顺滑小幅横向平移，对焦平稳过渡到男子面部特写，两人身体站位保持不变，画面停留在男子面部清晰的稳定状态。\n\noverall_soundscape: 山间持续轻柔风声，远处隐约传来仙灵环境回响，布料被微风轻轻拂动摩擦声。\n\nnon_diegetic_music: N/A\n\n【第2段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。近景镜头，<Picture 1>女子正对<Picture 2>男子，二人站在平台原地不动，服装样貌与上一段完全一致，两人面部持续清晰对焦。镜头为固定凝视机位不做位移。主光依旧斜上方照射，面部光影、色温和曝光与上一段完全保持统一。\n0.0～0.7秒：女子眉头微微蹙起，嘴唇微张，身体小幅前倾，眼神充满疑惑望向对面男子，肩膀轻微起伏完成吸气。\n0.7～3.5秒：女子 (S1) says: <d>[Chinese]大师兄，柳如烟到底是谁？</d>\n3.5～5.0秒：女子闭上嘴巴，头部姿态不变，依旧带着疑惑看向男子，等待对方作答，维持稳定的面部姿态。\n\noverall_soundscape: 山间轻柔风声持续，衣物布料轻微摩擦，女子细微呼吸声。\n\nnon_diegetic_music: N/A\n\n【第3段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。双人近景，<Picture 2>男子面对<Picture 1>女子，两人站位不变，面部全程清晰对焦，镜头保持固定凝视机位。主光斜上方，光影色调曝光延续前序段落。\n0.0～0.6秒：男子眉毛向上扬起，露出略带诧异的神情，肩膀微抬吸气。\n0.6～2.4秒：男子 (S2) says: <d>[Chinese]连如烟大帝你都不知道，看样子你都不看红果的吗？</d>\n2.4～3.2秒：男子闭合嘴唇，目光注视女子，身体保持不动。\n3.2～5.0秒：女子头部微微歪向一侧，脸上疑惑感加重，嘴唇轻启准备回话，画面停留在女子即将开口的稳定姿态。\n\noverall_soundscape: 山间轻柔风声持续，衣料轻微晃动，两人平缓呼吸声。\n\nnon_diegetic_music: N/A\n\n【第4段｜5秒】\nHow the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 1) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] 16:9古风奇幻画面，数字电影摄影机成像，色调柔和绚丽，场景参考<Picture 3>涂山仙境。中景镜头，<Picture 1>女子和<Picture 2>男子保持初始对峙站位，人物面部全程清晰，镜头固定凝视，跟随人物运动做极小幅度平稳跟随，维持画面主体构图。主光斜上方，光影色温曝光不变，人物动作遵循重力动量传递逻辑，肢体表现浮夸夸张。\n0.0～0.8秒：女子眼神困惑，眉头紧锁，身体轻微向前倾。\n0.8～2.0秒：女子 (S1) says: <d>[Chinese]是贵州六盘水的那个红果吗？</d>\n2.0～2.6秒：女子闭嘴，男子神色瞬间转为恼怒，眉头紧皱，身体重心压向右腿，左腿屈膝蓄力。\n2.6～3.6秒：男子 (S2) says: <d>[Chinese]连红果你都不知道，该打！</d>\n3.6～5.0秒：男子左腿迅猛向前蹬出，脚掌撞击女子小腹，受冲击力女子身体向后大幅弯折，身体顺着受力方向向后腾空飞出去，衣摆、长发顺着飞行动向向后扬起，遵循物理惯性，画面定格在女子向后飞出的动态瞬间。\n\noverall_soundscape: 山间风声持续，男子发力的闷响，肢体碰撞撞击声，衣物大幅度抖动摩擦声。\n\nnon_diegetic_music: N/A",
@@ -1560,7 +1641,8 @@
         "randomize_seed": true,
         "max_segments": 4,
         "seed_start": 0,
-        "global_text": ""
+        "global_text": "",
+        "global_prompt_visible": false
       }
     },
     {
@@ -2053,146 +2135,6 @@
         true
       ],
       "title": "MiniMax H3 Aicg 角色音色库"
-    },
-    {
-      "id": 196,
-      "type": "AICG3D_H3FinalHighResUpscalePacked",
-      "pos": [
-        1990,
-        -80
-      ],
-      "size": [
-        420,
-        420
-      ],
-      "flags": {},
-      "order": 23,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "成片数据",
-          "name": "final_sequence",
-          "type": "MINIMAX_H3_FINAL_SEQUENCE",
-          "link": 361
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "video",
-          "name": "video",
-          "type": "VIDEO",
-          "links": null
-        },
-        {
-          "localized_name": "saved_file",
-          "name": "saved_file",
-          "type": "STRING",
-          "links": null
-        },
-        {
-          "localized_name": "upscale_report",
-          "name": "upscale_report",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "AICG3D_H3FinalHighResUpscalePacked",
-        "cnr_id": "aicg3d-h3-suite"
-      },
-      "widgets_values": [
-        "video/MiniMax_H3_Final_HD",
-        true,
-        "none",
-        false,
-        "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
-        "按倍数放大",
-        1.5,
-        1920,
-        1088,
-        "cuda",
-        "fp16",
-        "er_sde",
-        "beta",
-        4,
-        0.3,
-        888888,
-        "fixed",
-        "关",
-        512,
-        512,
-        128,
-        32,
-        "关闭（仅 H3 二采）",
-        "自动选择",
-        1,
-        5,
-        2,
-        "lab",
-        "ULTRA",
-        "cuda",
-        0,
-        "cpu",
-        true,
-        true,
-        362,
-        24,
-        "关",
-        1,
-        "卸载模型",
-        false,
-        "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
-        "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
-        0.5,
-        true
-      ],
-      "widgets_values_named": {
-        "filename_prefix": "video/MiniMax_H3_Final_HD",
-        "second_pass": true,
-        "latent_upscale_model": "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
-        "upscale_mode": "按倍数放大",
-        "upscale_scale": 1.5,
-        "target_width": 1920,
-        "target_height": 1088,
-        "upscale_device": "cuda",
-        "upscale_precision": "fp16",
-        "sampler_name": "er_sde",
-        "scheduler": "beta",
-        "steps": 4,
-        "second_pass_denoise": 0.3,
-        "second_pass_seed": 888888,
-        "control_after_generate": "fixed",
-        "tiled_sampling": "关",
-        "tile_width": 512,
-        "tile_height": 512,
-        "tile_overlap": 128,
-        "tile_fade": 32,
-        "repair_engine": "关闭（仅 H3 二采）",
-        "repair_model": "自动选择",
-        "repair_scale": 1,
-        "repair_batch_size": 5,
-        "repair_temporal_overlap": 2,
-        "repair_color_correction": "lab",
-        "repair_quality": "ULTRA",
-        "repair_device": "cuda",
-        "repair_blocks_to_swap": 0,
-        "repair_offload_device": "cpu",
-        "repair_vae_tiling": true,
-        "lock_source_exposure": true,
-        "max_window_frames": 362,
-        "window_overlap_frames": 24,
-        "sample_preview": "关",
-        "preview_interval": 1,
-        "cleanup_after_run": "卸载模型",
-        "refiner_lora": "none",
-        "show_advanced_settings": false,
-        "relay_vsr_enabled": false,
-        "relay_vsr_model": "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
-        "relay_vsr_vae": "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
-        "relay_vsr_detail": 0.5,
-        "relay_lock_source_exposure": true
-      },
-      "title": "成片高清二采放大"
     }
   ],
   "links": [
@@ -2283,14 +2225,6 @@
       107,
       7,
       "AICG3D_CHARACTER_VOICE_CAST"
-    ],
-    [
-      361,
-      60,
-      3,
-      196,
-      0,
-      "MINIMAX_H3_FINAL_SEQUENCE"
     ]
   ],
   "groups": [],

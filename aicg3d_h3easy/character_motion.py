@@ -19,7 +19,10 @@ from collections.abc import Mapping
 from fractions import Fraction
 from typing import Any
 
-import psutil
+try:
+    import psutil
+except ImportError:  # Optional: media sizing uses a conservative fallback.
+    psutil = None
 import torch
 
 import comfy.model_management

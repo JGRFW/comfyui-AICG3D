@@ -25,7 +25,6 @@ from aicg3d_h3easy.render_progress import RenderProgressReporter  # noqa: E402
 from aicg3d_h3easy.nodes import (  # noqa: E402
     MiniMaxH3EasySequenceSegment,
     MiniMaxH3SegmentSample,
-    MiniMaxH3SequenceConfig,
     MiniMaxH3SequenceSegment,
 )
 
@@ -77,7 +76,6 @@ def main() -> None:
         cache_scope="test",
         chain_key="test-chain",
         node_id="74",
-        first_pass_sample=sample,
     )
 
     with (
@@ -89,16 +87,12 @@ def main() -> None:
         ),
     ):
         video = MiniMaxH3EasySequenceSegment._deliver_video(config, result)
-        first_pass_video = MiniMaxH3EasySequenceSegment._deliver_first_pass_video(config, result)
 
     components = video.get_components()
     assert components.images.shape[0] == 10
     assert torch.equal(components.images[0, 0, 0, :1], torch.tensor([5.0]))
     assert torch.equal(components.images[-1, 0, 0, :1], torch.tensor([14.0]))
     assert components.audio is not None
-    first_pass_components = first_pass_video.get_components()
-    assert first_pass_components.images.shape[0] == 10
-    assert first_pass_components.audio is not None
 
     preview_server = FakePreviewServer()
     reporter = RenderProgressReporter(node_id="74", prompt_id="preview-test")

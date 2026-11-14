@@ -96,7 +96,7 @@ class Attend(nn.Module):
         return mask
 
     def flash_attn(self, q, k, v, mask=None):
-        _, heads, q_len, _, k_len, is_cuda = *q.shape, k.shape[-2], q.is_cuda
+        _, heads, q_len, _, _, is_cuda = *q.shape, k.shape[-2], q.is_cuda
 
         # Recommended for multi-query single-key-value attention by Tri Dao
         # kv shape torch.Size([1, 512, 64]) -> torch.Size([1, 8, 512, 64])
@@ -180,10 +180,6 @@ class Attend(nn.Module):
 
 def Sequential(*mods):
     return nn.Sequential(*filter(exists, mods))
-
-
-def exists(x):
-    return x is not None
 
 
 def default(val, d):

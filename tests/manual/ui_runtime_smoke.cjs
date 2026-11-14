@@ -91,6 +91,8 @@ async function main() {
 
     await send("Runtime.enable");
     await send("Page.enable");
+    await send("Page.bringToFront");
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
     await send("Network.enable");
     await send("Network.setCacheDisabled", { cacheDisabled: true });
     await send("Emulation.setDeviceMetricsOverride", {
@@ -165,6 +167,15 @@ async function main() {
             create("AICG3D_H3SequenceSegment", [1000, 520]),
         ];
         await sleep(1800);
+        const storageControls = ["segment_output_directory", "segment_cleanup_policy"]
+            .map((name) => widget(globalNode, name));
+        if (storageControls.some((item) => !item || item.hidden)) {
+            throw new Error("Smart Drama segment storage controls are missing or hidden");
+        }
+        if (String(storageControls[0].value || "") !== ""
+            || String(storageControls[1].value || "") !== "合成后提示删除") {
+            throw new Error("Smart Drama segment storage defaults are incorrect");
+        }
         for (const node of segments) {
             node.size = [430, 610];
             node.setSize?.([430, 610]);
@@ -191,6 +202,34 @@ async function main() {
             const stagePreviewVideo = stageCards[0].querySelector(".h3-sequence-stage-video");
             if (!stagePreviewImage || !stagePreviewVideo) throw new Error("Sequence stage card must share one sampling image and one video surface");
             if (!stagePreviewImage.hidden || !stagePreviewVideo.hidden) throw new Error("Sequence stage media must start hidden behind the placeholder");
+            const previewVideos = segments.map((node, index) => {
+                const video = node.__h3SequenceStageFinal?.video;
+                if (!video) throw new Error("Sequence stage video surface is missing");
+                video.src = "data:video/mp4;base64,SMOKE" + index;
+                video.hidden = false;
+                return video;
+            });
+            const previewSourcesBeforeExecution = previewVideos.map((video) => String(video.src || ""));
+            if (new Set(previewSourcesBeforeExecution).size !== segments.length) {
+                throw new Error("Sequence preview regression setup did not create distinct sources");
+            }
+            const previewApi = (await import("/scripts/api.js")).api;
+            previewApi.dispatchEvent(new CustomEvent("execution_start", {
+                detail: { prompt_id: "segment-preview-retention-smoke" },
+            }));
+            await sleep(300);
+            const previewSourcesAfterExecution = previewVideos.map((video) => String(video.src || ""));
+            if (previewSourcesAfterExecution.join("\\n") !== previewSourcesBeforeExecution.join("\\n")) {
+                throw new Error("Execution start cleared or replaced another segment preview: " + JSON.stringify({
+                    before: previewSourcesBeforeExecution,
+                    after: previewSourcesAfterExecution,
+                }));
+            }
+            previewVideos.forEach((video) => {
+                video.pause?.();
+                video.removeAttribute?.("src");
+                video.hidden = true;
+            });
             const stageSizeBeforeSampling = [...segments[0].size];
             const sequenceApi = (await import("/scripts/api.js")).api;
             const samplingCanvas = document.createElement("canvas");
@@ -281,11 +320,11 @@ async function main() {
         const promptSplitWidthBeforeFold = Number(parser.size?.[0] || 0);
         const parserHeightCollapsed = Number(parser.size?.[1] || 0);
         const globalPromptStartsCollapsed = globalToggle.value === false && Boolean(globalTextWidget.hidden);
-        setWidget(parser, "显示全局提示词", true);
+        setWidget(parser, "global_prompt_visible", true);
         await sleep(350);
         const parserHeightExpanded = Number(parser.size?.[1] || 0);
         const globalPromptExpanded = !Boolean(globalTextWidget.hidden);
-        setWidget(parser, "显示全局提示词", false);
+        setWidget(parser, "global_prompt_visible", false);
         await sleep(350);
         const parserHeightClosedAgain = Number(parser.size?.[1] || 0);
         const globalPromptFoldStable = globalPromptStartsCollapsed
@@ -378,22 +417,19 @@ async function main() {
         if ((graph._nodes || []).includes(added)) throw new Error("Delete-this-segment did not remove the node");
         globalThis.__aicg3dSmokeProgress = "segment-deleted";
 
-        const secondPass = widget(globalNode, "second_pass");
-        const globalWidth = Number(globalNode.size?.[0] || 0);
-        const hiddenBefore = ["second_pass_model", "second_pass_scale", "second_pass_steps"]
-            .map((name) => Boolean(widget(globalNode, name)?.hidden));
-        setWidget(globalNode, "second_pass", true);
-        await sleep(400);
-        const hiddenOn = ["second_pass_model", "second_pass_scale", "second_pass_steps"]
-            .map((name) => Boolean(widget(globalNode, name)?.hidden));
-        setWidget(globalNode, "second_pass", false);
-        await sleep(400);
-        const hiddenOff = ["second_pass_model", "second_pass_scale", "second_pass_steps"]
-            .map((name) => Boolean(widget(globalNode, name)?.hidden));
-        if (!hiddenBefore.every(Boolean) || hiddenOn.some(Boolean) || !hiddenOff.every(Boolean)) {
-            throw new Error("Smart Drama second-pass controls are not showing/hiding correctly");
+        const removedSmartDramaSecondPass = [
+            "second_pass",
+            "second_pass_model",
+            "second_pass_scale",
+            "second_pass_sampler_name",
+            "second_pass_scheduler",
+            "second_pass_steps",
+            "second_pass_denoise",
+        ].filter((name) => widget(globalNode, name));
+        if (removedSmartDramaSecondPass.length) {
+            throw new Error("Smart Drama still exposes removed second-pass controls: "
+                + removedSmartDramaSecondPass.join(", "));
         }
-        if (!approx(globalWidth, globalNode.size?.[0])) throw new Error("Second-pass toggle changed node width");
 
         const repairNode = create("AICG3D_H3RenderPass2", [1480, 40]);
         globalThis.__aicg3dSmokeProgress = "repair-created";
@@ -623,9 +659,16 @@ async function main() {
 
 
         globalThis.__aicg3dSmokeProgress = "final-created";
+        const finalCombined = Boolean(LiteGraph.registered_node_types?.["AICG3D_H3FinalSequenceUpscale"]);
         const finalPacked = Boolean(LiteGraph.registered_node_types?.["AICG3D_H3FinalHighResUpscalePacked"]);
+        const finalCompact = finalCombined || finalPacked;
+        const finalExpectedInput = finalCombined ? "final_segment" : "final_sequence";
         const finalNode = create(
-            finalPacked ? "AICG3D_H3FinalHighResUpscalePacked" : "AICG3D_H3FinalHighResUpscale",
+            finalCombined
+                ? "AICG3D_H3FinalSequenceUpscale"
+                : finalPacked
+                    ? "AICG3D_H3FinalHighResUpscalePacked"
+                    : "AICG3D_H3FinalHighResUpscale",
             [1480, 800],
         );
         globalThis.__aicg3dFinalNode = finalNode;
@@ -644,12 +687,12 @@ async function main() {
             "relay_vsr_enabled", "relay_vsr_model", "relay_vsr_vae",
             "relay_vsr_detail", "relay_lock_source_exposure",
         ];
-        if (finalPacked) finalNames.push("refiner_lora", "show_advanced_settings");
+        if (finalCompact) finalNames.push("refiner_lora", "show_advanced_settings");
         const finalInputsPresent = finalNames.every((name) => Boolean(finalWidget(name)));
         if (!finalInputsPresent) throw new Error("Final upscale node lost one or more Python inputs");
         const finalInputSlots = (finalNode.inputs || []).filter((input) => !input?.widget).map((input) => String(input?.name || ""));
-        if (finalPacked && (finalInputSlots.length !== 1 || finalInputSlots[0] !== "final_sequence")) {
-            throw new Error("Packed final upscale must expose only the final_sequence input slot: " + finalInputSlots.join(","));
+        if (finalCompact && (finalInputSlots.length !== 1 || finalInputSlots[0] !== finalExpectedInput)) {
+            throw new Error("Compact final upscale must expose exactly one expected data input slot: " + finalInputSlots.join(","));
         }
         const finalLabels = {
             filename_prefix: "输出文件名前缀",
@@ -709,7 +752,7 @@ async function main() {
             }));
         }
         let finalPackedStartsCollapsed = true;
-        if (finalPacked) {
+        if (finalCompact) {
             const packedAdvancedNames = [
                 "latent_upscale_model", "upscale_device", "upscale_precision", "tiled_sampling",
                 "tile_width", "tile_height", "tile_overlap", "tile_fade", "repair_engine",
@@ -736,7 +779,7 @@ async function main() {
             "second_pass_denoise", "second_pass_seed", "tiled_sampling", "tile_width", "tile_height",
             "tile_overlap", "tile_fade", "sample_preview", "preview_interval",
         ];
-        if (finalPacked) finalLatentNames.push("refiner_lora");
+        if (finalCompact) finalLatentNames.push("refiner_lora");
         const finalSecondPassFolded = finalLatentNames.every(finalHidden) && !finalHidden("second_pass");
         if (!finalSecondPassFolded) throw new Error("Final upscale second-pass settings do not fold when disabled");
 
@@ -874,6 +917,7 @@ async function main() {
             finalUpscaleRelayConditionalUi: finalRelayConditionalUi,
             finalUpscaleRelayValuesSerialize: finalRelayValuesSerialize,
             finalUpscalePacked: finalPacked,
+            finalSequenceCombined: finalCombined,
             finalUpscalePackedStartsCollapsed: finalPackedStartsCollapsed,
             finalUpscaleLinkedInputs: finalInputSlots,
             vueNodesMode: Boolean(document.querySelector(".lg-node") || document.body.className.includes("vue")),

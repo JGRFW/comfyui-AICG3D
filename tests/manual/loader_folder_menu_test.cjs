@@ -1,6 +1,7 @@
 const { chromium } = require(process.env.PLAYWRIGHT_CORE_PATH);
 
 (async () => {
+  const comfyUrl = process.env.AICG3D_COMFY_URL || "http://127.0.0.1:8188/";
   const browser = await chromium.launch({
     headless: true,
     executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -13,7 +14,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE_PATH);
     if (message.type() === "error") pageErrors.push(message.text());
   });
 
-  await page.goto("http://127.0.0.1:8188", {
+  await page.goto(comfyUrl, {
     waitUntil: "domcontentloaded",
     timeout: 120000,
   });
@@ -99,7 +100,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE_PATH);
   await browser.close();
 
   const passed = rootState.hasSearch
-    && rootState.folders.includes("MiniMax")
+    && rootState.folders.some((name) => String(name).includes("MiniMax"))
     && rootState.folders.includes("Krea2")
     && miniMaxModels.some((label) => label.includes("fastvideo"))
     && searchState.options.length > 0

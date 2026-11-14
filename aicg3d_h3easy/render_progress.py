@@ -227,6 +227,25 @@ class RenderProgressReporter:
         except Exception:
             pass
 
+    def sequence_cleanup_prompt(self, cleanup: dict[str, Any]) -> None:
+        """Ask the frontend whether this run's saved segment files should be removed."""
+        server = progress_server()
+        if server is None or not self.node_id or not cleanup.get("token"):
+            return
+        payload = {
+            "node_id": self.node_id,
+            "prompt_id": self.prompt_id,
+            **dict(cleanup),
+        }
+        try:
+            server.send_sync(
+                "aicg3d_sequence_cleanup_prompt",
+                payload,
+                getattr(server, "client_id", None),
+            )
+        except Exception:
+            pass
+
     def finish(self, ok: bool = True) -> None:
         """收尾：成功画到 100%，失败让前端立刻收起进度条。"""
         self.finished = True
@@ -335,8 +354,14 @@ class RenderPreviewEncoder:
     def available(self) -> bool:
         return self._previewer is not None
 
-    def decode(self, x0: Any) -> Optional[Any]:
-        """x0 -> 放大后的 PIL 预览图；拿不到预览就返回 None。"""
+    def decode(self, x0: Any, position: Optional[float] = None) -> Optional[Any]:
+        """x0 -> 放大后的 PIL 预览图；拿不到预览就返回 None。
+
+        ``position`` 是视频时间轴上的相对位置（0..1）：给了就解那一个 latent 时刻，
+        不给就沿用 ComfyUI 原生行为（只解第 0 个时刻）。段落节点按采样步推进这个
+        位置，卡片才会真的动起来 —— 段落 2 起第 0 帧是接续锚点，几乎不变，只看它
+        就像卡在首帧。
+        """
         if self._previewer is None or x0 is None:
             return None
         try:
@@ -349,6 +374,11 @@ class RenderPreviewEncoder:
                 latent = tensors[0]
             if getattr(latent, "ndim", 0) == 5:
                 latent = latent[:1]
+                tokens = int(latent.shape[2])
+                if position is not None and tokens > 1:
+                    span = max(0.0, min(1.0, float(position)))
+                    pick = int(round(span * (tokens - 1)))
+                    latent = latent[:, :, pick:pick + 1]
             decoded = self._previewer.decode_latent_to_preview_image("JPEG", latent)
             image = decoded[1] if isinstance(decoded, tuple) else decoded
             if image is None:

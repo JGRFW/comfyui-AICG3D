@@ -32,6 +32,27 @@ class MiniMaxH3FinalSequence:
     sigmas: Any = None
     saved_file: str = ""
     seam_report: str = ""
+    cleanup_scope: str = ""
+    cleanup_chain_key: str = ""
+    cleanup_policy: str = base.SEQUENCE_SEGMENT_CLEANUP_PROMPT
+    cleanup_segment_count: int = 0
+    cleanup_segment_indices: tuple[int, ...] = ()
+
+
+def _finalize_sequence_segment_cleanup(final_sequence: MiniMaxH3FinalSequence) -> dict[str, Any]:
+    """Clean segment files only after the selected final output has saved."""
+    cleanup = base._sequence_finalize_segment_files(
+        final_sequence.cleanup_scope,
+        final_sequence.cleanup_chain_key,
+        final_sequence.cleanup_policy,
+        int(final_sequence.cleanup_segment_count or 0),
+        list(final_sequence.cleanup_segment_indices),
+    )
+    if cleanup.get("token"):
+        from aicg3d_h3easy.render_progress import RenderProgressReporter
+
+        RenderProgressReporter().sequence_cleanup_prompt(cleanup)
+    return cleanup
 
 
 def _is_cache_only(value: Any) -> bool:
@@ -58,6 +79,8 @@ class MiniMaxH3EasyFinalSequenceCombine(base.MiniMaxH3EasySequenceCombine):
         cache_scope: str,
         cache_chain_key: str,
         cache_segment_count: int,
+        cache_segment_indices: str,
+        cache_segment_nodes: str,
         extra_pnginfo: Any,
     ) -> list[base.MiniMaxH3SequenceSegment]:
         if _is_cache_only(cache_only):
@@ -66,7 +89,13 @@ class MiniMaxH3EasyFinalSequenceCombine(base.MiniMaxH3EasySequenceCombine):
             if not chain_key:
                 raise ValueError("抽卡缓存合成缺少段落链标识，请从连接好的最终合成节点重新运行")
             expected_count = int(cache_segment_count or 0)
-            chain = base._sequence_cache_read_chain(scope, chain_key, expected_count)
+            chain = base._sequence_cache_read_chain(
+                scope,
+                chain_key,
+                expected_count,
+                cache_segment_indices,
+                cache_segment_nodes,
+            )
             if expected_count > 0 and len(chain) != expected_count:
                 raise ValueError(
                     f"抽卡缓存只找到 {len(chain)} 段，当前工作流需要 {expected_count} 段完整结果；"
@@ -86,6 +115,8 @@ class MiniMaxH3EasyFinalSequenceCombine(base.MiniMaxH3EasySequenceCombine):
         cache_scope="",
         cache_chain_key="",
         cache_segment_count=0,
+        cache_segment_indices="",
+        cache_segment_nodes="",
         extra_pnginfo=None,
         **kwargs,
     ):
@@ -95,6 +126,8 @@ class MiniMaxH3EasyFinalSequenceCombine(base.MiniMaxH3EasySequenceCombine):
             cache_scope=cache_scope,
             cache_chain_key=cache_chain_key,
             cache_segment_count=cache_segment_count,
+            cache_segment_indices=cache_segment_indices,
+            cache_segment_nodes=cache_segment_nodes,
             extra_pnginfo=extra_pnginfo,
         )
         if not chain:
@@ -111,6 +144,8 @@ class MiniMaxH3EasyFinalSequenceCombine(base.MiniMaxH3EasySequenceCombine):
             cache_scope=cache_scope,
             cache_chain_key=cache_chain_key,
             cache_segment_count=cache_segment_count,
+            cache_segment_indices=cache_segment_indices,
+            cache_segment_nodes=cache_segment_nodes,
             extra_pnginfo=extra_pnginfo,
             **kwargs,
         )
@@ -126,6 +161,25 @@ class MiniMaxH3EasyFinalSequenceCombine(base.MiniMaxH3EasySequenceCombine):
             sigmas=getattr(config, "sigmas", None),
             saved_file=str(saved_file or ""),
             seam_report=str(seam_report or ""),
+            cleanup_scope=base._sequence_runtime_scope(
+                extra_pnginfo,
+                cache_scope
+                or getattr(final_segment, "cache_scope", "")
+                or getattr(chain[0], "cache_scope", ""),
+            ),
+            cleanup_chain_key=str(
+                cache_chain_key
+                or getattr(final_segment, "chain_key", "")
+                or getattr(chain[0], "chain_key", "")
+                or getattr(chain[0], "node_id", "")
+                or ""
+            ).strip(),
+            cleanup_policy=str(
+                getattr(config, "segment_cleanup_policy", "")
+                or base.SEQUENCE_SEGMENT_CLEANUP_PROMPT
+            ),
+            cleanup_segment_count=len(chain),
+            cleanup_segment_indices=tuple(int(item.index) for item in chain),
         )
         result["result"] = (video, saved_file, seam_report, final_sequence)
         return result
@@ -220,12 +274,140 @@ class MiniMaxH3EasyFinalHighResUpscalePacked(
         )
 
 
+class MiniMaxH3EasyFinalSequenceUpscale(MiniMaxH3EasyFinalSequenceCombine):
+    """Assemble the full sequence and finish HD processing in one node."""
+
+    FUNCTION = "final_sequence_upscale"
+    RETURN_TYPES = ("VIDEO", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("video", "saved_file", "seam_report", "upscale_report")
+    DESCRIPTION = (
+        "接最后一段「视频段落」，一个节点完成整片顺序拼接、原始曝光对齐、"
+        "整片 H3 二采、画质修复、RelayVSR 和原音轨封装。"
+        "所有高清开关都关闭时直接输出最终合成视频，不会重复采样或报错。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        packed = MiniMaxH3EasyFinalHighResUpscalePacked.INPUT_TYPES()["required"]
+        controls = {
+            name: definition
+            for name, definition in packed.items()
+            if name != "final_sequence"
+        }
+        return {
+            "required": {
+                "final_segment": (
+                    "*",
+                    {
+                        "tooltip": (
+                            "接最后一段的「视频段落」。节点会顺着段落链完成整片拼接，"
+                            "然后再执行所选高清处理。"
+                        )
+                    },
+                ),
+                **controls,
+            },
+            "optional": {
+                "cache_only": ("BOOLEAN", {"default": False, "hidden": True}),
+                "cache_scope": ("STRING", {"default": "", "hidden": True}),
+                "cache_segment_count": (
+                    "INT",
+                    {"default": 0, "min": 0, "max": 100000, "hidden": True},
+                ),
+                "cache_segment_indices": ("STRING", {"default": "", "hidden": True}),
+                "cache_segment_nodes": ("STRING", {"default": "", "hidden": True}),
+                "cache_chain_key": ("STRING", {"default": "", "hidden": True}),
+            },
+            "hidden": {
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+
+    def final_sequence_upscale(
+        self,
+        final_segment=None,
+        filename_prefix="video/MiniMax_H3_Final_HD",
+        second_pass=True,
+        refiner_lora="none",
+        show_advanced_settings=False,
+        cache_only=False,
+        cache_scope="",
+        cache_chain_key="",
+        cache_segment_count=0,
+        cache_segment_indices="",
+        cache_segment_nodes="",
+        extra_pnginfo=None,
+        **kwargs,
+    ):
+        del show_advanced_settings  # Frontend-only disclosure control.
+        combined = self.combine(
+            final_segment=final_segment,
+            filename_prefix=filename_prefix,
+            cache_only=cache_only,
+            cache_scope=cache_scope,
+            cache_chain_key=cache_chain_key,
+            cache_segment_count=cache_segment_count,
+            cache_segment_indices=cache_segment_indices,
+            cache_segment_nodes=cache_segment_nodes,
+            extra_pnginfo=extra_pnginfo,
+            _defer_segment_cleanup=True,
+        )
+        combined_result = combined["result"]
+        final_sequence = combined_result[3]
+        if not isinstance(final_sequence, MiniMaxH3FinalSequence):
+            raise ValueError("最终合成没有生成可交给整片高清处理的成片数据")
+
+        repair_engine = str(
+            kwargs.get("repair_engine", base.PASS2_REPAIR_OFF)
+            or base.PASS2_REPAIR_OFF
+        ).strip()
+        repair_enabled = repair_engine != base.PASS2_REPAIR_OFF
+        relay_enabled = bool(kwargs.get("relay_vsr_enabled", False))
+        if not bool(second_pass) and not repair_enabled and not relay_enabled:
+            if final_sequence.saved_file:
+                _finalize_sequence_segment_cleanup(final_sequence)
+            report = "整片高清未启用：已直接输出最终合成视频，未重复采样。"
+            return {
+                "ui": combined.get("ui", {}),
+                "result": (
+                    final_sequence.video,
+                    final_sequence.saved_file,
+                    final_sequence.seam_report,
+                    report,
+                ),
+            }
+
+        processor = MiniMaxH3EasyFinalHighResUpscalePacked()
+        highres = processor.upscale_final_video(
+            final_sequence,
+            refiner_lora=refiner_lora,
+            show_advanced_settings=False,
+            filename_prefix=filename_prefix,
+            second_pass=second_pass,
+            **kwargs,
+        )
+        video, saved_file, upscale_report = highres["result"][:3]
+        if saved_file:
+            _finalize_sequence_segment_cleanup(final_sequence)
+        return {
+            "ui": highres.get("ui", {}),
+            "result": (
+                video,
+                saved_file,
+                final_sequence.seam_report,
+                upscale_report,
+            ),
+        }
+
+
 NODE_CLASS_MAPPINGS = {
     "MiniMaxH3EasyFinalSequenceCombine": MiniMaxH3EasyFinalSequenceCombine,
     "MiniMaxH3EasyFinalHighResUpscalePacked": MiniMaxH3EasyFinalHighResUpscalePacked,
+    "MiniMaxH3EasyFinalSequenceUpscale": MiniMaxH3EasyFinalSequenceUpscale,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3EasyFinalSequenceCombine": "AICG3D H3 最终合成 · 单线成片",
     "MiniMaxH3EasyFinalHighResUpscalePacked": "AICG3D H3 成片高清二采放大",
+    "MiniMaxH3EasyFinalSequenceUpscale": "AICG3D H3 最终合成 · 高清成片",
 }

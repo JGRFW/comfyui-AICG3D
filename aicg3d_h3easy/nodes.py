@@ -4878,6 +4878,8 @@ def _fit_video_frame_count(frames: torch.Tensor, frame_count: int) -> torch.Tens
     """Pad a short clip with its edge frame, or crop it to a target count."""
     wanted = max(1, int(frame_count))
     current = int(frames.shape[0])
+    if current == wanted:
+        return frames
     if current >= wanted:
         return frames[:wanted].contiguous()
     if current <= 0:
@@ -8287,7 +8289,7 @@ def _format_memory(snapshot: Optional[dict[str, float]]) -> str:
     return "，".join(parts) or "取不到内存数据"
 
 
-def _release_render_resources(mode: Any) -> None:
+def _release_render_resources(mode: Any, reason: str = "") -> None:
     """渲染收尾：按 mode 释放显存与内存。
 
     ``卸载模型`` 把模型一并卸出显存并回收内存，占用最低，代价是下次运行要重新加载；
@@ -8309,8 +8311,9 @@ def _release_render_resources(mode: Any) -> None:
     except Exception:
         pass
     after = _memory_snapshot()
+    label = str(reason or "渲染结束").strip()
     print(
-        f"[MiniMax H3 Aicg] 渲染结束已清理（{policy}）："
+        f"[MiniMax H3 Aicg] {label}已清理（{policy}）："
         f"{_format_memory(before)} -> {_format_memory(after)}"
     )
 

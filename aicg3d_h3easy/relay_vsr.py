@@ -155,6 +155,8 @@ def _normalise_frames(frames: Any) -> torch.Tensor:
 def _fit_frame_count(frames: torch.Tensor, count: int) -> torch.Tensor:
     wanted = max(1, int(count))
     current = int(frames.shape[0])
+    if current == wanted:
+        return frames
     if current >= wanted:
         return frames[:wanted].contiguous()
     if current < 1:
@@ -166,45 +168,54 @@ def _fit_frame_count(frames: torch.Tensor, count: int) -> torch.Tensor:
 
 
 def _lock_source_exposure(frames: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
-    """Keep each frame's luminance aligned with the untouched source frame."""
+    """Keep each frame's luminance aligned without allocating a full-film copy.
+
+    The former implementation multiplied and clamped the complete CPU tensor at
+    once. At 2560x1472x362 that temporary alone is about 16.4 GiB. Process one
+    frame at a time and correct the decoded tensor in place instead.
+    """
     if not isinstance(frames, torch.Tensor) or not isinstance(reference, torch.Tensor):
         return frames
-    count = min(int(frames.shape[0]), int(reference.shape[0]))
-    if count <= 0:
+    frame_count = int(frames.shape[0])
+    reference_count = int(reference.shape[0])
+    count = min(frame_count, reference_count)
+    if count <= 0 or frames.ndim != 4 or reference.ndim != 4:
         return frames
 
-    output = frames[:count].detach().to(device="cpu", dtype=torch.float32)
-    ref = reference[:count].detach().to(device="cpu", dtype=torch.float32)
-    if tuple(output.shape[1:3]) != tuple(ref.shape[1:3]):
-        ref = torch.nn.functional.interpolate(
-            ref.permute(0, 3, 1, 2),
-            size=(int(output.shape[1]), int(output.shape[2])),
-            mode="bilinear",
-            align_corners=False,
-        ).permute(0, 2, 3, 1)
-    weights = torch.tensor(
-        [0.2126, 0.7152, 0.0722],
-        dtype=torch.float32,
-    ).view(1, 1, 1, 3)
-    output_luma = (output[..., :3] * weights).sum(dim=-1, keepdim=True).mean(
-        dim=(1, 2),
-        keepdim=True,
-    )
-    reference_luma = (ref[..., :3] * weights).sum(dim=-1, keepdim=True).mean(
-        dim=(1, 2),
-        keepdim=True,
-    )
-    gain = (reference_luma / output_luma.clamp_min(1e-4)).clamp(0.85, 1.18)
-    corrected = (output * gain).clamp(0.0, 1.0).contiguous()
-    if count < int(frames.shape[0]):
-        corrected = torch.cat(
-            (
-                corrected,
-                frames[count:].detach().to(device="cpu", dtype=torch.float32),
-            ),
-            dim=0,
-        )
-    return corrected
+    output = frames.detach().to(device="cpu", dtype=torch.float32)
+    target_height = int(output.shape[1])
+    target_width = int(output.shape[2])
+
+    with torch.inference_mode():
+        for index in range(count):
+            output_frame = output[index]
+            reference_frame = reference[index].detach().to(
+                device="cpu",
+                dtype=torch.float32,
+            )
+            if reference_frame.shape[:2] != (target_height, target_width):
+                reference_frame = torch.nn.functional.interpolate(
+                    reference_frame.permute(2, 0, 1).unsqueeze(0),
+                    size=(target_height, target_width),
+                    mode="bilinear",
+                    align_corners=False,
+                )[0].permute(1, 2, 0)
+
+            output_luma = torch.empty_like(output_frame[..., 0])
+            torch.mul(output_frame[..., 0], 0.2126, out=output_luma)
+            output_luma.add_(output_frame[..., 1], alpha=0.7152)
+            output_luma.add_(output_frame[..., 2], alpha=0.0722)
+            output_luma = output_luma.mean()
+
+            reference_luma = torch.empty_like(reference_frame[..., 0])
+            torch.mul(reference_frame[..., 0], 0.2126, out=reference_luma)
+            reference_luma.add_(reference_frame[..., 1], alpha=0.7152)
+            reference_luma.add_(reference_frame[..., 2], alpha=0.0722)
+            reference_luma = reference_luma.mean()
+
+            gain = (reference_luma / output_luma.clamp_min(1e-4)).clamp(0.85, 1.18)
+            output_frame.mul_(gain).clamp_(0.0, 1.0)
+    return output
 
 
 class RelayVSRRunner:

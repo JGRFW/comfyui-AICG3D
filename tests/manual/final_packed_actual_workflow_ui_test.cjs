@@ -12,7 +12,7 @@ const path = require("path");
 const CDP_PORT = Number(process.env.AICG3D_CDP_PORT || 9223);
 const COMFY_URL = process.env.AICG3D_COMFY_URL || "http://127.0.0.1:8188/";
 const WORKFLOW_FILE = process.env.AICG3D_WORKFLOW_FILE
-    || path.resolve(__dirname, "..", "..", "workflows", "13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json");
+    || path.resolve(__dirname, "..", "..", "workflows", "13.AICG3D_MiniMax H3 无限长视频短剧工作流.json");
 const SCREENSHOT_FILE = process.env.AICG3D_UI_SCREENSHOT
     || path.join(os.tmpdir(), "aicg3d-final-packed-actual-workflow.png");
 const TIMEOUT_MS = Number(process.env.AICG3D_UI_TIMEOUT_MS || 45000);

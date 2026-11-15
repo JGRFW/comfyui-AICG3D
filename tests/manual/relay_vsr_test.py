@@ -210,6 +210,32 @@ def test_relay_decode_runs_inside_inference_mode() -> None:
     assert result.shape == (3, 16, 12, 3)
 
 
+def test_exposure_lock_corrects_in_place_without_full_tensor_copy() -> None:
+    reference = torch.full((3, 24, 20, 3), 0.25, dtype=torch.float32)
+    processed = torch.full((3, 48, 40, 3), 0.28, dtype=torch.float32)
+    original_pointer = processed.data_ptr()
+
+    corrected = relay_vsr._lock_source_exposure(processed, reference)
+
+    assert corrected.data_ptr() == original_pointer
+    assert corrected.shape == processed.shape
+    luminance = (
+        corrected[..., :3]
+        * torch.tensor([0.2126, 0.7152, 0.0722], dtype=torch.float32)
+    ).sum(-1).mean()
+    assert abs(float(luminance) - 0.25) < 1e-3
+
+
+def test_frame_count_fit_reuses_matching_tensor() -> None:
+    frames = torch.zeros((5, 8, 6, 3), dtype=torch.float32)
+    original_pointer = frames.data_ptr()
+
+    fitted = relay_vsr._fit_frame_count(frames, 5)
+
+    assert fitted.data_ptr() == original_pointer
+    assert fitted is frames
+
+
 def test_apply_to_video_preserves_original_audio() -> None:
     frames = torch.full((4, 8, 6, 3), 0.25, dtype=torch.float32)
     enhanced = torch.full((4, 8, 6, 3), 0.5, dtype=torch.float32)
@@ -260,6 +286,8 @@ def main() -> None:
         test_matching_x2_model_and_vae_use_reference_sampler,
         test_mismatched_model_and_vae_are_rejected,
         test_relay_decode_runs_inside_inference_mode,
+        test_exposure_lock_corrects_in_place_without_full_tensor_copy,
+        test_frame_count_fit_reuses_matching_tensor,
         test_apply_to_video_preserves_original_audio,
         test_closed_renderer_keeps_non_relay_workflows_unchanged,
     )

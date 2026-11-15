@@ -61,6 +61,16 @@ def test_exposure_lock_preserves_frame_count() -> None:
     assert corrected.shape == processed.shape
 
 
+def test_matching_frame_count_reuses_full_tensor() -> None:
+    frames = torch.zeros((7, 12, 10, 3), dtype=torch.float32)
+    original_pointer = frames.data_ptr()
+
+    fitted = base._fit_video_frame_count(frames, 7)
+
+    assert fitted is frames
+    assert fitted.data_ptr() == original_pointer
+
+
 def test_relay_only_reuses_one_runner_and_muxes_audio_at_the_end() -> None:
     calls = {"runner_init": [], "enhance": [], "decode": [], "write": [], "mux": []}
 
@@ -149,5 +159,6 @@ if __name__ == "__main__":
     test_window_plan_reuses_context_without_mixing_output()
     test_exposure_lock_matches_source_luminance()
     test_exposure_lock_preserves_frame_count()
+    test_matching_frame_count_reuses_full_tensor()
     test_relay_only_reuses_one_runner_and_muxes_audio_at_the_end()
     print("final_upscale_test: ok")

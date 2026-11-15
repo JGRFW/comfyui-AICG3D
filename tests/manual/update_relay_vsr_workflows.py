@@ -259,7 +259,7 @@ def main() -> None:
         WORKFLOW_DIR / "11.AICG3D_多参考-首尾帧-数字人.json",
     )
     packed_paths = (
-        ROOT / "workflows" / "13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json",
+        ROOT / "workflows" / "13.AICG3D_MiniMax H3 无限长视频短剧工作流.json",
     )
     for path in render_paths:
         print(f"render {path}: {'updated' if update_render_workflow(path) else 'unchanged'}")

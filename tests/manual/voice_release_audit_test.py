@@ -10,8 +10,10 @@ import sys
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
+COMFY_ROOT = PLUGIN_ROOT.parents[1]
+for path in (str(COMFY_ROOT), str(PLUGIN_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 
 def test_voice_library_backend_contract() -> None:
@@ -96,10 +98,8 @@ def test_voice_library_ui_and_workflows_are_packaged() -> None:
     assert "固定角色音色库" in voice_ui.read_text(encoding="utf-8")
 
     for workflow in (
-        "11.AICG3D_多参考-首尾帧-数字人.json",
-        "13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json",
-        "13.AICG3D_参考无限生成视频.json",
-        "13.AICG3D_无限分段 生视频.json",
+        "12.AICG3D_二彩高清放大.json",
+        "13.AICG3D_MiniMax H3 无限长视频短剧工作流.json",
     ):
         data = json.loads((PLUGIN_ROOT / "workflows" / workflow).read_text(encoding="utf-8"))
         types = {node.get("type") for node in data.get("nodes", [])}

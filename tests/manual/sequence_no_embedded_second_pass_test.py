@@ -54,7 +54,7 @@ def main() -> None:
     workflow_path = (
         PLUGIN_ROOT
         / "workflows"
-        / "13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json"
+        / "13.AICG3D_MiniMax H3 无限长视频短剧工作流.json"
     )
     workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
     node = next(

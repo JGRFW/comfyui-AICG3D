@@ -103,14 +103,27 @@ jobs:
               "LICENSE",
           }
           missing = sorted(required - names)
-          workflows = sorted(name for name in names if name.startswith("workflows/") and name.endswith(".json"))
+          required_workflows = {
+              "workflows/10.AICG3D-SKILLS 多参考提示词推理工作流.json",
+              "workflows/11.AICG3D_多参考-首尾帧-数字人.json",
+              "workflows/12.AICG3D_二彩高清放大.json",
+              "workflows/13.AICG3D_MiniMax H3 无限长视频短剧工作流.json",
+              "workflows/18.AICG3D-CSR_人物场景动作迁移.json",
+              "workflows/20.AICG3D-换姿势，换服装，换人脸.json",
+              "workflows/22.AICG3D-VOSR2-最强图片视频超分极速流.json",
+          }
+          workflows = set(
+              name for name in names
+              if name.startswith("workflows/") and name.endswith(".json")
+          )
           last_error = None
           for attempt in range(1, 37):
-              if not missing and len(workflows) >= 9:
+              if not missing and workflows == required_workflows:
                   print(f"Verified {len(names)} files and {len(workflows)} workflows")
                   break
               last_error = RuntimeError(
-                  f"incomplete package: missing={missing}, workflows={len(workflows)}"
+                  f"incomplete package: missing={missing}, "
+                  f"workflows={len(workflows)}, expected={sorted(required_workflows)}"
               )
               print(f"Verification attempt {attempt}/36 failed: {last_error}")
               if attempt >= 36:
@@ -121,5 +134,8 @@ jobs:
               with zipfile.ZipFile(io.BytesIO(payload)) as archive:
                   names = set(archive.namelist())
               missing = sorted(required - names)
-              workflows = sorted(name for name in names if name.startswith("workflows/") and name.endswith(".json"))
+              workflows = set(
+                  name for name in names
+                  if name.startswith("workflows/") and name.endswith(".json")
+              )
           PY

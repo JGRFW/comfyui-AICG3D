@@ -1,22 +1,22 @@
 {
   "id": "f85c8784-876d-4487-a217-0a6fe2ac7f4e",
   "revision": 5,
-  "last_node_id": 1026,
-  "last_link_id": 142,
+  "last_node_id": 1170,
+  "last_link_id": 362,
   "nodes": [
     {
       "id": 941,
       "type": "SaveVideo",
       "pos": [
-        590,
+        1030,
         200
       ],
       "size": [
-        700,
-        690
+        830,
+        660
       ],
       "flags": {},
-      "order": 6,
+      "order": 31,
       "mode": 0,
       "inputs": [
         {
@@ -24,7 +24,7 @@
           "localized_name": "视频",
           "name": "video",
           "type": "VIDEO",
-          "link": 38
+          "link": 327
         },
         {
           "localized_name": "文件名前缀",
@@ -92,12 +92,12 @@
       "id": 942,
       "type": "AICG3D_H3Loader",
       "pos": [
-        -1410,
+        -750,
         200
       ],
       "size": [
-        320,
-        660.5000420791486
+        450,
+        610
       ],
       "flags": {},
       "order": 0,
@@ -348,42 +348,29 @@
           "localized_name": "model",
           "name": "model",
           "type": "MODEL",
-          "links": null
+          "links": []
         }
       ],
       "properties": {
         "Node name for S&R": "AICG3D_H3Loader",
         "aicg3d_lora_state": {
-          "1": {},
           "2": {
-            "selected": "minimax\\Minimax H3真实电影质感V0.1.safetensors",
-            "enabled": true
-          },
-          "3": {
-            "selected": "minimax\\minimax_h3_lms_v1.0_r64视频锐化.safetensors",
+            "selected": "minimax\\minimax_h3_motion_adapter_pilot_r16高速动作重生成时帧间跳跃、运动幅度虚高问题，显著提升打斗、激烈动画片段的动作流畅.safetensors",
             "enabled": false
           },
-          "4": {
-            "selected": "minimax\\曝光-亮度-3-3.safetensors",
-            "enabled": false
-          },
-          "5": {},
-          "6": {},
-          "7": {},
-          "8": {},
-          "9": {}
+          "7": {}
         }
       },
       "widgets_values": [
-        "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
-        "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
+        "无",
+        "MiniMax/PRISM_DMAD_PDMD_int8.safetensors",
         "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-        "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_lynnreal_light_vae_int8_convrot.safetensors",
         "minimax_h3_audio_vae_fp32.safetensors",
-        "minimax\\minimax_h3_dmad_full_dareties_v4_step600_comfy_fro.safetensors",
+        "minimax\\pika_h3_flex_ref2va_v1_bf16.safetensors",
         1,
-        "minimax\\Minimax H3真实电影质感V0.1.safetensors",
-        0.3,
+        "none",
+        0.75,
         "none",
         1,
         "none",
@@ -399,18 +386,18 @@
         1,
         "none",
         1,
-        "Comfy Kitchen INT8"
+        "自动（Sage 优先）"
       ],
       "widgets_values_named": {
-        "fl2va_model": "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
-        "ref2va_model": "MiniMax/DasiwaMinimaxH3_dasiwaREF2VAHybridV1_0.safetensors",
+        "fl2va_model": "无",
+        "ref2va_model": "MiniMax/PRISM_DMAD_PDMD_int8.safetensors",
         "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-        "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+        "video_vae": "minimax_h3_lynnreal_light_vae_int8_convrot.safetensors",
         "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
-        "lora_1": "minimax\\minimax_h3_dmad_full_dareties_v4_step600_comfy_fro.safetensors",
+        "lora_1": "minimax\\pika_h3_flex_ref2va_v1_bf16.safetensors",
         "lora_1_strength": 1,
-        "lora_2": "minimax\\Minimax H3真实电影质感V0.1.safetensors",
-        "lora_2_strength": 0.3,
+        "lora_2": "none",
+        "lora_2_strength": 0.75,
         "lora_3": "none",
         "lora_3_strength": 1,
         "lora_4": "none",
@@ -426,22 +413,22 @@
         "lora_8_strength": 1,
         "lora_9": "none",
         "lora_9_strength": 1,
-        "注意力加速(Sage)": "Comfy Kitchen INT8"
+        "注意力加速(Sage)": "自动（Sage 优先）"
       }
     },
     {
       "id": 945,
       "type": "AICG3D_H3RenderAdvancedWithModel",
       "pos": [
-        160,
+        680,
         200
       ],
       "size": [
-        350,
-        770
+        310,
+        610
       ],
       "flags": {},
-      "order": 5,
+      "order": 30,
       "mode": 0,
       "inputs": [
         {
@@ -449,7 +436,7 @@
           "localized_name": "模型",
           "name": "model",
           "type": "MODEL",
-          "link": 141
+          "link": 347
         },
         {
           "label": "H3 Context",
@@ -491,16 +478,16 @@
           "link": null
         },
         {
-          "label": "低清模型",
-          "localized_name": "低清模型",
+          "label": "首采模型",
+          "localized_name": "首采模型",
           "name": "digital_human_lowres_model",
           "shape": 7,
           "type": "MODEL",
           "link": null
         },
         {
-          "label": "高清模型",
-          "localized_name": "高清模型",
+          "label": "二采模型",
+          "localized_name": "二采模型",
           "name": "digital_human_highres_model",
           "shape": 7,
           "type": "MODEL",
@@ -579,6 +566,15 @@
           "link": null
         },
         {
+          "localized_name": "digital_human_upscale_scale",
+          "name": "digital_human_upscale_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "digital_human_upscale_scale"
+          },
+          "link": null
+        },
+        {
           "localized_name": "digital_human_cfg",
           "name": "digital_human_cfg",
           "type": "FLOAT",
@@ -615,20 +611,29 @@
           "link": null
         },
         {
-          "localized_name": "sample_preview",
-          "name": "sample_preview",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "sample_preview"
-          },
-          "link": null
-        },
-        {
           "localized_name": "digital_human_refiner_lora",
           "name": "digital_human_refiner_lora",
           "type": "COMBO",
           "widget": {
             "name": "digital_human_refiner_lora"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "show_advanced_inputs",
+          "name": "show_advanced_inputs",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "show_advanced_inputs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sample_preview",
+          "name": "sample_preview",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "sample_preview"
           },
           "link": null
         }
@@ -640,7 +645,7 @@
           "name": "video",
           "type": "VIDEO",
           "links": [
-            38
+            327
           ]
         }
       ],
@@ -648,22 +653,23 @@
         "Node name for S&R": "AICG3D_H3RenderAdvanced"
       },
       "widgets_values": [
-        357482398646636,
-        "randomize",
-        "euler",
+        771204598,
+        "fixed",
+        "er_sde",
         "beta",
         8,
-        1.0,
+        1,
         "释放缓存",
         0,
-        true,
+        false,
         1.5,
-        1.0,
+        1,
         4,
         0.3,
         "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
-        false,
         "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors",
+        true,
+        true,
         false,
         "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
         "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
@@ -671,22 +677,23 @@
         true
       ],
       "widgets_values_named": {
-        "noise_seed": 357482398646636,
-        "sampler_name": "euler",
+        "show_advanced_inputs": true,
+        "noise_seed": 771204598,
+        "control_after_generate": "fixed",
+        "sampler_name": "er_sde",
         "scheduler": "beta",
         "steps": 8,
-        "denoise": 1.0,
+        "denoise": 1,
         "cleanup_after_run": "释放缓存",
-        "control_after_generate": "randomize",
         "guide_frame_idx": 0,
-        "digital_human_selflift": true,
+        "digital_human_selflift": false,
         "digital_human_upscale_scale": 1.5,
-        "digital_human_cfg": 1.0,
+        "digital_human_cfg": 1,
         "digital_human_transition_step": 4,
         "digital_human_lowres_scale": 0.3,
         "digital_human_upscaler_model": "minimax_h3_latent_upscaler_3d_fp16_V2.safetensors",
-        "sample_preview": false,
         "digital_human_refiner_lora": "minimax\\minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors",
+        "sample_preview": true,
         "relay_vsr_enabled": false,
         "relay_vsr_model": "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
         "relay_vsr_vae": "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
@@ -698,15 +705,15 @@
       "id": 951,
       "type": "AICG3D_H3",
       "pos": [
-        -680,
-        200
+        50,
+        210
       ],
       "size": [
-        480,
-        870
+        360,
+        720
       ],
       "flags": {},
-      "order": 4,
+      "order": 29,
       "mode": 0,
       "inputs": [
         {
@@ -717,12 +724,20 @@
           "link": 42
         },
         {
+          "label": "voice_cast",
+          "localized_name": "voice_cast",
+          "name": "voice_cast",
+          "shape": 7,
+          "type": "AICG3D_CHARACTER_VOICE_CAST",
+          "link": null
+        },
+        {
           "label": "AICG3D",
           "localized_name": "AICG3D",
           "name": "media",
           "shape": 7,
           "type": "*",
-          "link": 126
+          "link": 344
         },
         {
           "localized_name": "mode",
@@ -903,13 +918,6 @@
             "name": "digital_human_rife_clear_cache"
           },
           "link": null
-        },
-        {
-          "label": "voice_cast",
-          "localized_name": "角色音色库",
-          "name": "voice_cast",
-          "type": "AICG3D_CHARACTER_VOICE_CAST",
-          "link": 142
         }
       ],
       "outputs": [
@@ -919,7 +927,7 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            141
+            347
           ]
         },
         {
@@ -937,220 +945,312 @@
         "minimax_h3_virtual_media_links": [],
         "minimax_h3_prompt_reference_doc": {
           "version": 1,
-          "text": "subject_definitions:\r<Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r<Picture 1>: fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: <Picture 1>: fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `<Picture 1>: fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 <Picture 1> 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 从梦想掌剑走天涯</d>\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 看一看世界的泛黄</d>\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A",
+          "text": "【0s - 5s】前奏炸场，全景入画\r\n\r\n运镜：从 <Picture 5> 的舞台顶部灯光开始，快速向下摇摄（Tilt down）至全景，随后缓慢平推（Dolly in）。\r\n\r\n画面：舞台灯光爆闪，<Picture 1>（紫衣女孩）猛地拨动吉他琴弦，<Picture 2>（蓝衣男孩）双手重重按下钢琴键，<Picture 3>（主唱）举起麦克风起范儿，<Picture 4> 的小人们在后方挥手。\r\n\r\n【5s - 10s】主唱特写，霸气开嗓\r\n\r\n运镜：中近景，围绕主唱进行 180度环绕运镜（Orbit）。\r\n\r\n画面：镜头聚焦 <Picture 3> 红衣主唱，她闭着眼睛眉头微皱，用尽全力飙高音，双马尾随着头部动作甩动。\r\n\r\n【10s - 15s】乐器SOLO，反差萌拉满\r\n\r\n运镜：分屏效果或快速剪辑（Quick Pan）。先给 <Picture 1> 吉他特写（微仰角，Low angle），再快速平移（Whip pan）到 <Picture 2> 的钢琴特写（侧面，Side angle）。\r\n\r\n画面：<Picture 1> 的紫衣女孩一边弹吉他一边点头踩点，裙摆和发饰飞扬；<Picture 2> 的男孩表情严肃，手指在琴键上快速飞舞，形成强烈的武侠与西洋乐器反差。\r\n\r\n【15s - 20s】高潮合唱，互动狂欢\r\n\r\n运镜：中景，镜头拉远（Pull out）展示乐队群像。\r\n\r\n画面：主唱 <Picture 3> 走到吉他手 <Picture 1> 和钢琴手 <Picture 2> 中间，三人同框互动。<Picture 4> 的伴舞团在后方整齐划一地做武侠动作（如太极推手）。舞台后方的 LED 屏幕爆发出水墨金光的特效。\r\n\r\n【20s - 24.3s】完美定格，帅气收尾\r\n\r\n运镜：高角度俯拍（High angle），镜头快速拉远并轻微震动（Camera shake）。\r\n\r\n画面：配合 <Audio 1> 最后一个重音，主唱举起手臂，吉他手举起拨片，钢琴手站起来，所有人（包含 <Picture 4>）摆出一个极其酷炫又可爱的“武林高手”收招姿势。画面定格。\n",
           "parts": [
             {
               "type": "text",
-              "text": "subject_definitions:\r<Subject 1> 是 "
+              "text": "【0s - 5s】前奏炸场，全景入画\r\n\r\n运镜：从 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片5",
+              "tag": "<Picture 5>",
+              "label": "图片5",
+              "fullLabel": "Q版音乐台演奏1场景.jpeg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 5,
+              "mediaIndex": 5,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=Q%E7%89%88%E9%9F%B3%E4%B9%90%E5%8F%B0%E6%BC%94%E5%A5%8F1%E5%9C%BA%E6%99%AF.jpeg&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 的舞台顶部灯光开始，快速向下摇摄（Tilt down）至全景，随后缓慢平推（Dolly in）。\r\n\r\n画面：舞台灯光爆闪，"
             },
             {
               "type": "mention",
               "token": "@图片1",
               "tag": "<Picture 1>",
               "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "fullLabel": "ComfyUI_00001__01.jpg",
               "mediaType": "image",
               "referenceMode": "index",
               "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "mediaIndex": 1,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_00001__01.jpg&type=input"
             },
             {
               "type": "text",
-              "text": " 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 "
+              "text": "（紫衣女孩）猛地拨动吉他琴弦，"
+            },
+            {
+              "type": "mention",
+              "token": "@图片2",
+              "tag": "<Picture 2>",
+              "label": "图片2",
+              "fullLabel": "ComfyUI_00001__02.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 2,
+              "mediaIndex": 2,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_00001__02.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": "（蓝衣男孩）双手重重按下钢琴键，"
+            },
+            {
+              "type": "mention",
+              "token": "@图片3",
+              "tag": "<Picture 3>",
+              "label": "图片3",
+              "fullLabel": "ComfyUI_temp_lrjhj_00003__01.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 3,
+              "mediaIndex": 3,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_temp_lrjhj_00003__01.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": "（主唱）举起麦克风起范儿，"
+            },
+            {
+              "type": "mention",
+              "token": "@图片4",
+              "tag": "<Picture 4>",
+              "label": "图片4",
+              "fullLabel": "ComfyUI_temp_lrjhj_00003__11.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 4,
+              "mediaIndex": 4,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_temp_lrjhj_00003__11.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 的小人们在后方挥手。\r\n\r\n【5s - 10s】主唱特写，霸气开嗓\r\n\r\n运镜：中近景，围绕主唱进行 180度环绕运镜（Orbit）。\r\n\r\n画面：镜头聚焦 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片3",
+              "tag": "<Picture 3>",
+              "label": "图片3",
+              "fullLabel": "ComfyUI_temp_lrjhj_00003__01.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 3,
+              "mediaIndex": 3,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_temp_lrjhj_00003__01.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 红衣主唱，她闭着眼睛眉头微皱，用尽全力飙高音，双马尾随着头部动作甩动。\r\n\r\n【10s - 15s】乐器SOLO，反差萌拉满\r\n\r\n运镜：分屏效果或快速剪辑（Quick Pan）。先给 "
             },
             {
               "type": "mention",
               "token": "@图片1",
               "tag": "<Picture 1>",
               "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "fullLabel": "ComfyUI_00001__01.jpg",
               "mediaType": "image",
               "referenceMode": "index",
               "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "mediaIndex": 1,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_00001__01.jpg&type=input"
             },
             {
               "type": "text",
-              "text": " 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r"
+              "text": " 吉他特写（微仰角，Low angle），再快速平移（Whip pan）到 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片2",
+              "tag": "<Picture 2>",
+              "label": "图片2",
+              "fullLabel": "ComfyUI_00001__02.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 2,
+              "mediaIndex": 2,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_00001__02.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 的钢琴特写（侧面，Side angle）。\r\n\r\n画面："
             },
             {
               "type": "mention",
               "token": "@图片1",
               "tag": "<Picture 1>",
               "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "fullLabel": "ComfyUI_00001__01.jpg",
               "mediaType": "image",
               "referenceMode": "index",
               "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "mediaIndex": 1,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_00001__01.jpg&type=input"
             },
             {
               "type": "text",
-              "text": ": fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 "
+              "text": " 的紫衣女孩一边弹吉他一边点头踩点，裙摆和发饰飞扬；"
+            },
+            {
+              "type": "mention",
+              "token": "@图片2",
+              "tag": "<Picture 2>",
+              "label": "图片2",
+              "fullLabel": "ComfyUI_00001__02.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 2,
+              "mediaIndex": 2,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_00001__02.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 的男孩表情严肃，手指在琴键上快速飞舞，形成强烈的武侠与西洋乐器反差。\r\n\r\n【15s - 20s】高潮合唱，互动狂欢\r\n\r\n运镜：中景，镜头拉远（Pull out）展示乐队群像。\r\n\r\n画面：主唱 "
+            },
+            {
+              "type": "mention",
+              "token": "@图片3",
+              "tag": "<Picture 3>",
+              "label": "图片3",
+              "fullLabel": "ComfyUI_temp_lrjhj_00003__01.jpg",
+              "mediaType": "image",
+              "referenceMode": "index",
+              "ordinal": 3,
+              "mediaIndex": 3,
+              "sourceId": 1124,
+              "sourceSlot": 0,
+              "previewUrl": "/view?filename=ComfyUI_temp_lrjhj_00003__01.jpg&type=input"
+            },
+            {
+              "type": "text",
+              "text": " 走到吉他手 "
             },
             {
               "type": "mention",
               "token": "@图片1",
               "tag": "<Picture 1>",
               "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "fullLabel": "ComfyUI_00001__01.jpg",
               "mediaType": "image",
               "referenceMode": "index",
               "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "mediaIndex": 1,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_00001__01.jpg&type=input"
             },
             {
               "type": "text",
-              "text": " 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 "
+              "text": " 和钢琴手 "
             },
             {
               "type": "mention",
-              "token": "@图片1",
-              "tag": "<Picture 1>",
-              "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "token": "@图片2",
+              "tag": "<Picture 2>",
+              "label": "图片2",
+              "fullLabel": "ComfyUI_00001__02.jpg",
               "mediaType": "image",
               "referenceMode": "index",
-              "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "ordinal": 2,
+              "mediaIndex": 2,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_00001__02.jpg&type=input"
             },
             {
               "type": "text",
-              "text": " 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 "
+              "text": " 中间，三人同框互动。"
             },
             {
               "type": "mention",
-              "token": "@图片1",
-              "tag": "<Picture 1>",
-              "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "token": "@图片4",
+              "tag": "<Picture 4>",
+              "label": "图片4",
+              "fullLabel": "ComfyUI_temp_lrjhj_00003__11.jpg",
               "mediaType": "image",
               "referenceMode": "index",
-              "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "ordinal": 4,
+              "mediaIndex": 4,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_temp_lrjhj_00003__11.jpg&type=input"
             },
             {
               "type": "text",
-              "text": " 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: "
+              "text": " 的伴舞团在后方整齐划一地做武侠动作（如太极推手）。舞台后方的 LED 屏幕爆发出水墨金光的特效。\r\n\r\n【20s - 24.3s】完美定格，帅气收尾\r\n\r\n运镜：高角度俯拍（High angle），镜头快速拉远并轻微震动（Camera shake）。\r\n\r\n画面：配合 "
             },
             {
               "type": "mention",
-              "token": "@图片1",
-              "tag": "<Picture 1>",
-              "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
-              "mediaType": "image",
+              "token": "@音频1",
+              "tag": "<Audio 1>",
+              "label": "音频1",
+              "fullLabel": "男儿当自强Q版女孩版.mp3",
+              "mediaType": "audio",
               "referenceMode": "index",
               "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "mediaIndex": 6,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=%E7%94%B7%E5%84%BF%E5%BD%93%E8%87%AA%E5%BC%BAQ%E7%89%88%E5%A5%B3%E5%AD%A9%E7%89%88.mp3&type=input"
             },
             {
               "type": "text",
-              "text": ": fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 "
+              "text": " 最后一个重音，主唱举起手臂，吉他手举起拨片，钢琴手站起来，所有人（包含 "
             },
             {
               "type": "mention",
-              "token": "@图片1",
-              "tag": "<Picture 1>",
-              "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
+              "token": "@图片4",
+              "tag": "<Picture 4>",
+              "label": "图片4",
+              "fullLabel": "ComfyUI_temp_lrjhj_00003__11.jpg",
               "mediaType": "image",
               "referenceMode": "index",
-              "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
+              "ordinal": 4,
+              "mediaIndex": 4,
+              "sourceId": 1124,
               "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
+              "previewUrl": "/view?filename=ComfyUI_temp_lrjhj_00003__11.jpg&type=input"
             },
             {
               "type": "text",
-              "text": " 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `"
-            },
-            {
-              "type": "mention",
-              "token": "@图片1",
-              "tag": "<Picture 1>",
-              "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
-              "mediaType": "image",
-              "referenceMode": "index",
-              "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
-              "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
-            },
-            {
-              "type": "text",
-              "text": ": fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 "
-            },
-            {
-              "type": "mention",
-              "token": "@图片1",
-              "tag": "<Picture 1>",
-              "label": "图片1",
-              "fullLabel": "Qwen_image_2.1_00033.png",
-              "mediaType": "image",
-              "referenceMode": "index",
-              "ordinal": 1,
-              "mediaIndex": null,
-              "sourceId": 1017,
-              "sourceSlot": 0,
-              "previewUrl": "/view?filename=Qwen_image_2.1_00033.png&type=input"
-            },
-            {
-              "type": "text",
-              "text": " 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r"
-            },
-            {
-              "type": "dialogue",
-              "text": "[Mandarin singing] 从梦想掌剑走天涯"
-            },
-            {
-              "type": "text",
-              "text": "\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r"
-            },
-            {
-              "type": "dialogue",
-              "text": "[Mandarin singing] 看一看世界的泛黄"
-            },
-            {
-              "type": "text",
-              "text": "\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A"
+              "text": "）摆出一个极其酷炫又可爱的“武林高手”收招姿势。画面定格。\n"
             }
           ]
         },
-        "minimax_h3_prompt_view_mode": "raw"
+        "minimax_h3_prompt_view_mode": "structured"
       },
       "widgets_values": [
         "数字人",
-        "subject_definitions:\r<Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r<Picture 1>: fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: <Picture 1>: fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `<Picture 1>: fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 <Picture 1> 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 从梦想掌剑走天涯</d>\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 看一看世界的泛黄</d>\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A",
-        "640P",
+        "【0s - 5s】前奏炸场，全景入画\r\n\r\n运镜：从 <Picture 5> 的舞台顶部灯光开始，快速向下摇摄（Tilt down）至全景，随后缓慢平推（Dolly in）。\r\n\r\n画面：舞台灯光爆闪，<Picture 1>（紫衣女孩）猛地拨动吉他琴弦，<Picture 2>（蓝衣男孩）双手重重按下钢琴键，<Picture 3>（主唱）举起麦克风起范儿，<Picture 4> 的小人们在后方挥手。\r\n\r\n【5s - 10s】主唱特写，霸气开嗓\r\n\r\n运镜：中近景，围绕主唱进行 180度环绕运镜（Orbit）。\r\n\r\n画面：镜头聚焦 <Picture 3> 红衣主唱，她闭着眼睛眉头微皱，用尽全力飙高音，双马尾随着头部动作甩动。\r\n\r\n【10s - 15s】乐器SOLO，反差萌拉满\r\n\r\n运镜：分屏效果或快速剪辑（Quick Pan）。先给 <Picture 1> 吉他特写（微仰角，Low angle），再快速平移（Whip pan）到 <Picture 2> 的钢琴特写（侧面，Side angle）。\r\n\r\n画面：<Picture 1> 的紫衣女孩一边弹吉他一边点头踩点，裙摆和发饰飞扬；<Picture 2> 的男孩表情严肃，手指在琴键上快速飞舞，形成强烈的武侠与西洋乐器反差。\r\n\r\n【15s - 20s】高潮合唱，互动狂欢\r\n\r\n运镜：中景，镜头拉远（Pull out）展示乐队群像。\r\n\r\n画面：主唱 <Picture 3> 走到吉他手 <Picture 1> 和钢琴手 <Picture 2> 中间，三人同框互动。<Picture 4> 的伴舞团在后方整齐划一地做武侠动作（如太极推手）。舞台后方的 LED 屏幕爆发出水墨金光的特效。\r\n\r\n【20s - 24.3s】完美定格，帅气收尾\r\n\r\n运镜：高角度俯拍（High angle），镜头快速拉远并轻微震动（Camera shake）。\r\n\r\n画面：配合 <Audio 1> 最后一个重音，主唱举起手臂，吉他手举起拨片，钢琴手站起来，所有人（包含 <Picture 4>）摆出一个极其酷炫又可爱的“武林高手”收招姿势。画面定格。\n",
+        "720P",
         "16:9",
         1152,
         640,
-        17.5,
+        10,
         true,
         24,
         "首帧优先",
@@ -1167,12 +1267,12 @@
       ],
       "widgets_values_named": {
         "mode": "数字人",
-        "prompt": "subject_definitions:\r<Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。\r\rsummary:\r[reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。\r\rretention_analysis:\r<Picture 1>: fully_preserved - 人物身份、脸型、发型、服装、配饰、体型和构图保持稳定。\r锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏、停顿、音色和时长作为完整最终音轨原样复用。\r\rdetailed_description:\r[Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:06.600, <Subject 1> (S1) sings maintains the original speaking motion, lip-sync, and mouth timing.最终提示词不使用 `<Audio N>` 标签，可直接粘贴到 11 号数字人工作流。# Skill 参考：references/template.md # 数字人演唱提示词模板 subject_definitions: <Subject 1> 是 <Picture 1> 中的人物，保持脸型、五官、发型、服装、配饰、体型、背景和构图稳定。人物是目标视频中的歌手（S1）。summary: [reference generation + digital human audio reuse] 人物保持 <Picture 1> 中的身份与外观，按照锁定歌曲音轨完成逐字演唱和口型同步。retention_analysis: <Picture 1>: fully_preserved - 人物身份、外观、服装和构图保持稳定。锁定歌曲音轨: fully_copy - 原歌曲、人声、伴奏、节奏和时长完整复用。detailed_description: [Shot 1] 写实音乐视频风格，<Subject 1>（S1）保持 <Picture 1> 中的人物外观、服装、背景和构图，镜头稳定，口型、下颌、呼吸、眼神和头肩动作跟随锁定歌曲音轨同步。00:00.000-00:03.- 保留原语言、标点和文字，不自行补句号或改写。- 口型与每个时间段对应，长音、转音、换气和重音写成可见的面部与呼吸变化。- 不把全部歌词堆在开头，也不写“随后继续演唱”这类笼统说明。### overall_soundscape 写 `N/A`。完整歌曲音轨已经由数字人模式锁定，不重复描述背景音乐。### non_diegetic_music 写 `N/A`。不创建第二条音乐或替代音轨。## 三、稳定与防错 - 人物身份、脸型、发型、服装、配饰和构图全程不变。- 镜头稳定，允许极轻微推进，不做无依据的大幅运镜。- 头肩和手指只做与节拍一致的小幅自然律动。- 不添加新的歌词、对白、旁白、人声、音效或音乐。- 不添加字幕、歌词文字、Logo、水印、麦克风、乐器或额外人物，除非用户明确要求。- 不出现口型延迟、提前张嘴、闭嘴发声、张口无声、五官漂移或面部拉伸。## 四、输出检查 返回前确认： 1.六个字段完整且顺序正确2.没有 `<Audio N>` 标签3.`retention_analysis` 同时有 `<Picture 1>: fully_preserved` 和“锁定歌曲音轨: fully_copy”4.`detailed_description` 从 `[Shot 1]` 开始5.每个真实时间段都有对应 `` 歌词6.歌词逐字一致，时间码没有倒序7.第六段之后没有说明或建议。用户只给一句创意时，先补足合理的可见动作、镜头、声音与连续性不得改变用户明确指定的主体、对白和事件。请只输出可直接粘贴到 11 号数字人工作流的 MiniMax H3 六段式正文。把 <Picture 1> 中的人物定义为 <Subject 1>（S1），歌曲使用 11 号工作流锁定的全局音轨retention_analysis 写“锁定歌曲音轨: fully_copy - ...”。禁止输出 <Audio N> 标签。把识别歌词按真实时间码逐字写入 detailed_description，每段写成时间范围、<Subject 1> 演唱动作和一条 :00:06.600-00:11.440, <Subject 1> (S1)\r\rThe singing, lip sync, and lyrics follow this timecode schedule:\r00:00.000-00:06.600, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 从梦想掌剑走天涯</d>\r\r00:06.600-00:11.440, <Subject 1> (S1) sings:\r<d>[Mandarin singing] 看一看世界的泛黄</d>\r\roverall_soundscape:\rN/A\r\rnon_diegetic_music:\rN/A",
-        "resolution": "640P",
+        "prompt": "【0s - 5s】前奏炸场，全景入画\r\n\r\n运镜：从 <Picture 5> 的舞台顶部灯光开始，快速向下摇摄（Tilt down）至全景，随后缓慢平推（Dolly in）。\r\n\r\n画面：舞台灯光爆闪，<Picture 1>（紫衣女孩）猛地拨动吉他琴弦，<Picture 2>（蓝衣男孩）双手重重按下钢琴键，<Picture 3>（主唱）举起麦克风起范儿，<Picture 4> 的小人们在后方挥手。\r\n\r\n【5s - 10s】主唱特写，霸气开嗓\r\n\r\n运镜：中近景，围绕主唱进行 180度环绕运镜（Orbit）。\r\n\r\n画面：镜头聚焦 <Picture 3> 红衣主唱，她闭着眼睛眉头微皱，用尽全力飙高音，双马尾随着头部动作甩动。\r\n\r\n【10s - 15s】乐器SOLO，反差萌拉满\r\n\r\n运镜：分屏效果或快速剪辑（Quick Pan）。先给 <Picture 1> 吉他特写（微仰角，Low angle），再快速平移（Whip pan）到 <Picture 2> 的钢琴特写（侧面，Side angle）。\r\n\r\n画面：<Picture 1> 的紫衣女孩一边弹吉他一边点头踩点，裙摆和发饰飞扬；<Picture 2> 的男孩表情严肃，手指在琴键上快速飞舞，形成强烈的武侠与西洋乐器反差。\r\n\r\n【15s - 20s】高潮合唱，互动狂欢\r\n\r\n运镜：中景，镜头拉远（Pull out）展示乐队群像。\r\n\r\n画面：主唱 <Picture 3> 走到吉他手 <Picture 1> 和钢琴手 <Picture 2> 中间，三人同框互动。<Picture 4> 的伴舞团在后方整齐划一地做武侠动作（如太极推手）。舞台后方的 LED 屏幕爆发出水墨金光的特效。\r\n\r\n【20s - 24.3s】完美定格，帅气收尾\r\n\r\n运镜：高角度俯拍（High angle），镜头快速拉远并轻微震动（Camera shake）。\r\n\r\n画面：配合 <Audio 1> 最后一个重音，主唱举起手臂，吉他手举起拨片，钢琴手站起来，所有人（包含 <Picture 4>）摆出一个极其酷炫又可爱的“武林高手”收招姿势。画面定格。\n",
+        "resolution": "720P",
         "aspect_ratio": "16:9",
         "width": 1152,
         "height": 640,
-        "seconds": 17.5,
+        "seconds": 10,
         "advanced": true,
         "fps": 24,
         "keyframe_role": "首帧优先",
@@ -1189,18 +1289,789 @@
       }
     },
     {
-      "id": 1017,
-      "type": "AICG3D_H3MediaLoader",
+      "id": 1081,
+      "type": "Label (rgthree)",
       "pos": [
-        -1080,
-        260
+        -410,
+        -40
       ],
       "size": [
-        370,
-        570
+        1823.35986328125,
+        140
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "MiniMax H3 工作流  三方加速",
+      "properties": {
+        "fontSize": 140,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        },
+        "widget_ue_connectable": {}
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1083,
+      "type": "LoadVideo",
+      "pos": [
+        5020,
+        330
+      ],
+      "size": [
+        1250,
+        890
       ],
       "flags": {},
-      "order": 1,
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "视频文件",
+          "name": "file",
+          "type": "COMBO",
+          "widget": {
+            "name": "file"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "选择要上传的文件",
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "title": "加载视频（可上传）",
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "ComfyUI_00093_.mp4",
+        "image"
+      ],
+      "widgets_values_named": {
+        "file": "ComfyUI_00093_.mp4",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 1084,
+      "type": "LoadVideo",
+      "pos": [
+        6290,
+        330
+      ],
+      "size": [
+        1280,
+        890
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "视频文件",
+          "name": "file",
+          "type": "COMBO",
+          "widget": {
+            "name": "file"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "选择要上传的文件",
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": []
+        }
+      ],
+      "title": "加载视频（可上传）",
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "ComfyUI_00094_.mp4",
+        "image"
+      ],
+      "widgets_values_named": {
+        "file": "ComfyUI_00094_.mp4",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 1085,
+      "type": "Label (rgthree)",
+      "pos": [
+        5400,
+        110
+      ],
+      "size": [
+        529.7999877929688,
+        100
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "480P无二采",
+      "properties": {
+        "fontSize": 100,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1086,
+      "type": "Label (rgthree)",
+      "pos": [
+        6680,
+        100
+      ],
+      "size": [
+        560,
+        100
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "480P 开二采",
+      "properties": {
+        "fontSize": 100,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1087,
+      "type": "LoadVideo",
+      "pos": [
+        7590,
+        310
+      ],
+      "size": [
+        1100,
+        900
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "视频文件",
+          "name": "file",
+          "type": "COMBO",
+          "widget": {
+            "name": "file"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "选择要上传的文件",
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": []
+        }
+      ],
+      "title": "加载视频（可上传）",
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "ComfyUI_00092_.mp4",
+        "image"
+      ],
+      "widgets_values_named": {
+        "file": "ComfyUI_00092_.mp4",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 1088,
+      "type": "Label (rgthree)",
+      "pos": [
+        7870,
+        220
+      ],
+      "size": [
+        510,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "1280x736 耗时243.53s",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1089,
+      "type": "Label (rgthree)",
+      "pos": [
+        7850,
+        110
+      ],
+      "size": [
+        560,
+        100
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "720p无 二采",
+      "properties": {
+        "fontSize": 100,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1090,
+      "type": "Label (rgthree)",
+      "pos": [
+        5410,
+        230
+      ],
+      "size": [
+        478.64996337890625,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "864x480 耗时101.94s",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1091,
+      "type": "Label (rgthree)",
+      "pos": [
+        6710,
+        210
+      ],
+      "size": [
+        500,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "1280x704耗时251.74s",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1093,
+      "type": "Label (rgthree)",
+      "pos": [
+        5010,
+        -170
+      ],
+      "size": [
+        247.314453125,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 11,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "调度器beta",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "Arial",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1094,
+      "type": "Label (rgthree)",
+      "pos": [
+        5010,
+        -240
+      ],
+      "size": [
+        316.7724609375,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 12,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "采样器 er_sde",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "Arial",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1095,
+      "type": "Label (rgthree)",
+      "pos": [
+        5010,
+        -110
+      ],
+      "size": [
+        277.8076171875,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 13,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "采样步数8步",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "Arial",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1096,
+      "type": "Label (rgthree)",
+      "pos": [
+        5010,
+        -50
+      ],
+      "size": [
+        525.09765625,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 14,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "基础放大1.5倍  二彩6步",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "Arial",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1097,
+      "type": "Label (rgthree)",
+      "pos": [
+        5010,
+        20
+      ],
+      "size": [
+        523.3154296875,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 15,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "本机显卡：5070 Ti 16G",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "Arial",
+        "fontColor": "#9999",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1098,
+      "type": "LoadVideo",
+      "pos": [
+        8720,
+        300
+      ],
+      "size": [
+        1120,
+        910
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "视频文件",
+          "name": "file",
+          "type": "COMBO",
+          "widget": {
+            "name": "file"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "选择要上传的文件",
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": []
+        }
+      ],
+      "title": "加载视频（可上传）",
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "ComfyUI_00095_.mp4",
+        "image"
+      ],
+      "widgets_values_named": {
+        "file": "ComfyUI_00095_.mp4",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 1099,
+      "type": "Label (rgthree)",
+      "pos": [
+        9000,
+        210
+      ],
+      "size": [
+        540,
+        50
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 17,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "1820x1088 耗时722.81s",
+      "properties": {
+        "fontSize": 50,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1100,
+      "type": "Label (rgthree)",
+      "pos": [
+        8980,
+        100
+      ],
+      "size": [
+        560,
+        100
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 18,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "720p 开二采",
+      "properties": {
+        "fontSize": 100,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1101,
+      "type": "Label (rgthree)",
+      "pos": [
+        5760,
+        -200
+      ],
+      "size": [
+        160,
+        20
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 19,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "报错了告诉我一下",
+      "properties": {
+        "fontSize": 20,
+        "fontFamily": "Arial",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1124,
+      "type": "AICG3D_H3MediaLoader",
+      "pos": [
+        -290,
+        280
+      ],
+      "size": [
+        300,
+        530
+      ],
+      "flags": {},
+      "order": 20,
       "mode": 0,
       "inputs": [
         {
@@ -1229,69 +2100,318 @@
           "name": "media_bundle",
           "type": "MINIMAX_H3_MEDIA_BUNDLE",
           "links": [
-            126
+            344
           ]
         }
       ],
       "properties": {
         "Node name for S&R": "AICG3D_H3MediaLoader",
-        "aicg3d_media_trim": {
-          "videos": {},
-          "audios": {}
-        },
-        "media_loader_state": "{\"images\":[{\"filename\":\"Qwen_image_2.1_00033.png\"}],\"audios\":[{\"filename\":\"不灭神话18s.mp3\"}],\"videos\":[]}"
+        "media_loader_state": "{\"images\":[{\"filename\":\"ComfyUI_00001__01.jpg\"},{\"filename\":\"ComfyUI_00001__02.jpg\"},{\"filename\":\"ComfyUI_temp_lrjhj_00003__01.jpg\"},{\"filename\":\"ComfyUI_temp_lrjhj_00003__11.jpg\"},{\"filename\":\"Q版音乐台演奏1场景.jpeg\"}],\"audios\":[{\"filename\":\"男儿当自强Q版女孩版.mp3\"}],\"videos\":[]}"
       },
       "widgets_values": [
-        "{\"images\":[{\"filename\":\"Qwen_image_2.1_00033.png\"}],\"audios\":[{\"filename\":\"不灭神话18s.mp3\"}],\"videos\":[]}",
+        "{\"images\":[{\"filename\":\"ComfyUI_00001__01.jpg\"},{\"filename\":\"ComfyUI_00001__02.jpg\"},{\"filename\":\"ComfyUI_temp_lrjhj_00003__01.jpg\"},{\"filename\":\"ComfyUI_temp_lrjhj_00003__11.jpg\"},{\"filename\":\"Q版音乐台演奏1场景.jpeg\"}],\"audios\":[{\"filename\":\"男儿当自强Q版女孩版.mp3\"}],\"videos\":[]}",
         0
       ],
       "widgets_values_named": {
-        "media_state": "{\"images\":[{\"filename\":\"Qwen_image_2.1_00033.png\"}],\"audios\":[{\"filename\":\"不灭神话18s.mp3\"}],\"videos\":[]}",
+        "media_state": "{\"images\":[{\"filename\":\"ComfyUI_00001__01.jpg\"},{\"filename\":\"ComfyUI_00001__02.jpg\"},{\"filename\":\"ComfyUI_temp_lrjhj_00003__01.jpg\"},{\"filename\":\"ComfyUI_temp_lrjhj_00003__11.jpg\"},{\"filename\":\"Q版音乐台演奏1场景.jpeg\"}],\"audios\":[{\"filename\":\"男儿当自强Q版女孩版.mp3\"}],\"videos\":[]}",
         "视频解码长边": 0
       }
     },
     {
-      "id": 1026,
-      "type": "AICG3D_H3CharacterVoiceLibrary",
+      "id": 1146,
+      "type": "Label (rgthree)",
       "pos": [
-        -680,
-        1050
+        -480,
+        -160
       ],
       "size": [
-        620,
-        700
+        1973.193359375,
+        100
       ],
-      "flags": {},
-      "order": 7,
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 21,
       "mode": 0,
       "inputs": [],
-      "outputs": [
-        {
-          "label": "角色音色",
-          "localized_name": "角色音色",
-          "name": "voice_cast",
-          "type": "AICG3D_CHARACTER_VOICE_CAST",
-          "links": [
-            142
-          ]
-        },
-        {
-          "label": "报告",
-          "localized_name": "报告",
-          "name": "report_json",
-          "type": "STRING",
-          "links": []
-        }
-      ],
+      "outputs": [],
+      "title": "二采高清放大修复   open_h3_regenerate_2k",
       "properties": {
-        "Node name for S&R": "AICG3D_H3CharacterVoiceLibrary",
-        "cnr_id": "aicg3d-h3-suite"
+        "fontSize": 100,
+        "fontFamily": "Arial",
+        "fontColor": "#33eee3",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
       },
-      "widgets_values": [
-        "{\"version\":1,\"roles\":[{\"id\":\"girl\",\"name\":\"女孩\",\"mode\":\"described\",\"description\":\"稚嫩清亮的少女童声，音色柔和细腻，吐字清楚，情绪自然，保留轻微呼吸和童声尾音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"female\",\"pitch\":\"high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"boy\",\"name\":\"男孩\",\"mode\":\"described\",\"description\":\"稚嫩清脆的少年童声，音色明亮有精神，语调自然，情绪变化真实，不做成年人低音。\",\"language\":\"Chinese\",\"age\":\"child\",\"gender\":\"male\",\"pitch\":\"medium_high\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"heroine\",\"name\":\"女主角\",\"mode\":\"described\",\"description\":\"年轻成年女性声音，清澈温柔，音色细腻稳定，古风台词自然端庄，情绪表达克制而清楚。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"female\",\"pitch\":\"medium\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"hero\",\"name\":\"男主角\",\"mode\":\"described\",\"description\":\"年轻成年男性声音，低稳温厚，咬字清晰有力量，情绪推进自然，不夸张吼叫。\",\"language\":\"Chinese\",\"age\":\"young_adult\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"natural\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_woman\",\"name\":\"老太太\",\"mode\":\"described\",\"description\":\"年长女性声音，略带岁月沙哑和轻微气声，语速偏慢，咬字仍然清楚，情绪自然不夸张。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"female\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false},{\"id\":\"old_man\",\"name\":\"老爷子\",\"mode\":\"described\",\"description\":\"年长男性声音，低沉宽厚，带轻微沙哑和岁月感，语速偏慢，威严但自然。\",\"language\":\"Chinese\",\"age\":\"elder\",\"gender\":\"male\",\"pitch\":\"low\",\"pace\":\"slow\",\"reference\":\"\",\"reference_start\":0,\"reference_duration\":8,\"rights_confirmed\":false}]}",
-        true
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1154,
+      "type": "Label (rgthree)",
+      "pos": [
+        -710,
+        820
       ],
-      "title": "MiniMax H3 Aicg 角色音色库"
+      "size": [
+        171.1719207763672,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 22,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "模型 Lora",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1155,
+      "type": "Label (rgthree)",
+      "pos": [
+        -120,
+        720
+      ],
+      "size": [
+        120,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 23,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "素材库",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1156,
+      "type": "Label (rgthree)",
+      "pos": [
+        -1070,
+        870
+      ],
+      "size": [
+        240,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 24,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "角色声音绑定",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1157,
+      "type": "Label (rgthree)",
+      "pos": [
+        130,
+        840
+      ],
+      "size": [
+        240,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 25,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "提示词分辨率",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1158,
+      "type": "Label (rgthree)",
+      "pos": [
+        440,
+        310
+      ],
+      "size": [
+        200,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 26,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "第三方加速",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1159,
+      "type": "Label (rgthree)",
+      "pos": [
+        670,
+        830
+      ],
+      "size": [
+        320,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 27,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "二采高清修复放大",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
+    },
+    {
+      "id": 1160,
+      "type": "Label (rgthree)",
+      "pos": [
+        1330,
+        880
+      ],
+      "size": [
+        240,
+        40
+      ],
+      "flags": {
+        "allow_interaction": true
+      },
+      "order": 28,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "最终视频合成",
+      "properties": {
+        "fontSize": 40,
+        "fontFamily": "经典综艺体简",
+        "fontColor": "#ffffff",
+        "textAlign": "left",
+        "backgroundColor": "transparent",
+        "padding": 0,
+        "borderRadius": 0,
+        "angle": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#fff0",
+      "bgcolor": "#fff0"
     }
   ],
   "links": [
@@ -1304,7 +2424,7 @@
       "MINIMAX_H3_CONTEXT"
     ],
     [
-      141,
+      347,
       951,
       0,
       945,
@@ -1312,7 +2432,7 @@
       "MODEL"
     ],
     [
-      38,
+      327,
       945,
       0,
       941,
@@ -1328,20 +2448,12 @@
       "MINIMAX_H3_BUNDLE"
     ],
     [
-      126,
-      1017,
+      344,
+      1124,
       0,
       951,
-      1,
+      2,
       "MINIMAX_H3_MEDIA_BUNDLE"
-    ],
-    [
-      142,
-      1026,
-      0,
-      951,
-      22,
-      "AICG3D_CHARACTER_VOICE_CAST"
     ]
   ],
   "groups": [
@@ -1349,10 +2461,10 @@
       "id": 3,
       "title": "Group",
       "bounding": [
-        -1450,
-        60,
-        2810,
-        1110
+        -950,
+        110,
+        2900,
+        890
       ],
       "color": "#3f789e",
       "flags": {}
@@ -1360,16 +2472,20 @@
   ],
   "config": {},
   "extra": {
-    "ds": {
-      "scale": 0.6934334949441353,
-      "offset": [
-        1780.3110036863593,
-        490.493739471962
-      ]
-    },
     "frontendVersion": "1.24.0",
     "ue_links": [],
-    "links_added_by_ue": []
+    "links_added_by_ue": [],
+    "linearData": {
+      "inputs": [],
+      "outputs": []
+    },
+    "ds": {
+      "scale": 0.34245533787595817,
+      "offset": [
+        2131.9027652688883,
+        939.6006907232098
+      ]
+    }
   },
   "version": 0.4
 }

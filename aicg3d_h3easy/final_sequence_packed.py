@@ -340,6 +340,10 @@ class MiniMaxH3EasyFinalSequenceUpscale(MiniMaxH3EasyFinalSequenceCombine):
         **kwargs,
     ):
         del show_advanced_settings  # Frontend-only disclosure control.
+        base._release_render_resources(
+            base.RENDER_CLEANUP_UNLOAD,
+            reason="最终合成开始前前端模型与缓存",
+        )
         combined = self.combine(
             final_segment=final_segment,
             filename_prefix=filename_prefix,
@@ -356,6 +360,10 @@ class MiniMaxH3EasyFinalSequenceUpscale(MiniMaxH3EasyFinalSequenceCombine):
         final_sequence = combined_result[3]
         if not isinstance(final_sequence, MiniMaxH3FinalSequence):
             raise ValueError("最终合成没有生成可交给整片高清处理的成片数据")
+        base._release_render_resources(
+            base.RENDER_CLEANUP_UNLOAD,
+            reason="最终成片解码后、成片高清开始前",
+        )
 
         repair_engine = str(
             kwargs.get("repair_engine", base.PASS2_REPAIR_OFF)

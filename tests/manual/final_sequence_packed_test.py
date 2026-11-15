@@ -20,7 +20,7 @@ from aicg3d_h3easy import final_upscale  # noqa: E402
 from aicg3d_h3easy import nodes as base  # noqa: E402
 
 
-WORKFLOW = ROOT / "workflows" / "13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json"
+WORKFLOW = ROOT / "workflows" / "13.AICG3D_MiniMax H3 无限长视频短剧工作流.json"
 SHORT_DRAMA_WORKFLOW = (
     COMFY_ROOT
     / "user"
@@ -254,6 +254,58 @@ def test_combined_final_node_keeps_post_hd_order() -> None:
     )
 
 
+def test_combined_final_node_releases_runtime_before_and_between_stages() -> None:
+    node = packed.MiniMaxH3EasyFinalSequenceUpscale()
+    sequence = packed.MiniMaxH3FinalSequence(
+        video=_FakeVideo(),
+        h3_bundle=_fake_bundle(),
+        saved_file="video/combined.mp4",
+        seam_report="seam clean",
+    )
+    events: list[str] = []
+    combined = {
+        "ui": {},
+        "result": (sequence.video, sequence.saved_file, sequence.seam_report, sequence),
+    }
+    highres = {
+        "ui": {},
+        "result": ("final-video", "video/final.mp4", "hd report"),
+    }
+
+    def release_runtime(_mode, reason=""):
+        events.append(f"release:{reason}")
+
+    def combine(**_kwargs):
+        events.append("combine")
+        return combined
+
+    def upscale(*_args, **_kwargs):
+        events.append("upscale")
+        return highres
+
+    with patch.object(
+        packed.base,
+        "_release_render_resources",
+        side_effect=release_runtime,
+    ), patch.object(node, "combine", side_effect=combine), patch.object(
+        packed.MiniMaxH3EasyFinalHighResUpscalePacked,
+        "upscale_final_video",
+        side_effect=upscale,
+    ):
+        node.final_sequence_upscale(
+            final_segment=object(),
+            second_pass=True,
+            latent_upscale_model="upscaler.safetensors",
+        )
+
+    assert events == [
+        "release:最终合成开始前前端模型与缓存",
+        "combine",
+        "release:最终成片解码后、成片高清开始前",
+        "upscale",
+    ]
+
+
 def test_combined_final_node_defers_cleanup_until_final_output_success() -> None:
     node = packed.MiniMaxH3EasyFinalSequenceUpscale()
     sequence = packed.MiniMaxH3FinalSequence(
@@ -303,10 +355,14 @@ def test_workflow_uses_one_combined_final_node() -> None:
     nodes = {int(node["id"]): node for node in workflow["nodes"]}
     combined = nodes[60]
 
-    assert 196 not in nodes
+    assert nodes[196]["type"] == "Label (rgthree)"
+    assert all(
+        node["type"] != "AICG3D_H3FinalSequenceCombine"
+        for node in nodes.values()
+    )
     assert combined["type"] == "AICG3D_H3FinalSequenceUpscale"
     assert combined["inputs"][0]["name"] == "final_segment"
-    assert combined["inputs"][0]["link"] == 353
+    assert combined["inputs"][0]["link"] == 755
     assert [item["name"] for item in combined["outputs"]] == [
         "video",
         "saved_file",
@@ -315,30 +371,19 @@ def test_workflow_uses_one_combined_final_node() -> None:
     ]
     assert combined["widgets_values"][:4] == [
         "video/MiniMax_H3_Final_HD",
-        True,
+        False,
         "none",
         False,
     ]
-    assert combined["widgets_values"][-5:] == [
-        False,
-        "RelayVSR\\relayvsr_x2_lightx2v_int8_convrot.safetensors",
-        "RelayVSR\\relayvsr_flash_vae_x2_fp32.safetensors",
-        0.5,
-        True,
-    ]
     named = combined["widgets_values_named"]
-    assert named["relay_vsr_enabled"] is False
+    assert named["relay_vsr_enabled"] is True
     assert named["relay_vsr_model"].endswith("relayvsr_x2_lightx2v_int8_convrot.safetensors")
     assert named["relay_vsr_vae"].endswith("relayvsr_flash_vae_x2_fp32.safetensors")
     assert named["relay_vsr_detail"] == 0.5
     assert named["relay_lock_source_exposure"] is True
 
     links = {int(link[0]): link for link in workflow["links"]}
-    assert 358 not in links
-    assert 359 not in links
-    assert 360 not in links
-    assert 361 not in links
-    assert links[353][1:5] == [193, 0, 60, 0]
+    assert links[755][1:5] == [1177, 0, 60, 0]
 
 
 def test_short_drama_workflow_uses_one_combined_final_node() -> None:
@@ -353,12 +398,11 @@ def test_short_drama_workflow_uses_one_combined_final_node() -> None:
     assert 1159 not in nodes
     assert nodes[60]["type"] == "AICG3D_H3FinalSequenceUpscale"
     assert nodes[60]["inputs"][0]["name"] == "final_segment"
-    assert nodes[60]["inputs"][0]["link"] == 745
+    assert nodes[60]["inputs"][0]["link"] == 755
     assert nodes[1160]["inputs"][0]["name"] == "video"
     assert nodes[1160]["inputs"][0]["link"] == 711
 
-    assert 700 not in links
-    assert links[745][1:5] == [1134, 0, 60, 0]
+    assert links[755][1:5] == [1177, 0, 60, 0]
     assert links[711][1:5] == [60, 0, 1160, 0]
 
     global_node = nodes[212]
@@ -388,6 +432,7 @@ def main() -> None:
         test_refiner_is_only_applied_during_second_pass,
         test_combined_final_node_bypasses_hd_cleanly_when_all_stages_are_off,
         test_combined_final_node_keeps_post_hd_order,
+        test_combined_final_node_releases_runtime_before_and_between_stages,
         test_combined_final_node_defers_cleanup_until_final_output_success,
         test_workflow_uses_one_combined_final_node,
         test_short_drama_workflow_uses_one_combined_final_node,

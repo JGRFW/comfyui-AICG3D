@@ -10,6 +10,7 @@ second-pass exposure step at each story-segment boundary.
 
 from __future__ import annotations
 
+import gc
 import os
 import subprocess
 import tempfile
@@ -441,13 +442,10 @@ class MiniMaxH3EasyFinalHighResUpscale:
 
     @staticmethod
     def _write_video_only(frames: torch.Tensor, fps: float, path: str) -> None:
-        frames = (
-            frames[..., :3]
-            .detach()
-            .to(device="cpu", dtype=torch.float32)
-            .clamp(0.0, 1.0)
-            .contiguous()
-        )
+        frames = frames[..., :3].detach().to(device="cpu", dtype=torch.float32)
+        frames = frames.clamp_(0.0, 1.0)
+        if not frames.is_contiguous():
+            frames = frames.contiguous()
         components = Types.VideoComponents(
             images=frames,
             audio=None,
@@ -547,45 +545,8 @@ class MiniMaxH3EasyFinalHighResUpscale:
 
     @staticmethod
     def _lock_exposure(frames: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
-        """Match each output frame's luminance gain to the untouched source frame."""
-        if not isinstance(frames, torch.Tensor) or not isinstance(reference, torch.Tensor):
-            return frames
-        count = min(int(frames.shape[0]), int(reference.shape[0]))
-        if count <= 0:
-            return frames
-
-        output = frames[:count].detach().to(device="cpu", dtype=torch.float32)
-        ref = reference[:count].detach().to(device="cpu", dtype=torch.float32)
-        if tuple(output.shape[1:3]) != tuple(ref.shape[1:3]):
-            ref = h3._resize(
-                ref,
-                int(output.shape[2]),
-                int(output.shape[1]),
-                "disabled",
-            ).to(device="cpu")
-        weights = torch.tensor(
-            [0.2126, 0.7152, 0.0722],
-            dtype=torch.float32,
-        ).view(1, 1, 1, 3)
-        out_luma = (output[..., :3] * weights).sum(dim=-1, keepdim=True).mean(
-            dim=(1, 2),
-            keepdim=True,
-        )
-        ref_luma = (ref[..., :3] * weights).sum(dim=-1, keepdim=True).mean(
-            dim=(1, 2),
-            keepdim=True,
-        )
-        gain = (ref_luma / out_luma.clamp_min(1e-4)).clamp(0.85, 1.18)
-        corrected = (output * gain).clamp(0.0, 1.0).contiguous()
-        if count < int(frames.shape[0]):
-            corrected = torch.cat(
-                (
-                    corrected,
-                    frames[count:].to(device="cpu", dtype=torch.float32),
-                ),
-                dim=0,
-            )
-        return corrected
+        """Match luminance with the same low-memory path used by RelayVSR."""
+        return relay_vsr._lock_source_exposure(frames, reference)
 
     @classmethod
     def _apply_repair(
@@ -968,8 +929,8 @@ class MiniMaxH3EasyFinalHighResUpscale:
                     working[..., :3]
                     .detach()
                     .to(device="cpu", dtype=torch.float32)
-                    .clamp(0.0, 1.0)
                 )
+                working = working.clamp_(0.0, 1.0)
                 working = base._fit_video_frame_count(
                     working,
                     int(source_frames.shape[0]),
@@ -995,6 +956,16 @@ class MiniMaxH3EasyFinalHighResUpscale:
                     f"输入 {source_frames.shape[0]} 帧，保留 {kept.shape[0]} 帧，"
                     f"输出 {output_width}x{output_height}"
                 )
+                del kept
+                del working
+                del source_frames
+                gc.collect()
+                try:
+                    import comfy.model_management as model_management
+
+                    model_management.soft_empty_cache(force=True)
+                except Exception:
+                    pass
 
             if processed_total != total_frames:
                 raise RuntimeError(

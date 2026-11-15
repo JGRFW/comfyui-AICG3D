@@ -97,9 +97,9 @@ def test_repository_13_workflows_include_top_toggle_without_shifting_values() ->
     import json
 
     workflow_paths = (
-        PLUGIN_ROOT / "workflows" / "13.AICG3D_MiniMax H3 无限长视频生成工作流1.2.json",
-        PLUGIN_ROOT / "workflows" / "13.AICG3D_无限分段 生视频.json",
-        PLUGIN_ROOT / "workflows" / "13.AICG3D_参考无限生成视频.json",
+        PLUGIN_ROOT
+        / "workflows"
+        / "13.AICG3D_MiniMax H3 无限长视频短剧工作流.json",
     )
     for path in workflow_paths:
         workflow = json.loads(path.read_text(encoding="utf-8"))

@@ -31,6 +31,8 @@ from aiohttp import web
 import folder_paths
 from server import PromptServer
 
+from aicg3d.network_policy import sanitize_optimizer_url, validate_optimizer_endpoint
+
 
 DEFAULT_CONFIG = {
     "mode": "api",
@@ -271,7 +273,9 @@ def _normalize_config(data: dict | None) -> dict:
     config = {
         "mode": "local" if str(data.get("mode") or current.get("mode") or "api").lower() == "local" else "api",
         "provider": provider,
-        "api_url": str(data.get("api_url") or (preset[0] if preset else current["api_url"])).strip(),
+        "api_url": sanitize_optimizer_url(
+            str(data.get("api_url") or (preset[0] if preset else current["api_url"])).strip()
+        ),
         "api_key": str(data.get("api_key") if "api_key" in data else current["api_key"]),
         "model": str(data.get("model") or (preset[1] if preset else current["model"])).strip(),
         "protocol": str(data.get("protocol") or (preset[2] if preset else current["protocol"])).lower(),
@@ -381,8 +385,10 @@ async def _refresh_runninghub_models() -> tuple[str, ...]:
     global _RUNNINGHUB_MODELS_CACHE
     async with _RUNNINGHUB_MODELS_LOCK:
         timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-            async with session.get(RUNNINGHUB_DETAIL_URL) as response:
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+            async with session.get(
+                RUNNINGHUB_DETAIL_URL, allow_redirects=False
+            ) as response:
                 if response.status != 200:
                     raise RuntimeError(f"RunningHub model list returned HTTP {response.status}")
                 models = _runninghub_models_from_page(await response.text())
@@ -462,6 +468,7 @@ async def _runninghub_upload(session: aiohttp.ClientSession, api_key: str, *, pa
     async with session.post(
         "https://www.runninghub.cn/openapi/v2/media/upload/binary",
         headers={"Authorization": f"Bearer {api_key}"}, data=form,
+        allow_redirects=False,
     ) as response:
         body = await response.text()
         if response.status >= 400:
@@ -480,11 +487,12 @@ async def _runninghub_cancel(api_key: str, task_id: str) -> None:
     if not api_key or not task_id:
         return
     timeout = aiohttp.ClientTimeout(total=20)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
         async with session.post(
             "https://www.runninghub.cn/task/openapi/cancel",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"apiKey": api_key, "taskId": task_id},
+            allow_redirects=False,
         ) as response:
             await response.read()
 
@@ -500,7 +508,8 @@ async def _runninghub_result_text(session: aiohttp.ClientSession, results: list)
         url = item.get("url") or item.get("fileUrl")
         if output_type not in {"txt", "text"} or not url:
             continue
-        async with session.get(str(url)) as response:
+        validated_url = validate_optimizer_endpoint(str(url), has_credentials=False)
+        async with session.get(validated_url, allow_redirects=False) as response:
             body = await response.read()
             if response.status >= 400:
                 raise RuntimeError(f"RunningHub TXT 结果下载失败 ({response.status})")
@@ -1425,9 +1434,8 @@ def _request_parts(config: dict, payload: dict):
             "contents": [{"role": "user", "parts": gemini_parts}],
             "generationConfig": {"temperature": 0.35, "maxOutputTokens": 2048},
         }
+        headers["x-goog-api-key"] = config["api_key"]
         url = _endpoint(config)
-        separator = "&" if "?" in url else "?"
-        url += separator + "key=" + urllib.parse.quote(config["api_key"])
     elif config["protocol"] == "responses":
         response_parts = []
         for part in parts:
@@ -1460,7 +1468,8 @@ def _request_parts(config: dict, payload: dict):
         }
         headers["Authorization"] = f"Bearer {config['api_key']}"
         url = _endpoint(config)
-    return url, headers, body
+    endpoint = validate_optimizer_endpoint(url, has_credentials=bool(config.get("api_key")))
+    return endpoint, headers, body
 
 
 async def _request_runninghub(config: dict, payload: dict) -> str:
@@ -1485,7 +1494,7 @@ async def _request_runninghub(config: dict, payload: dict) -> str:
     temp_dir = Path(tempfile.mkdtemp(prefix="gh_h3_rh_"))
     task_id = ""
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
             image_index = 0
             video_uploaded = False
             for item in media:
@@ -1531,6 +1540,7 @@ async def _request_runninghub(config: dict, payload: dict) -> str:
                 f"https://www.runninghub.cn/openapi/v2/run/ai-app/{RUNNINGHUB_APP_ID}",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={"nodeInfoList": node_info, "instanceType": "default", "usePersonalQueue": False},
+                allow_redirects=False,
             ) as response:
                 body = await response.text()
                 if response.status >= 400:
@@ -1555,6 +1565,7 @@ async def _request_runninghub(config: dict, payload: dict) -> str:
                     "https://www.runninghub.cn/openapi/v2/query",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={"taskId": task_id},
+                    allow_redirects=False,
                 ) as response:
                     body = await response.text()
                     if response.status >= 400:
@@ -1603,10 +1614,12 @@ async def _request_async(config: dict, payload: dict) -> str:
     url, headers, body = _request_parts(config, payload)
     try:
         timeout = aiohttp.ClientTimeout(total=200)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, headers=headers, json=body) as response:
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+            async with session.post(
+                url, headers=headers, json=body, allow_redirects=False
+            ) as response:
                 text = await response.text()
-                if response.status >= 400:
+                if response.status >= 300:
                     raise RuntimeError(f"API request failed ({response.status}): {text[:1000]}")
                 data = json.loads(text)
     except asyncio.CancelledError:

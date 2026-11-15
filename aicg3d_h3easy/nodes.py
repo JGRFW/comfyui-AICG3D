@@ -106,6 +106,7 @@ except ImportError:
     MiniMaxH3EasyLatentUpscaler3D = None
     scan_latent_upscaler_models = None
 from aicg3d import prompt_guides as prompt_guide_lib
+from aicg3d.network_policy import sanitize_optimizer_url, validate_optimizer_endpoint
 from aicg3d_h3easy import accel as accel_lib
 from aicg3d_h3easy import relay_vsr
 
@@ -916,7 +917,7 @@ def _normalize_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[
         "version": PROMPT_OPTIMIZER_CONFIG_VERSION,
         "mode": engine,
         "api_format": api_format,
-        "api_url": str(source.get("api_url") or "").strip(),
+        "api_url": sanitize_optimizer_url(str(source.get("api_url") or "").strip()),
         "api_key": str(source.get("api_key") or ""),
         "model": str(source.get("model") or "").strip(),
         "language": _normalize_optimizer_language(source.get("language")),
@@ -1175,12 +1176,19 @@ def _unload_ollama_model(api_url: str, model: str, timeout_seconds: float) -> No
     if requests is None:
         return
     try:
-        response = requests.post(
-            _normalize_ollama_unload_url(api_url),
+        url = validate_optimizer_endpoint(
+            _normalize_ollama_unload_url(api_url), has_credentials=False
+        )
+        session = requests.Session()
+        session.trust_env = False
+        response = session.post(
+            url,
             json={"model": str(model or "").strip(), "keep_alive": 0},
             timeout=min(10.0, max(1.0, float(timeout_seconds))),
+            allow_redirects=False,
         )
-        response.raise_for_status()
+        if response.status_code >= 300:
+            response.raise_for_status()
     except Exception as exc:
         print(f"[MiniMax H3 Aicg] Ollama model unload skipped: {exc}")
 
@@ -1307,8 +1315,11 @@ def _optimizer_http_json(
             "提示词优化缺少 requests 依赖。请在当前 ComfyUI 的 Python 环境执行："
             "python.exe -m pip install requests"
         )
-    url = _normalize_optimizer_url(api_url, api_format, model)
     api_key = str(api_key or "").strip()
+    url = validate_optimizer_endpoint(
+        _normalize_optimizer_url(api_url, api_format, model),
+        has_credentials=bool(api_key),
+    )
     media_parts = list(media_parts or [])
     output_budget = max(1, int(max_output_tokens or PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS))
     if api_format == "gemini":
@@ -1356,12 +1367,17 @@ def _optimizer_http_json(
             content = user_prompt
         payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}], "stream": False, "temperature": 0.35, "max_tokens": output_budget}
     try:
-        response = requests.post(
+        session = requests.Session()
+        session.trust_env = False
+        response = session.post(
             url,
             json=payload,
             headers=headers,
             timeout=max(1.0, float(timeout_seconds)),
+            allow_redirects=False,
         )
+        if 300 <= response.status_code < 400:
+            raise RuntimeError("Prompt optimization API redirects are blocked")
         response.raise_for_status()
         data = response.json()
     except requests.HTTPError as exc:

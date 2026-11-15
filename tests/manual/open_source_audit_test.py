@@ -80,6 +80,73 @@ def test_goohai_config_redacts_api_key() -> None:
         optimizer._config_path = original_path
 
 
+def test_optimizer_network_policy_blocks_credential_exfiltration() -> None:
+    from aicg3d.network_policy import sanitize_optimizer_url, validate_optimizer_endpoint
+
+    sanitized = sanitize_optimizer_url(
+        "https://api.openai.com/v1?key=audit-secret&trace=1#fragment"
+    )
+    assert "audit-secret" not in sanitized
+    assert "trace=1" in sanitized
+
+    assert validate_optimizer_endpoint(
+        "https://api.openai.com/v1", has_credentials=True
+    ).startswith("https://api.openai.com/")
+    assert validate_optimizer_endpoint(
+        "http://127.0.0.1:11434/v1", has_credentials=False
+    ).startswith("http://127.0.0.1:")
+    assert validate_optimizer_endpoint(
+        "https://custom.example.com/v1", has_credentials=False
+    ).startswith("https://custom.example.com/")
+
+    rejected = (
+        ("http://api.openai.com/v1", True),
+        ("https://attacker.example/v1", True),
+        ("https://api.openai.com:8443/v1", True),
+        ("http://192.168.1.8:11434/v1", False),
+    )
+    for url, has_credentials in rejected:
+        try:
+            validate_optimizer_endpoint(url, has_credentials=has_credentials)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Unsafe optimizer endpoint accepted: {url}")
+
+
+def test_gemini_key_is_sent_only_in_request_header() -> None:
+    from aicg3d_h3goohai import prompt_optimizer
+
+    config = prompt_optimizer._normalize_config(
+        {
+            **prompt_optimizer.DEFAULT_CONFIG,
+            "provider": "gemini",
+            "api_url": "https://generativelanguage.googleapis.com/v1beta",
+            "api_key": "audit-secret",
+            "model": "gemini-2.5-flash",
+            "protocol": "gemini",
+        }
+    )
+    url, headers, _body = prompt_optimizer._request_parts(
+        config, {"task": "T2VA", "prompt": "audit", "duration": 5}
+    )
+    assert "audit-secret" not in url
+    assert "key=" not in url
+    assert headers["x-goog-api-key"] == "audit-secret"
+
+
+def test_optimizer_http_calls_disable_redirects_and_environment_proxies() -> None:
+    easy_source = (PLUGIN_ROOT / "aicg3d_h3easy" / "nodes.py").read_text(encoding="utf-8")
+    goohai_source = (
+        PLUGIN_ROOT / "aicg3d_h3goohai" / "prompt_optimizer.py"
+    ).read_text(encoding="utf-8")
+    assert "allow_redirects=False" in easy_source
+    assert "session.trust_env = False" in easy_source
+    assert "allow_redirects=False" in goohai_source
+    assert "trust_env=False" in goohai_source
+    assert 'url += separator + "key="' not in goohai_source
+
+
 def test_input_file_resolution_rejects_escape() -> None:
     import aicg3d_h3goohai.prompt_optimizer as optimizer
 
@@ -348,6 +415,9 @@ def main() -> None:
         test_node_categories_and_integration_registration,
         test_optimizer_config_is_stored_outside_checkout,
         test_goohai_config_redacts_api_key,
+        test_optimizer_network_policy_blocks_credential_exfiltration,
+        test_gemini_key_is_sent_only_in_request_header,
+        test_optimizer_http_calls_disable_redirects_and_environment_proxies,
         test_input_file_resolution_rejects_escape,
         test_frontend_globals_are_namespaced,
         test_no_private_module_injection,
